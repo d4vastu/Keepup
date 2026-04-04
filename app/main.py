@@ -32,7 +32,7 @@ _PUBLIC_PATHS = {"/login", "/logout", "/setup", "/setup/backup-key",
 class AuthMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         path = request.url.path
-        if path in _PUBLIC_PATHS:
+        if path in _PUBLIC_PATHS or path.startswith("/setup/"):
             return await call_next(request)
         if not admin_exists():
             return RedirectResponse("/setup", status_code=302)
