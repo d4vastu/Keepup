@@ -9,9 +9,9 @@ from fastapi.templating import Jinja2Templates
 
 from .admin import router as admin_router
 from .auto_update_log import get_recent, get_unread_error_count, mark_all_read
-from .auto_update_scheduler import apply_all_schedules, scheduler, set_backends
+from .auto_update_scheduler import apply_all_schedules, scheduler
 from .auto_updates_router import router as auto_updates_router
-from .auto_updates_router import set_backends as set_auto_updates_backends
+from .backend_loader import get_backends, get_dockerhub_creds, reload_backends
 from .config_manager import get_hosts, get_ssh_config
 from .credentials import get_credentials, save_sudo_password
 from .ssh_client import _needs_sudo, check_host_updates, reboot_host, run_host_update_buffered
@@ -25,43 +25,9 @@ app.include_router(admin_router)
 app.include_router(auto_updates_router)
 templates = Jinja2Templates(directory=Path(__file__).parent / "templates")
 
-# ---------------------------------------------------------------------------
-# Config
-# ---------------------------------------------------------------------------
-
-_backends: list = []
-
-_dockerhub_user = os.getenv("DOCKERHUB_USERNAME", "")
-_dockerhub_token = os.getenv("DOCKERHUB_TOKEN", "")
-dockerhub_creds: dict | None = (
-    {"username": _dockerhub_user, "token": _dockerhub_token}
-    if _dockerhub_user and _dockerhub_token
-    else None
-)
-
-
 @app.on_event("startup")
 async def _startup() -> None:
-    global _backends
-    backends = []
-
-    # Portainer backend — opt-in via env vars
-    url = os.getenv("PORTAINER_URL", "")
-    key = os.getenv("PORTAINER_API_KEY", "")
-    verify_ssl = os.getenv("PORTAINER_VERIFY_SSL", "false").lower() == "true"
-    if url and key:
-        from .portainer_client import PortainerClient
-        from .backends import PortainerBackend
-        backends.append(PortainerBackend(PortainerClient(url=url, api_key=key, verify_ssl=verify_ssl)))
-
-    # SSH Docker backend — always registered; only activates for hosts with docker_mode set
-    from .backends import SSHDockerBackend
-    backends.append(SSHDockerBackend())
-
-    _backends = backends
-
-    set_backends(_backends)
-    set_auto_updates_backends(_backends)
+    await reload_backends()
     apply_all_schedules()
     scheduler.start()
 
@@ -78,6 +44,7 @@ def _get_host(slug: str) -> dict:
 
 
 _jobs: dict[str, dict] = {}
+
 
 
 # ---------------------------------------------------------------------------
@@ -110,7 +77,7 @@ async def _job_run_host_restart(job_id: str, host: dict, creds: dict) -> None:
 
 async def _job_run_stack_update(job_id: str, backend_key: str, ref: str) -> None:
     try:
-        backend = next((b for b in _backends if b.BACKEND_KEY == backend_key), None)
+        backend = next((b for b in get_backends() if b.BACKEND_KEY == backend_key), None)
         if backend is None:
             raise ValueError(f"Backend {backend_key!r} not available")
         await backend.update_stack(ref)
@@ -130,8 +97,9 @@ async def _job_run_stack_update(job_id: str, backend_key: str, ref: str) -> None
 @app.get("/", response_class=HTMLResponse)
 async def dashboard(request: Request) -> HTMLResponse:
     hosts = get_hosts()
+    backends = get_backends()
     docker_configured = (
-        any(b.BACKEND_KEY == "portainer" for b in _backends)
+        any(b.BACKEND_KEY == "portainer" for b in backends)
         or any(h.get("docker_mode") for h in hosts)
     )
     return templates.TemplateResponse(
@@ -248,8 +216,9 @@ async def host_restart(
 @app.get("/api/docker/check", response_class=HTMLResponse)
 async def docker_check(request: Request) -> HTMLResponse:
     hosts = get_hosts()
+    backends = get_backends()
     active = [
-        b for b in _backends
+        b for b in backends
         if b.BACKEND_KEY != "ssh" or any(h.get("docker_mode") for h in hosts)
     ]
     if not active:
@@ -259,7 +228,7 @@ async def docker_check(request: Request) -> HTMLResponse:
         )
     try:
         results = await asyncio.gather(
-            *[b.get_stacks_with_update_status(dockerhub_creds) for b in active],
+            *[b.get_stacks_with_update_status(get_dockerhub_creds()) for b in active],
             return_exceptions=True,
         )
         stacks = []
@@ -284,7 +253,7 @@ async def stack_update(
     ref: str,
     background_tasks: BackgroundTasks,
 ) -> HTMLResponse:
-    backend = next((b for b in _backends if b.BACKEND_KEY == backend_key), None)
+    backend = next((b for b in get_backends() if b.BACKEND_KEY == backend_key), None)
     if not backend:
         return templates.TemplateResponse(
             "partials/error.html",
@@ -352,3 +321,10 @@ async def notifications_read(request: Request) -> HTMLResponse:
         '<span id="notif-badge" hx-get="/api/notifications/badge" '
         'hx-trigger="every 60s" hx-swap="outerHTML"></span>'
     )
+
+
+@app.post("/api/reload-connections", response_class=HTMLResponse)
+async def reload_connections(request: Request) -> HTMLResponse:
+    """Reinitialise backends after connection settings change."""
+    await reload_backends()
+    return HTMLResponse("")

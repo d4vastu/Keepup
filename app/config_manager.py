@@ -117,6 +117,36 @@ def get_ssh_config() -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Integration settings (non-sensitive — URLs/usernames only)
+# ---------------------------------------------------------------------------
+
+def get_portainer_config() -> dict:
+    return load_config().get("portainer", {})
+
+
+def save_portainer_config(url: str, verify_ssl: bool) -> None:
+    config = load_config()
+    if url:
+        config["portainer"] = {"url": url.rstrip("/"), "verify_ssl": verify_ssl}
+    else:
+        config.pop("portainer", None)
+    save_config(config)
+
+
+def get_dockerhub_config() -> dict:
+    return load_config().get("dockerhub", {})
+
+
+def save_dockerhub_config(username: str) -> None:
+    config = load_config()
+    if username:
+        config["dockerhub"] = {"username": username}
+    else:
+        config.pop("dockerhub", None)
+    save_config(config)
+
+
+# ---------------------------------------------------------------------------
 # Auto-update settings
 # ---------------------------------------------------------------------------
 

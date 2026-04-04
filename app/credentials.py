@@ -105,6 +105,33 @@ def rename_credentials(old_slug: str, new_slug: str) -> None:
         _save_store(store)
 
 
+# ---------------------------------------------------------------------------
+# Integration credentials (Portainer, DockerHub, etc.)
+# ---------------------------------------------------------------------------
+
+def get_integration_credentials(key: str) -> dict:
+    """Return stored credentials for a named integration. Never raises."""
+    return _load_store().get(f"__integration_{key}__", {})
+
+
+def save_integration_credentials(key: str, **fields) -> None:
+    """
+    Save credentials for a named integration.
+    Pass None to leave an existing value unchanged; "" to clear it.
+    """
+    store = _load_store()
+    entry = store.get(f"__integration_{key}__", {})
+    for field, value in fields.items():
+        if value is None:
+            continue
+        if value == "":
+            entry.pop(field, None)
+        else:
+            entry[field] = value
+    store[f"__integration_{key}__"] = entry
+    _save_store(store)
+
+
 def credential_status(slug: str) -> dict:
     """Returns which credentials are configured for a host (no secrets exposed)."""
     creds = get_credentials(slug)
