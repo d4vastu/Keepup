@@ -70,6 +70,21 @@ async def verify_connection(host: dict, ssh_cfg: dict, creds: dict | None = None
         return {"ok": False, "message": str(exc)}
 
 
+async def detect_docker_stacks(host: dict, ssh_cfg: dict, creds: dict | None = None) -> int:
+    """Return the number of Docker Compose stacks found on the host, or -1 on error."""
+    try:
+        async with await _connect(host, ssh_cfg, creds) as conn:
+            result = await conn.run(
+                "docker compose ls --all --format json 2>/dev/null || echo '[]'",
+                check=False,
+            )
+        import json
+        stacks = json.loads(result.stdout.strip() or "[]")
+        return len(stacks) if isinstance(stacks, list) else 0
+    except Exception:
+        return -1
+
+
 async def check_host_updates(
     host: dict, ssh_cfg: dict, creds: dict | None = None
 ) -> dict:

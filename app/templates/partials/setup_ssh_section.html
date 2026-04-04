@@ -44,6 +44,54 @@
     <p class="text-sm text-green-400">&#10003; {{ add_success }}</p>
     {% endif %}
 
+    <!-- Docker discovery prompt -->
+    {% if docker_prompt %}
+    <div class="rounded-xl border border-blue-500/40 bg-blue-900/20 px-4 py-4 space-y-3">
+      <div class="flex items-start gap-3">
+        <svg class="w-5 h-5 text-blue-400 mt-0.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+            d="M13 16h-1v-4h-1m1-4h.01M12 2a10 10 0 110 20A10 10 0 0112 2z"/>
+        </svg>
+        <div>
+          <p class="text-sm font-medium text-blue-300">Docker detected on {{ docker_prompt.name }}</p>
+          <p class="text-xs text-slate-400 mt-0.5">
+            We found {{ docker_prompt.stack_label }} running. Want to monitor them for image updates?
+          </p>
+        </div>
+      </div>
+      <div class="flex gap-2">
+        <form hx-post="/setup/hosts/confirm-add" hx-target="#ssh-hosts-section" hx-swap="outerHTML">
+          <input type="hidden" name="name" value="{{ docker_prompt.name }}">
+          <input type="hidden" name="host" value="{{ docker_prompt.host }}">
+          <input type="hidden" name="user" value="{{ docker_prompt.user }}">
+          <input type="hidden" name="port" value="{{ docker_prompt.port }}">
+          <input type="hidden" name="auth_method" value="{{ docker_prompt.auth_method }}">
+          <input type="hidden" name="ssh_password" value="{{ docker_prompt.ssh_password }}">
+          <input type="hidden" name="key_file" value="{{ docker_prompt.key_file }}">
+          <input type="hidden" name="enable_docker" value="yes">
+          <button type="submit"
+            class="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-sm font-medium text-white transition-colors">
+            Yes, monitor containers
+          </button>
+        </form>
+        <form hx-post="/setup/hosts/confirm-add" hx-target="#ssh-hosts-section" hx-swap="outerHTML">
+          <input type="hidden" name="name" value="{{ docker_prompt.name }}">
+          <input type="hidden" name="host" value="{{ docker_prompt.host }}">
+          <input type="hidden" name="user" value="{{ docker_prompt.user }}">
+          <input type="hidden" name="port" value="{{ docker_prompt.port }}">
+          <input type="hidden" name="auth_method" value="{{ docker_prompt.auth_method }}">
+          <input type="hidden" name="ssh_password" value="{{ docker_prompt.ssh_password }}">
+          <input type="hidden" name="key_file" value="{{ docker_prompt.key_file }}">
+          <input type="hidden" name="enable_docker" value="no">
+          <button type="submit"
+            class="px-4 py-2 rounded-lg bg-slate-700 hover:bg-slate-600 text-sm font-medium text-slate-300 transition-colors">
+            No, skip
+          </button>
+        </form>
+      </div>
+    </div>
+    {% endif %}
+
     <!-- Add host form -->
     <details {% if form or add_error %}open{% endif %} class="group">
       <summary class="cursor-pointer text-sm text-blue-400 hover:text-blue-300 list-none flex items-center gap-1 select-none">
@@ -122,14 +170,6 @@
             </div>
           </div>
         </div>
-
-        <label class="flex items-center gap-2 cursor-pointer select-none">
-          <input type="checkbox" name="docker_mode" value="all"
-            {% if form and form.docker_mode %}checked{% endif %}
-            class="w-4 h-4 rounded accent-blue-500">
-          <span class="text-sm text-slate-300">Monitor Docker Compose stacks on this host</span>
-        </label>
-        <p class="text-xs text-slate-500 -mt-1 ml-6">Enable if Docker is running on this server and you want to track container image updates.</p>
 
         <button type="submit"
           class="w-full py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-sm font-medium text-white transition-colors">

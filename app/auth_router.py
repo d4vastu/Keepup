@@ -32,7 +32,7 @@ from .credentials import (
     save_credentials,
     save_integration_credentials,
 )
-from .ssh_client import verify_connection
+from .ssh_client import detect_docker_stacks, verify_connection
 from .backend_loader import reload_backends
 
 router = APIRouter()
@@ -329,7 +329,6 @@ async def setup_add_host(
     auth_method: str = Form("password"),
     ssh_password: str = Form(""),
     key_file: str = Form(""),
-    docker_mode: str = Form(""),
 ) -> HTMLResponse:
     name = name.strip()
     host_addr = host.strip()
@@ -343,7 +342,7 @@ async def setup_add_host(
             "hosts": get_hosts(),
             "available_keys": get_available_ssh_keys(),
             "add_error": "Name and host/IP are required.",
-            "form": {"name": name, "host": host_addr, "user": user_val or "", "port": port or "", "auth_method": auth_method, "key_file": key_file, "docker_mode": docker_mode},
+            "form": {"name": name, "host": host_addr, "user": user_val or "", "port": port or "", "auth_method": auth_method, "key_file": key_file},
         })
 
     host_entry = {"name": name, "host": host_addr}
@@ -357,8 +356,6 @@ async def setup_add_host(
     creds: dict = {}
     if auth_method == "password" and ssh_password.strip():
         creds = {"ssh_password": ssh_password.strip()}
-    elif auth_method == "key" and key_path:
-        pass  # key stored in host entry
 
     result = await verify_connection(host_entry, get_ssh_config(), creds)
     if not result["ok"]:
@@ -367,12 +364,65 @@ async def setup_add_host(
             "hosts": get_hosts(),
             "available_keys": get_available_ssh_keys(),
             "add_error": f"Could not connect: {result['message']}",
-            "form": {"name": name, "host": host_addr, "user": user_val or "", "port": port or "", "auth_method": auth_method, "key_file": key_file, "docker_mode": docker_mode},
+            "form": {"name": name, "host": host_addr, "user": user_val or "", "port": port or "", "auth_method": auth_method, "key_file": key_file},
         })
 
+    # Connection succeeded — check for Docker before committing
+    stack_count = await detect_docker_stacks(host_entry, get_ssh_config(), creds)
+
+    if stack_count > 0:
+        # Docker found — ask user before adding
+        label = f"{stack_count} stack{'s' if stack_count != 1 else ''}"
+        return templates.TemplateResponse("partials/setup_ssh_section.html", {
+            "request": request,
+            "hosts": get_hosts(),
+            "available_keys": get_available_ssh_keys(),
+            "docker_prompt": {
+                "name": name,
+                "host": host_addr,
+                "user": user_val or "",
+                "port": port,
+                "auth_method": auth_method,
+                "ssh_password": ssh_password.strip(),
+                "key_file": key_file,
+                "stack_label": label,
+            },
+        })
+
+    # No Docker (or detection failed) — add host directly
+    slug = add_host(name=name, host=host_addr, user=user_val, port=port_val, key_path=key_path)
+    if auth_method == "password" and ssh_password.strip():
+        save_credentials(slug, ssh_password=ssh_password.strip())
+
+    return templates.TemplateResponse("partials/setup_ssh_section.html", {
+        "request": request,
+        "hosts": get_hosts(),
+        "available_keys": get_available_ssh_keys(),
+        "add_success": f"{name} added successfully.",
+    })
+
+
+@router.post("/setup/hosts/confirm-add", response_class=HTMLResponse)
+async def setup_confirm_add_host(
+    request: Request,
+    name: str = Form(""),
+    host: str = Form(""),
+    user: str = Form(""),
+    port: str = Form(""),
+    auth_method: str = Form("password"),
+    ssh_password: str = Form(""),
+    key_file: str = Form(""),
+    enable_docker: str = Form("no"),
+) -> HTMLResponse:
+    name = name.strip()
+    host_addr = host.strip()
+    user_val = user.strip() or None
+    port_val = int(port) if port.strip().isdigit() else None
+    key_path = f"/app/keys/{key_file}" if auth_method == "key" and key_file else None
+    docker_mode = "all" if enable_docker == "yes" else None
+
     slug = add_host(name=name, host=host_addr, user=user_val, port=port_val,
-                    key_path=key_path,
-                    docker_mode=docker_mode if docker_mode else None)
+                    key_path=key_path, docker_mode=docker_mode)
     if auth_method == "password" and ssh_password.strip():
         save_credentials(slug, ssh_password=ssh_password.strip())
 

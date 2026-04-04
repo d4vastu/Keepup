@@ -79,11 +79,12 @@ def test_setup_add_host_connection_fails_shows_error(setup_client, data_dir, con
     assert "could not connect" in response.text.lower()
 
 
-def test_setup_add_host_connection_succeeds_adds_host(setup_client, data_dir, config_file):
+def test_setup_add_host_connection_succeeds_no_docker_adds_host(setup_client, data_dir, config_file):
     import yaml
     _create_admin()
     mock_result = {"ok": True, "message": "Connected"}
-    with patch("app.auth_router.verify_connection", new=AsyncMock(return_value=mock_result)):
+    with patch("app.auth_router.verify_connection", new=AsyncMock(return_value=mock_result)), \
+         patch("app.auth_router.detect_docker_stacks", new=AsyncMock(return_value=0)):
         response = setup_client.post("/setup/hosts/add", data={
             "name": "My Server",
             "host": "192.168.1.10",
@@ -97,6 +98,55 @@ def test_setup_add_host_connection_succeeds_adds_host(setup_client, data_dir, co
     assert "My Server" in names
 
 
+def test_setup_add_host_docker_detected_shows_prompt(setup_client, data_dir, config_file):
+    _create_admin()
+    mock_result = {"ok": True, "message": "Connected"}
+    with patch("app.auth_router.verify_connection", new=AsyncMock(return_value=mock_result)), \
+         patch("app.auth_router.detect_docker_stacks", new=AsyncMock(return_value=3)):
+        response = setup_client.post("/setup/hosts/add", data={
+            "name": "Docker Host",
+            "host": "192.168.1.20",
+            "auth_method": "password",
+            "ssh_password": "pass",
+        })
+    assert response.status_code == 200
+    assert "docker detected" in response.text.lower() or "3 stack" in response.text.lower()
+    assert "monitor" in response.text.lower()
+
+
+def test_setup_confirm_add_with_docker(setup_client, data_dir, config_file):
+    import yaml
+    _create_admin()
+    response = setup_client.post("/setup/hosts/confirm-add", data={
+        "name": "Docker Host",
+        "host": "192.168.1.20",
+        "auth_method": "password",
+        "ssh_password": "pass",
+        "enable_docker": "yes",
+    })
+    assert response.status_code == 200
+    assert "added successfully" in response.text.lower()
+    raw = yaml.safe_load(config_file.read_text())
+    host = next(h for h in raw["hosts"] if h["name"] == "Docker Host")
+    assert host.get("docker_mode") == "all"
+
+
+def test_setup_confirm_add_without_docker(setup_client, data_dir, config_file):
+    import yaml
+    _create_admin()
+    response = setup_client.post("/setup/hosts/confirm-add", data={
+        "name": "Plain Host",
+        "host": "192.168.1.30",
+        "auth_method": "password",
+        "enable_docker": "no",
+    })
+    assert response.status_code == 200
+    assert "added successfully" in response.text.lower()
+    raw = yaml.safe_load(config_file.read_text())
+    host = next(h for h in raw["hosts"] if h["name"] == "Plain Host")
+    assert "docker_mode" not in host
+
+
 # ---------------------------------------------------------------------------
 # POST /setup/hosts/{slug}/remove
 # ---------------------------------------------------------------------------
@@ -104,13 +154,13 @@ def test_setup_add_host_connection_succeeds_adds_host(setup_client, data_dir, co
 def test_setup_remove_host(setup_client, data_dir, config_file):
     import yaml
     _create_admin()
-    mock_result = {"ok": True, "message": "Connected"}
-    with patch("app.auth_router.verify_connection", new=AsyncMock(return_value=mock_result)):
-        setup_client.post("/setup/hosts/add", data={
-            "name": "Remove Me",
-            "host": "192.168.1.50",
-            "auth_method": "password",
-        })
+    # Add host via confirm-add (bypasses connection test)
+    setup_client.post("/setup/hosts/confirm-add", data={
+        "name": "Remove Me",
+        "host": "192.168.1.50",
+        "auth_method": "password",
+        "enable_docker": "no",
+    })
     response = setup_client.post("/setup/hosts/remove-me/remove")
     assert response.status_code == 200
     raw = yaml.safe_load(config_file.read_text())
@@ -213,12 +263,14 @@ def test_middleware_allows_setup_hosts_without_auth(setup_client, data_dir):
     assert response.status_code == 200
 
 
-def test_middleware_allows_setup_add_host_without_session(setup_client, data_dir, config_file):
-    """POST /setup/hosts/add should be reachable without an authenticated session."""
+def test_middleware_allows_setup_confirm_add_without_session(setup_client, data_dir, config_file):
+    """POST /setup/hosts/confirm-add should be reachable without an authenticated session."""
     _create_admin()
-    response = setup_client.post("/setup/hosts/add", data={
-        "name": "",
-        "host": "",
+    response = setup_client.post("/setup/hosts/confirm-add", data={
+        "name": "Test",
+        "host": "192.168.1.99",
+        "auth_method": "password",
+        "enable_docker": "no",
     })
     # If middleware blocked it, we'd get a redirect; 200 means it reached the route
     assert response.status_code == 200
