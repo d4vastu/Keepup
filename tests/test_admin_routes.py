@@ -1,4 +1,6 @@
 """Integration tests for admin panel routes."""
+from unittest.mock import AsyncMock, patch
+
 import yaml
 
 
@@ -146,3 +148,70 @@ def test_update_ssh_settings(client, config_file):
     raw = yaml.safe_load(config_file.read_text())
     assert raw["ssh"]["default_user"] == "ubuntu"
     assert raw["ssh"]["default_port"] == 2222
+
+
+# ---------------------------------------------------------------------------
+# Password auth
+# ---------------------------------------------------------------------------
+
+def test_add_host_with_password(client, config_file):
+    response = client.post("/admin/hosts", data={
+        "name": "Password Host",
+        "host": "10.0.0.77",
+        "user": "dashboard",
+        "auth_method": "password",
+        "password": "s3cr3t",
+    })
+    assert response.status_code == 200
+    assert "Password Host" in response.text
+
+    raw = yaml.safe_load(config_file.read_text())
+    host = next(h for h in raw["hosts"] if h["name"] == "Password Host")
+    assert host["password"] == "s3cr3t"
+    assert "key" not in host
+
+
+def test_add_host_key_auth_does_not_store_password(client, config_file):
+    client.post("/admin/hosts", data={
+        "name": "Key Host",
+        "host": "10.0.0.78",
+        "auth_method": "key",
+        "key": "/app/keys/id_ed25519",
+        "password": "should-be-ignored",
+    })
+    raw = yaml.safe_load(config_file.read_text())
+    host = next(h for h in raw["hosts"] if h["name"] == "Key Host")
+    assert "password" not in host
+    assert host["key"] == "/app/keys/id_ed25519"
+
+
+def test_admin_table_shows_auth_method(client):
+    response = client.get("/admin/hosts")
+    assert response.status_code == 200
+    assert "SSH Key" in response.text
+
+
+# ---------------------------------------------------------------------------
+# POST /admin/hosts/{slug}/test
+# ---------------------------------------------------------------------------
+
+def test_connection_test_success(client):
+    mock_result = {"ok": True, "message": "Connected successfully."}
+    with patch("app.admin.test_connection", new=AsyncMock(return_value=mock_result)):
+        response = client.post("/admin/hosts/test-host/test")
+    assert response.status_code == 200
+    assert "Connected" in response.text
+
+
+def test_connection_test_failure(client):
+    mock_result = {"ok": False, "message": "Connection refused"}
+    with patch("app.admin.test_connection", new=AsyncMock(return_value=mock_result)):
+        response = client.post("/admin/hosts/test-host/test")
+    assert response.status_code == 200
+    assert "Failed" in response.text
+
+
+def test_connection_test_unknown_host(client):
+    response = client.post("/admin/hosts/does-not-exist/test")
+    assert response.status_code == 200
+    assert "not found" in response.text.lower()

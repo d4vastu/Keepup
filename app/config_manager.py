@@ -40,33 +40,35 @@ def get_hosts() -> list[dict]:
     ]
 
 
-def add_host(name: str, host: str, user: str | None, port: int | None, key: str | None) -> None:
-    config = load_config()
-    hosts = config.setdefault("hosts", [])
+def _build_host_entry(name: str, host: str, user: str | None, port: int | None,
+                      key: str | None, password: str | None) -> dict:
     entry: dict = {"name": name, "host": host}
     if user:
         entry["user"] = user
     if port:
         entry["port"] = port
-    if key:
+    if password:
+        entry["password"] = password
+    elif key:
         entry["key"] = key
-    hosts.append(entry)
+    return entry
+
+
+def add_host(name: str, host: str, user: str | None, port: int | None,
+             key: str | None, password: str | None = None) -> None:
+    config = load_config()
+    hosts = config.setdefault("hosts", [])
+    hosts.append(_build_host_entry(name, host, user, port, key, password))
     save_config(config)
 
 
-def update_host(slug: str, name: str, host: str, user: str | None, port: int | None, key: str | None) -> None:
+def update_host(slug: str, name: str, host: str, user: str | None, port: int | None,
+                key: str | None, password: str | None = None) -> None:
     config = load_config()
     hosts = config.get("hosts", [])
     for i, h in enumerate(hosts):
         if slugify(h["name"]) == slug:
-            entry: dict = {"name": name, "host": host}
-            if user:
-                entry["user"] = user
-            if port:
-                entry["port"] = port
-            if key:
-                entry["key"] = key
-            hosts[i] = entry
+            hosts[i] = _build_host_entry(name, host, user, port, key, password)
             break
     save_config(config)
 

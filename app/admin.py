@@ -13,6 +13,7 @@ from .config_manager import (
     update_host,
     update_ssh_config,
 )
+from .ssh_client import test_connection
 
 router = APIRouter(prefix="/admin")
 templates = Jinja2Templates(directory=Path(__file__).parent / "templates")
@@ -63,7 +64,9 @@ async def admin_add_host(
     host: str = Form(...),
     user: str = Form(""),
     port: str = Form(""),
+    auth_method: str = Form("key"),
     key: str = Form(""),
+    password: str = Form(""),
 ) -> HTMLResponse:
     try:
         if not name.strip() or not host.strip():
@@ -73,7 +76,8 @@ async def admin_add_host(
             host=host.strip(),
             user=user.strip() or None,
             port=int(port) if port.strip() else None,
-            key=key.strip() or None,
+            key=key.strip() or None if auth_method == "key" else None,
+            password=password.strip() or None if auth_method == "password" else None,
         )
     except Exception as exc:
         return templates.TemplateResponse(
@@ -106,7 +110,9 @@ async def admin_update_host(
     host: str = Form(...),
     user: str = Form(""),
     port: str = Form(""),
+    auth_method: str = Form("key"),
     key: str = Form(""),
+    password: str = Form(""),
 ) -> HTMLResponse:
     try:
         update_host(
@@ -115,7 +121,8 @@ async def admin_update_host(
             host=host.strip(),
             user=user.strip() or None,
             port=int(port) if port.strip() else None,
-            key=key.strip() or None,
+            key=key.strip() or None if auth_method == "key" else None,
+            password=password.strip() or None if auth_method == "password" else None,
         )
     except Exception as exc:
         return templates.TemplateResponse(
@@ -140,6 +147,21 @@ async def admin_delete_host(request: Request, slug: str) -> HTMLResponse:
     return templates.TemplateResponse(
         "partials/admin_hosts.html",
         {"request": request, "hosts": get_hosts()},
+    )
+
+
+@router.post("/hosts/{slug}/test", response_class=HTMLResponse)
+async def admin_test_host(request: Request, slug: str) -> HTMLResponse:
+    hosts = get_hosts()
+    host = next((h for h in hosts if h["slug"] == slug), None)
+    if not host:
+        return HTMLResponse(
+            "<span class='text-red-400 text-xs'>Host not found</span>"
+        )
+    result = await test_connection(host, get_ssh_config())
+    return templates.TemplateResponse(
+        "partials/admin_host_test_result.html",
+        {"request": request, "slug": slug, "result": result},
     )
 
 
