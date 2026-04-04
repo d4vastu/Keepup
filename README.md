@@ -1,38 +1,42 @@
 # Update Dashboard
 
-A self-hosted dashboard for monitoring and applying OS package updates and Docker Compose stack updates across multiple Linux hosts.
+A self-hosted dashboard for monitoring and applying OS package updates and Docker Compose stack updates across multiple Linux hosts — from a single browser tab.
 
-Built with FastAPI + HTMX. No JavaScript frameworks, no database — just a single Docker container.
+Built with FastAPI + HTMX. No JavaScript frameworks, no database, no agents to install on remote hosts — just SSH.
+
+![Dashboard](docs/screenshots/dashboard.png)
+
+---
 
 ## Features
 
-- **Setup wizard** — first-run flow creates your admin account (username + password + optional 2FA), generates a backup key, and guides you through adding hosts and configuring connections
-- **OS package updates** — checks `apt`, `dnf`, `yum`, `zypper`, `pacman`, and `apk` on each host via SSH, shows pending updates with version diffs
-- **One-click upgrade** — runs the appropriate upgrade command remotely with live output
+- **Setup wizard** — first-run flow creates your admin account (username + password + optional 2FA), generates a backup key, and walks through adding hosts and configuring connections
+- **OS package updates** — checks `apt`, `dnf`, `yum`, `zypper`, `pacman`, and `apk` via SSH; shows pending updates with version diffs
+- **One-click upgrade** — runs the appropriate upgrade command remotely with live streaming output
 - **Reboot detection** — shows a "Reboot required" badge and restart button after kernel/system updates
-- **Docker Compose monitoring** — connects to hosts via SSH to discover running stacks, compares image digests against the registry to detect available updates — no Portainer required
-- **Portainer support** — optionally use a Portainer API as an alternative Docker backend
+- **Docker Compose monitoring** — discovers running stacks over SSH, compares image digests against the registry to detect available updates — no Portainer or agent required
+- **Portainer support** — optionally use a Portainer API as an alternative or additional Docker backend
 - **One-click stack redeploy** — pulls latest images and restarts the stack
-- **Auto-discovery** — when you add a host and save credentials, the dashboard checks for running Compose stacks and offers to monitor them
-- **Auto-updates** — schedule unattended OS upgrades and Docker stack redeployments per host/stack with individual cron schedules; optional auto-reboot per host
-- **Notification bell** — persists auto-update run history; badge turns red on failures so you know when something needs attention
-- **Encrypted credential store** — SSH keys, SSH passwords, sudo passwords, API keys, and tokens are stored encrypted on disk; nothing sensitive ever touches `config.yml`
-- **Sudo modal** — non-root users are prompted for their sudo password inline on Update/Restart, with an option to save it for future runs
-- **HTTPS/TLS** — enable HTTPS from **Admin → HTTPS**: generate a self-signed cert for internal use or upload your own certificate and private key for public-facing deployments; the app restarts automatically
-- **Fully UI-managed** — hosts, credentials, SSH settings, Portainer, DockerHub, auto-update schedules, and TLS are all configured through the admin panel; no file editing or env vars required after initial setup
+- **Auto-discovery** — after a successful connection test, the dashboard checks for running Compose stacks and asks if you want to monitor them
+- **Auto-updates** — schedule unattended OS upgrades and Docker stack redeployments per host/stack with cron schedules; optional auto-reboot per host
+- **Notification bell** — tracks auto-update run history; badge turns red on failure
+- **Encrypted credential store** — SSH keys, passwords, sudo passwords, API keys, and tokens stored encrypted on disk; nothing sensitive ever touches `config.yml`
+- **Sudo support** — non-root users are prompted for their sudo password inline, with an option to save it for future runs
+- **HTTPS/TLS** — generate a self-signed cert or upload your own from **Admin → HTTPS**; the app restarts automatically
+- **Single admin account** — single-user by design; all configuration is managed through the UI
 
 ---
 
 ## Quick Start
 
-### 1. Create the directory structure
+### 1. Create directories
 
 ```bash
 mkdir update-dashboard && cd update-dashboard
 mkdir config data
 ```
 
-### 2. Create docker-compose.yml
+### 2. Create `docker-compose.yml`
 
 ```yaml
 services:
@@ -53,36 +57,40 @@ services:
 docker compose up -d
 ```
 
-Open **http://localhost:8765** — a setup wizard will guide you through creating your admin account and connecting your first hosts.
-
-> **Portainer and DockerHub** are configured through the setup wizard or **Admin → Connections**, not via environment variables. See [Connections](#connections) below.
+Open **http://localhost:8765** — the setup wizard will guide you through the rest.
 
 ---
 
 ## First-Run Setup Wizard
 
-When you open the dashboard for the first time (no admin account exists), you are automatically directed to the setup wizard:
+The setup wizard runs automatically the first time (when no admin account exists):
 
-1. **Create account (step 1/3)** — set a username and password; optionally enroll TOTP two-factor authentication
-2. **Save your backup key (step 2/3)** — a one-time backup key is shown; store it somewhere safe — it's the only way to reset your password if you lose access
-3. **Connect infrastructure (step 3/3)** — add SSH hosts, configure Portainer, and set DockerHub credentials
+1. **Create account (1/3)** — set a username and password; optionally enroll TOTP 2FA with any authenticator app
+2. **Save your backup key (2/3)** — a one-time recovery key is displayed; **copy it and store it somewhere safe before continuing** — this is the only way to reset your password if you lose access, there is no other recovery path
+3. **Connect infrastructure (3/3)** — add SSH hosts, configure Portainer, set DockerHub credentials
 
-After finishing the wizard you are redirected to the login page. You can re-run steps 2 and 3 at any time from the admin panel without going through the wizard again.
+Have ready before starting step 3: IP addresses of your hosts, SSH credentials (password or key), and optionally your Portainer URL and API token.
+
+After finishing, you are redirected to the login page. Backup key and infrastructure settings can be updated anytime from the admin panel without re-running the full wizard.
 
 ---
 
 ## Adding Hosts
 
-1. Go to **/admin → Add Host** — enter name, IP/hostname, SSH user (optional), and port (optional)
-2. Click **Credentials** on the new host row — choose SSH Key or Password auth and optionally save a sudo password
-3. Click **Test** to verify the connection
-4. If Docker Compose stacks are running on the host, a prompt will appear automatically: choose to monitor all stacks, all including future ones, or select specific stacks
+![Admin panel](docs/screenshots/admin.png)
+
+1. Go to **Admin → Hosts → Add host** — enter name, IP/hostname, SSH user (optional), and port (optional)
+2. Choose **Password** or **SSH key** authentication and enter credentials
+3. Click **Test connection & add host** — the dashboard verifies SSH access
+4. If Docker Compose stacks are found, a prompt appears: *"We found X stacks running — want to monitor them?"* — click **Yes** or **No**
 
 ---
 
 ## SSH Authentication
 
-Credentials are stored **encrypted** in `/app/data/credentials.json`. The encryption key is auto-generated at `/app/data/.secret` on first run. Nothing sensitive is written to `config.yml`.
+Credentials are stored **encrypted** in `./data/credentials.json`. The encryption key lives at `./data/.secret`.
+
+> **Important:** If `./data/.secret` is lost, all stored credentials become permanently unrecoverable. Back up the entire `./data/` directory, keep it secure, and never commit it to version control.
 
 ### SSH Key (recommended)
 
@@ -93,9 +101,9 @@ ssh-keygen -t ed25519 -f ~/.ssh/dashboard_key -N ""
 ssh-copy-id -i ~/.ssh/dashboard_key.pub user@your-host
 ```
 
-Then paste the private key contents into the **Credentials** form in the admin panel.
+Paste the private key contents into the **Credentials** form in the admin panel.
 
-Alternatively, mount a key file and use the SSH default key path in SSH Settings:
+Alternatively, mount a keys directory and use the SSH default key setting:
 
 ```bash
 mkdir keys
@@ -108,85 +116,154 @@ volumes:
   - ./keys:/app/keys:ro
 ```
 
+Then set the key path in **Admin → SSH Settings → Default key** to `/app/keys/id_ed25519`.
+
 ### SSH Password
 
 Enable `PasswordAuthentication yes` in `/etc/ssh/sshd_config` on the remote host, then enter the password in the Credentials form.
 
 ### Sudo
 
-If your SSH user is not root, the dashboard will prompt for a sudo password inline when running updates or reboots. You can save it so future runs don't prompt again.
+If your SSH user is not root, updates and reboots require `sudo`. The dashboard will prompt for the sudo password inline when needed — you can save it to avoid being prompted again. The saved sudo password is stored encrypted alongside the SSH credentials.
 
 ---
 
 ## Docker Compose Monitoring
 
-Docker monitoring works over the same SSH connection used for OS updates — no Portainer required.
+Docker monitoring works over the same SSH connection used for OS updates — no Portainer or agent required on the remote host.
 
 **Requirements on the remote host:**
 - Docker Engine and Docker Compose v2 (`docker compose` subcommand)
-- The SSH user must have permission to run `docker compose` commands (either root or a user in the `docker` group)
+- The SSH user must be root or a member of the `docker` group
 
 **How it works:**
-1. The dashboard runs `docker compose ls --all --format json` to discover stacks
-2. For each running container, it fetches the local image digest via `docker image inspect` and compares it against the registry
+1. Runs `docker compose ls --all --format json` to discover stacks
+2. For each running container, fetches the local image digest via `docker image inspect` and compares it against the upstream registry
 3. Updates are applied with `docker compose pull && docker compose up -d`
 
-**Monitoring modes** (set per-host in the admin panel):
-- **Monitor all** — watches all stacks present at setup time
-- **Monitor all + new** — always queries the host fresh, picks up newly added stacks automatically
-- **Select** — choose specific stack names to watch
+**Notes:**
+- Image digest comparison works for public images and private registries where the remote host already has pull access (the dashboard uses the remote host's Docker credentials, not its own)
+- If your stack uses `image: nginx:latest`, any breaking upstream change will be detected — pin versions if that is a concern
+
+**Monitoring modes** (set per-host):
+
+| Mode | Behaviour |
+|---|---|
+| All stacks | Monitors stacks found when monitoring was first enabled |
+| All + new | Always queries fresh; picks up newly added stacks automatically |
+| Selected | Only monitors the stacks you explicitly choose |
 
 ### Portainer (optional)
 
-If you already run Portainer, you can use it as an additional Docker backend alongside SSH.
+If you already run Portainer, it can be used alongside SSH monitoring.
 
-Configure it in **Admin → Connections → Portainer** — enter the URL, paste your API token, and click **Test Connection** before saving. No environment variables needed.
+1. Go to **Admin → Connections → Portainer**
+2. Enter the Portainer URL (e.g. `https://192.168.1.10:9443`) and paste your API token
+3. Click **Test Connection**, then **Save**
 
-To get your Portainer API token: open Portainer → click your username (top-right) → **Account Settings** → **Access Tokens** → **Add access token**.
+To get your API token: Portainer → your username (top-right) → **Account Settings** → **Access Tokens** → **Add access token**.
 
 ---
 
 ## Auto-Updates
 
+![Auto-Updates](docs/screenshots/admin_auto_updates.png)
+
 Schedule unattended updates in **Admin → Auto-Updates**.
 
 **OS updates (per host):**
-- Enable the toggle, set a cron schedule (UTC), and optionally enable auto-reboot
-- Uses `apt upgrade` (safe mode — never removes packages)
-- If auto-reboot is on, the host reboots immediately after the update if a reboot was required
+- Enable the toggle and set a cron schedule (all times are UTC)
+- Runs the appropriate upgrade command for the detected package manager (`apt`, `dnf`, `yum`, `zypper`, `pacman`, or `apk`)
+- Optionally enable auto-reboot — the host reboots immediately after the update if the system indicates a reboot is required
 - Non-root hosts require a saved sudo password (set in Admin → Hosts → Credentials)
+- Missed schedules (e.g. container was stopped during the window) are skipped, not queued
 
 **Docker stack redeployments (per stack):**
 - Enable the toggle and set a cron schedule
-- Pulls the latest image tag and restarts the stack
-- Note: if your image uses the `latest` tag, a breaking upstream change could be pulled automatically — pin your image versions if that's a concern
+- Pulls the latest image tags and restarts the stack
+
+**Cron schedule format** — standard 5-field cron (UTC):
+
+```
+┌─ minute (0–59)
+│  ┌─ hour (0–23)
+│  │  ┌─ day of month (1–31)
+│  │  │  ┌─ month (1–12)
+│  │  │  │  ┌─ day of week (0–7, 0 and 7 = Sunday)
+│  │  │  │  │
+*  *  *  *  *
+```
+
+Common examples:
+
+| Schedule | Meaning |
+|---|---|
+| `0 3 * * *` | Every day at 03:00 UTC |
+| `0 3 * * 0` | Every Sunday at 03:00 UTC |
+| `0 3 1 * *` | First day of each month at 03:00 UTC |
+| `30 2 * * 1-5` | Weekdays at 02:30 UTC |
 
 **Notification bell:**
-- Appears in every page header
-- Badge turns red when an auto-update fails
-- Click to see recent run history and dismiss notifications
+- Badge turns red when an auto-update job fails
+- Click to view the last 20 run results and mark notifications as read
 
 ---
 
 ## HTTPS / TLS
 
-Enable HTTPS from **Admin → HTTPS** — no manual cert management or container restarts required.
+Enable HTTPS from **Admin → HTTPS** — no manual cert or container restart required.
 
-**Self-signed certificate (internal use):**
+**Self-signed certificate (internal / home lab use):**
 1. Go to **Admin → HTTPS → Self-signed certificate**
-2. Enter the hostname or IP address the dashboard will be reached at
-3. Click **Generate & Enable** — a 2-year certificate is created and the app restarts automatically
-4. Your browser will show a certificate warning on first visit — add a permanent exception
+2. Enter the hostname or IP the dashboard will be reached at
+3. Click **Generate & Enable** — a 2-year certificate is created, the app restarts, and the page redirects to the HTTPS URL
+4. Your browser will show a security warning — add a permanent exception (the cert is only self-signed, not malicious)
 
-**Custom certificate (external / public-facing):**
+> After clicking Generate, the browser will show a connection error for a few seconds while the container restarts. Wait, then reload the page at the new `https://` URL.
+
+**Custom certificate (public-facing deployments):**
 1. Go to **Admin → HTTPS → Custom certificate**
-2. Paste your PEM-encoded certificate and private key
-3. Click **Save & Enable** — the app restarts and serves your certificate immediately
+2. Paste your PEM-encoded certificate chain and private key
+3. Click **Save & Enable** — the app restarts with your certificate
 
 **Disable HTTPS:**
-- Go to **Admin → HTTPS → Disable** to remove the certificate and revert to HTTP
+- **Admin → HTTPS → Disable** — removes the certificate files and reverts to HTTP on the next restart
 
-The app uses a Docker restart policy (`unless-stopped`) to come back up after the automatic restart triggered by certificate changes.
+**Reverse proxy (nginx, Caddy, Traefik):**
+
+If you terminate TLS at a reverse proxy, leave HTTPS disabled in the app and point the proxy at `http://localhost:8765` (or whichever port you mapped). Example nginx config:
+
+```nginx
+server {
+    listen 443 ssl;
+    server_name dashboard.example.com;
+
+    ssl_certificate     /etc/ssl/certs/dashboard.crt;
+    ssl_certificate_key /etc/ssl/private/dashboard.key;
+
+    location / {
+        proxy_pass http://localhost:8765;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        # Required for WebSocket / HTMX streaming
+        proxy_buffering off;
+        proxy_read_timeout 300s;
+    }
+}
+```
+
+For Caddy, the equivalent is simply:
+```
+dashboard.example.com {
+    reverse_proxy localhost:8765
+}
+```
+
+If binding directly on `0.0.0.0` is undesirable, restrict to loopback in the compose file:
+```yaml
+ports:
+  - "127.0.0.1:8765:8000"
+```
 
 ---
 
@@ -194,41 +271,98 @@ The app uses a Docker restart policy (`unless-stopped`) to come back up after th
 
 ### Two-Factor Authentication (TOTP)
 
-Enable or disable TOTP from **Admin → Account → Two-Factor Authentication**. Use any authenticator app (Google Authenticator, Authy, etc.).
+Enable or disable TOTP from **Admin → Account → Two-Factor Authentication**. Works with Google Authenticator, Authy, 1Password, and any standard TOTP app.
 
 ### Backup Key
 
-A backup key is generated when your account is created. Use it to reset your password if you are locked out — go to the login page and click **Forgot password**.
+A backup key is generated when your account is created. If you lose your password, go to the login page, click **Forgot password**, and enter the backup key to set a new password.
 
-You can regenerate your backup key from **Admin → Account → Backup Key**. The old key is immediately invalidated.
+> **Store your backup key somewhere safe.** If you lose both your password and backup key, there is no account recovery — only a factory reset (which wipes all data).
+
+Regenerate your backup key at any time from **Admin → Account → Backup Key**. The old key is invalidated immediately.
 
 ### Factory Reset
 
-**Admin → Account → Danger Zone → Factory Reset** wipes all settings and credentials and redirects to the setup wizard. You must enter your current password and type `RESET` to confirm.
+**Admin → Account → Danger Zone → Factory Reset** — wipes all in-app configuration and credentials, then redirects to the setup wizard.
 
-This is irreversible — all hosts, credentials, Portainer config, and auto-update schedules will be deleted.
+Requires your current password and typing `RESET` (case-insensitive) to confirm.
+
+**What is deleted:** all hosts, SSH credentials, Portainer config, DockerHub config, auto-update schedules, and the admin account.
+
+**What is NOT deleted:** the `./config` and `./data` directories on disk. After a factory reset, the app writes a blank `config.yml` on next run. If you want a completely clean slate, stop the container and delete those directories manually before restarting.
 
 ---
 
 ## Connections
 
-Configure Portainer and Docker Hub in **Admin → Connections** — no environment variables needed.
+![Connections](docs/screenshots/admin_connections.png)
 
-**Portainer** — required to use the Portainer backend for Docker monitoring. Enter your Portainer URL and API token, click **Test Connection** to verify before saving.
+Configure Portainer and Docker Hub in **Admin → Connections**.
 
-**Docker Hub** (optional) — without credentials, Docker Hub limits image update checks to 100/hour shared across your IP. A free account bumps this to 200/hour for you alone. Use an access token (not your password): hub.docker.com → Account Settings → Personal access tokens.
+**Portainer** — connect a Portainer instance to use it as a Docker backend. Enter the URL and API token, click **Test Connection** to verify, then **Save**.
 
-Both integrations take effect immediately on save — no restart needed.
+**Docker Hub** (optional) — unauthenticated pulls from Docker Hub are rate-limited. Adding a free Docker Hub account and access token gives you a higher personal rate limit for image digest lookups. Use an access token (not your password): hub.docker.com → Account Settings → Personal access tokens.
+
+Changes take effect immediately on save — no restart needed.
 
 ---
 
-## config.yml
+## Upgrading
 
-`config.yml` stores host topology and SSH defaults only — no secrets. It lives in the `config/` volume and is managed by the admin panel.
+```bash
+docker compose pull
+docker compose up -d
+```
+
+The `./config` and `./data` volumes persist across upgrades. No migration steps are required between versions — the app reads whatever is in those directories on startup.
+
+If you pin to a specific version tag (recommended for production):
+```yaml
+image: ghcr.io/d4vastu/update-dashboard:0.9.0
+```
+
+Available tags are listed on the [packages page](https://github.com/d4vastu/update-dashboard/pkgs/container/update-dashboard).
+
+---
+
+## Backup
+
+Back up the `./data` directory — it contains the encrypted credential store and the encryption key.
+
+```bash
+# Stop the container first to avoid partial writes
+docker compose stop
+tar -czf update-dashboard-backup-$(date +%Y%m%d).tar.gz data/ config/
+docker compose start
+```
+
+> **`./data/.secret` is critical.** This file is the Fernet encryption key for all stored credentials. Without it, the credential store cannot be decrypted. Store the backup in a separate location from the running container.
+
+The `./config` directory (`config.yml`) contains no secrets and can be backed up separately or committed to version control.
+
+---
+
+## Logs
+
+```bash
+# Follow live logs
+docker compose logs -f
+
+# Last 100 lines
+docker compose logs --tail=100
+```
+
+The app logs to stdout via uvicorn. Each request is logged with method, path, and status code. Auto-update job output is stored in `./data/auto_update_log.json` and viewable from the notification bell in the UI.
+
+---
+
+## config.yml Reference
+
+`config.yml` stores host topology and SSH defaults only — no secrets. It is managed by the admin panel and lives in the `./config` volume.
 
 ```yaml
 ssh:
-  default_key: /app/keys/id_ed25519   # path inside the container (if using key files)
+  default_key: /app/keys/id_ed25519   # path inside the container
   default_user: root
   default_port: 22
   connect_timeout: 15
@@ -242,7 +376,7 @@ hosts:
     host: 192.168.1.20
     user: dmadmin
     port: 22
-    docker_mode: all_and_new          # monitor all Compose stacks, including new ones
+    docker_mode: all_and_new
 
   - name: "Nextcloud"
     host: 192.168.1.30
@@ -259,29 +393,31 @@ hosts:
 |---|---|
 | `all` | Monitor stacks found when monitoring was enabled |
 | `all_and_new` | Always query the host fresh; picks up new stacks automatically |
-| `selected` | Only monitor the stacks listed in `docker_stacks` |
+| `selected` | Only monitor stacks listed in `docker_stacks` |
 | *(absent)* | No Docker monitoring for this host |
 
 ---
 
 ## Volumes
 
-| Volume | Purpose |
-|---|---|
-| `./config` | `config.yml` — host list, SSH settings. Safe to back up and commit (no secrets). |
-| `./data` | `credentials.json` (encrypted) and `.secret` (encryption key). **Back up and restrict access.** |
-| `./keys` (optional) | SSH key files if using file-based key auth instead of pasting keys in the UI. Mount read-only. |
+| Path | Contents | Secrets? |
+|---|---|---|
+| `./config` | `config.yml` — host list, SSH settings | No — safe to commit |
+| `./data` | `credentials.json` (encrypted), `.secret` (key), session data, auto-update log | **Yes — back up and restrict access** |
+| `./keys` (optional) | SSH private key files for file-based auth | **Yes — mount read-only** |
 
 ---
 
 ## Environment Variables
 
+Only two environment variables are recognised:
+
 | Variable | Default | Description |
 |---|---|---|
-| `CONFIG_PATH` | `/app/config.yml` | Path to `config.yml` inside the container |
-| `DATA_PATH` | `/app/data` | Directory for the encrypted credential store and auto-update log |
+| `CONFIG_PATH` | `/app/config/config.yml` | Path to `config.yml` inside the container |
+| `DATA_PATH` | `/app/data` | Directory for credentials, session secret, and auto-update log |
 
-All other configuration (Portainer, DockerHub, hosts, SSH settings, HTTPS) is managed through the UI.
+All other configuration is managed through the UI.
 
 ---
 
@@ -290,17 +426,17 @@ All other configuration (Portainer, DockerHub, hosts, SSH settings, HTTPS) is ma
 ```
 FastAPI (Python)
 ├── SSH via asyncssh
-│   ├── multi-PM check / upgrade / reboot on each host (apt, dnf, yum, zypper, pacman, apk)
-│   └── docker compose ls / inspect / pull / up -d per host
-├── Container backends (protocol-based, pluggable)
-│   ├── SSHDockerBackend  — direct SSH + docker CLI (no Portainer needed)
-│   └── PortainerBackend  — Portainer API via httpx (optional)
-├── Auto-update scheduler (APScheduler AsyncIOScheduler)
-│   ├── per-host OS upgrade jobs with optional auto-reboot
-│   └── per-stack Docker redeploy jobs
-├── Encrypted credential store (Fernet)
-│   └── SSH keys, SSH passwords, sudo passwords, API keys, tokens — never in config.yml
-└── HTMX frontend — partial HTML responses, no page reloads
+│   ├── Package check / upgrade / reboot (apt, dnf, yum, zypper, pacman, apk)
+│   └── Docker Compose discover / inspect / pull / up -d
+├── Container backends (pluggable)
+│   ├── SSHDockerBackend  — SSH + docker CLI, no agent needed
+│   └── PortainerBackend  — Portainer REST API via httpx
+├── Auto-update scheduler (APScheduler)
+│   ├── Per-host OS upgrade jobs with optional auto-reboot
+│   └── Per-stack Docker redeploy jobs
+├── Encrypted credential store (Fernet / AES-128)
+│   └── SSH keys, passwords, sudo passwords, API tokens — never in config.yml
+└── HTMX frontend — server-rendered partials, no page reloads, no JS framework
 ```
 
 ---
@@ -310,10 +446,9 @@ FastAPI (Python)
 ```bash
 git clone https://github.com/d4vastu/update-dashboard.git
 cd update-dashboard
-pip install -r requirements.txt
+pip install -r requirements.txt -r requirements-dev.txt
 
-# Run locally
-CONFIG_PATH=./config/config.yml DATA_PATH=./data uvicorn app.main:app --reload --port 8000
+DATA_PATH=./data uvicorn app.main:app --reload --port 8000
 ```
 
 Run tests:
@@ -321,6 +456,8 @@ Run tests:
 ```bash
 pytest --cov=app --cov-fail-under=95
 ```
+
+The test suite uses isolated temp directories for config and credentials — no real SSH connections are made.
 
 ---
 

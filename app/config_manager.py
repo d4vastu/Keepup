@@ -4,7 +4,7 @@ from pathlib import Path
 
 import yaml
 
-_CONFIG_PATH = Path(os.getenv("CONFIG_PATH", "/app/config.yml"))
+_CONFIG_PATH = Path(os.getenv("CONFIG_PATH", "/app/config/config.yml"))
 _lock = threading.Lock()
 
 
