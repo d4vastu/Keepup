@@ -1,0 +1,199 @@
+<div id="admin-account" class="space-y-6">
+
+  <!-- Change password -->
+  <div class="bg-slate-800/50 rounded-xl border border-slate-700 overflow-hidden">
+    <div class="px-5 py-4 border-b border-slate-700">
+      <h3 class="text-sm font-semibold text-slate-200">Change password</h3>
+    </div>
+    <div class="px-5 py-4">
+      {% if pw_saved %}
+      <p class="text-sm text-green-400 mb-4">&#10003; Password updated.</p>
+      {% endif %}
+      {% if pw_errors %}
+      <div class="mb-4 space-y-1">
+        {% for e in pw_errors %}<p class="text-sm text-red-400">{{ e }}</p>{% endfor %}
+      </div>
+      {% endif %}
+      <form hx-post="/admin/account/password" hx-target="#admin-account" hx-swap="outerHTML" class="space-y-3">
+        <div>
+          <label class="block text-xs font-medium text-slate-400 mb-1">Current password</label>
+          <input type="password" name="current_password" required
+            class="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-blue-500">
+        </div>
+        <div>
+          <label class="block text-xs font-medium text-slate-400 mb-1">New password</label>
+          <input type="password" name="new_password" required minlength="8"
+            class="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-blue-500">
+        </div>
+        <div>
+          <label class="block text-xs font-medium text-slate-400 mb-1">Confirm new password</label>
+          <input type="password" name="new_password_confirm" required
+            class="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-blue-500">
+        </div>
+        <button type="submit"
+          class="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-sm font-medium text-white transition-colors">
+          Update password
+        </button>
+      </form>
+    </div>
+  </div>
+
+  <!-- Two-factor authentication -->
+  <div class="bg-slate-800/50 rounded-xl border border-slate-700 overflow-hidden">
+    <div class="flex items-center justify-between px-5 py-4 border-b border-slate-700">
+      <h3 class="text-sm font-semibold text-slate-200">Two-factor authentication</h3>
+      {% if mfa_enrolled %}
+        <span class="flex items-center gap-1.5 text-xs text-green-400 font-medium">
+          <span class="w-2 h-2 rounded-full bg-green-400"></span> Enabled
+        </span>
+      {% else %}
+        <span class="flex items-center gap-1.5 text-xs text-slate-500">
+          <span class="w-2 h-2 rounded-full bg-slate-600"></span> Disabled
+        </span>
+      {% endif %}
+    </div>
+    <div class="px-5 py-4">
+
+      {% if mfa_enrolled_now %}
+      <p class="text-sm text-green-400 mb-4">&#10003; Two-factor authentication is now enabled.</p>
+      {% endif %}
+      {% if mfa_removed %}
+      <p class="text-sm text-amber-400 mb-4">Two-factor authentication has been removed.</p>
+      {% endif %}
+
+      {% if mfa_setup %}
+        <!-- Enroll MFA -->
+        {% if mfa_error %}
+        <p class="text-sm text-red-400 mb-4">{{ mfa_error }}</p>
+        {% endif %}
+        <p class="text-xs text-slate-400 mb-4">
+          Scan this QR code with <strong class="text-slate-300">Google Authenticator</strong>, <strong class="text-slate-300">Authy</strong>, or any TOTP app.
+        </p>
+        <div class="flex justify-center mb-4">
+          <div id="mfa-qrcode" class="rounded-lg overflow-hidden"></div>
+        </div>
+        <p class="text-xs text-slate-500 text-center mb-1">Or enter this code manually:</p>
+        <p class="text-xs font-mono text-slate-300 text-center bg-slate-900 rounded px-3 py-2 mb-4 break-all tracking-widest">{{ totp_secret }}</p>
+        <form hx-post="/admin/account/mfa/setup" hx-target="#admin-account" hx-swap="outerHTML" class="space-y-3">
+          <div>
+            <label class="block text-xs font-medium text-slate-400 mb-1">Enter the 6-digit code from your app to confirm</label>
+            <input type="text" name="totp_code" inputmode="numeric" maxlength="6" placeholder="000000" autofocus
+              class="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-200 font-mono tracking-widest text-center focus:outline-none focus:border-blue-500">
+          </div>
+          <div class="flex gap-3">
+            <button type="submit"
+              class="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-sm font-medium text-white transition-colors">
+              Confirm and enable
+            </button>
+            <a href="/admin/account"
+              hx-get="/admin/account" hx-target="#admin-account" hx-swap="outerHTML"
+              class="px-4 py-2 rounded-lg bg-slate-700 hover:bg-slate-600 text-sm font-medium text-slate-300 transition-colors cursor-pointer">
+              Cancel
+            </a>
+          </div>
+        </form>
+        <script>
+          window.addEventListener('load', function() {
+            if (typeof QRCode !== 'undefined') {
+              new QRCode(document.getElementById('mfa-qrcode'), {
+                text: {{ totp_uri | tojson }},
+                width: 160, height: 160,
+                colorDark: '#1e293b', colorLight: '#f8fafc',
+              });
+            }
+          });
+        </script>
+
+      {% elif mfa_enrolled %}
+        <!-- Remove MFA -->
+        <p class="text-xs text-slate-400 mb-4">
+          To disable two-factor authentication, confirm your password and enter a current authenticator code.
+        </p>
+        {% if mfa_remove_error %}
+        <p class="text-sm text-red-400 mb-3">{{ mfa_remove_error }}</p>
+        {% endif %}
+        <form hx-post="/admin/account/mfa/remove" hx-target="#admin-account" hx-swap="outerHTML" class="space-y-3">
+          <div>
+            <label class="block text-xs font-medium text-slate-400 mb-1">Password</label>
+            <input type="password" name="current_password" required
+              class="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-blue-500">
+          </div>
+          <div>
+            <label class="block text-xs font-medium text-slate-400 mb-1">Authenticator code</label>
+            <input type="text" name="totp_code" inputmode="numeric" maxlength="6" placeholder="000000"
+              class="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-200 font-mono tracking-widest text-center focus:outline-none focus:border-blue-500">
+          </div>
+          <button type="submit"
+            class="px-4 py-2 rounded-lg bg-red-700 hover:bg-red-600 text-sm font-medium text-white transition-colors">
+            Disable two-factor authentication
+          </button>
+        </form>
+
+      {% else %}
+        <!-- Enable MFA -->
+        <p class="text-xs text-slate-400 mb-4">
+          Two-factor authentication is not enabled. Add it for an extra layer of security —
+          once enabled, you'll need your authenticator app every time you sign in.
+        </p>
+        <a hx-get="/admin/account/mfa/setup" hx-target="#admin-account" hx-swap="outerHTML"
+          class="inline-block px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-sm font-medium text-white transition-colors cursor-pointer">
+          Set up authenticator app
+        </a>
+      {% endif %}
+
+    </div>
+  </div>
+
+  <!-- Backup key -->
+  <div class="bg-slate-800/50 rounded-xl border border-slate-700 overflow-hidden">
+    <div class="px-5 py-4 border-b border-slate-700">
+      <h3 class="text-sm font-semibold text-slate-200">Backup key</h3>
+      <p class="text-xs text-slate-500 mt-0.5">Required to reset your password if you get locked out.</p>
+    </div>
+    <div class="px-5 py-4">
+      {% if new_backup_key %}
+      <div class="mb-4 space-y-3">
+        <div class="flex items-start gap-2 bg-amber-900/20 border border-amber-700/40 rounded-lg px-4 py-3">
+          <span class="text-amber-400 flex-shrink-0">&#9888;</span>
+          <p class="text-xs text-amber-300">Save this key now — it won't be shown again. Your old backup key is no longer valid.</p>
+        </div>
+        <div class="bg-slate-900 border border-slate-600 rounded-xl px-5 py-4 text-center">
+          <span id="new-bk" class="text-base font-mono font-bold text-slate-100 tracking-widest select-all">{{ new_backup_key }}</span>
+        </div>
+        <div class="flex gap-3">
+          <button onclick="navigator.clipboard.writeText('{{ new_backup_key }}').then(()=>{this.textContent='Copied!';setTimeout(()=>{this.textContent='Copy'},2000)})"
+            class="px-3 py-1.5 rounded bg-slate-700 hover:bg-slate-600 text-xs font-medium text-slate-300 transition-colors">Copy</button>
+          <button onclick="(function(){var b=new Blob(['Update Dashboard — Backup Key\n\n{{ new_backup_key }}\n'],{type:'text/plain'});var a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='update-dashboard-backup-key.txt';a.click();})()"
+            class="px-3 py-1.5 rounded bg-slate-700 hover:bg-slate-600 text-xs font-medium text-slate-300 transition-colors">Download .txt</button>
+        </div>
+      </div>
+      {% endif %}
+      {% if bk_error %}
+      <p class="text-sm text-red-400 mb-3">{{ bk_error }}</p>
+      {% endif %}
+      <p class="text-xs text-slate-400 mb-3">Regenerate your backup key (enter your current password to confirm). Your old key will stop working immediately.</p>
+      <form hx-post="/admin/account/backup-key" hx-target="#admin-account" hx-swap="outerHTML" class="flex gap-3 items-end">
+        <div class="flex-1">
+          <label class="block text-xs font-medium text-slate-400 mb-1">Current password</label>
+          <input type="password" name="current_password" required
+            class="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-blue-500">
+        </div>
+        <button type="submit"
+          class="px-4 py-2 rounded-lg bg-slate-600 hover:bg-slate-500 text-sm font-medium text-slate-200 transition-colors flex-shrink-0">
+          Regenerate
+        </button>
+      </form>
+    </div>
+  </div>
+
+  <!-- Sign out -->
+  <div class="flex justify-end">
+    <form method="post" action="/logout">
+      <button type="submit"
+        class="px-4 py-2 rounded-lg bg-slate-700 hover:bg-slate-600 text-sm font-medium text-slate-400 hover:text-slate-200 transition-colors">
+        Sign out
+      </button>
+    </form>
+  </div>
+
+</div>

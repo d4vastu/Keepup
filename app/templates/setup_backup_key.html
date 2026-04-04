@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Save your backup key — Update Dashboard</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>body { background-color: #0f172a; }</style>
+</head>
+<body class="min-h-full text-slate-200 font-sans flex items-center justify-center px-4 py-12">
+
+  <div class="w-full max-w-md">
+
+    <!-- Header -->
+    <div class="text-center mb-8">
+      <div class="inline-flex items-center justify-center w-12 h-12 rounded-xl bg-amber-500 mb-4">
+        <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+            d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z"/>
+        </svg>
+      </div>
+      <h1 class="text-2xl font-bold text-white">Save your backup key</h1>
+      <p class="text-sm text-slate-400 mt-1">This is the only way to recover your account if you forget your password.</p>
+    </div>
+
+    <div class="bg-slate-800/60 border border-slate-700 rounded-2xl p-6 space-y-5">
+
+      <!-- Warning -->
+      <div class="flex items-start gap-3 bg-amber-900/20 border border-amber-700/40 rounded-xl px-4 py-3">
+        <span class="text-amber-400 flex-shrink-0 mt-0.5">&#9888;</span>
+        <p class="text-xs text-amber-300">
+          <strong>This key is shown once.</strong> Store it somewhere safe — a password manager,
+          a printed sheet, or an encrypted notes app. Without it, a forgotten password means
+          a full reinstall.
+        </p>
+      </div>
+
+      <!-- Key display -->
+      <div>
+        <p class="text-xs font-medium text-slate-400 mb-2">Your backup key</p>
+        <div class="bg-slate-900 border border-slate-600 rounded-xl px-5 py-4 text-center">
+          <span id="backup-key" class="text-lg font-mono font-bold text-slate-100 tracking-widest select-all">
+            {{ backup_key }}
+          </span>
+        </div>
+      </div>
+
+      <!-- Actions -->
+      <div class="flex gap-3">
+        <button onclick="copyKey()" id="copy-btn"
+          class="flex-1 py-2.5 rounded-lg bg-slate-700 hover:bg-slate-600 text-sm font-medium text-slate-200 transition-colors">
+          Copy
+        </button>
+        <button onclick="downloadKey()"
+          class="flex-1 py-2.5 rounded-lg bg-slate-700 hover:bg-slate-600 text-sm font-medium text-slate-200 transition-colors">
+          Download .txt
+        </button>
+      </div>
+
+      <!-- Confirmation -->
+      <form method="post" action="/setup/backup-key/confirm">
+        <label class="flex items-start gap-3 cursor-pointer select-none mb-4">
+          <input type="checkbox" id="saved-checkbox" required
+            onchange="document.getElementById('confirm-btn').disabled = !this.checked"
+            class="mt-0.5 w-4 h-4 rounded accent-blue-500 flex-shrink-0">
+          <span class="text-sm text-slate-300">
+            I've saved my backup key in a safe place. I understand I'll need it to reset my password if I get locked out.
+          </span>
+        </label>
+        <button type="submit" id="confirm-btn" disabled
+          class="w-full py-3 rounded-xl bg-blue-600 hover:bg-blue-500 disabled:opacity-40 disabled:cursor-not-allowed text-sm font-semibold text-white transition-colors">
+          I've saved it — go to login →
+        </button>
+      </form>
+
+    </div>
+  </div>
+
+  <script>
+    const key = {{ backup_key | tojson }};
+
+    function copyKey() {
+      navigator.clipboard.writeText(key).then(() => {
+        const btn = document.getElementById('copy-btn');
+        btn.textContent = 'Copied!';
+        setTimeout(() => { btn.textContent = 'Copy'; }, 2000);
+      });
+    }
+
+    function downloadKey() {
+      const blob = new Blob(
+        ['Update Dashboard — Backup Key\n\n' + key + '\n\nKeep this safe. You need it to reset your password.\n'],
+        { type: 'text/plain' }
+      );
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'update-dashboard-backup-key.txt';
+      a.click();
+    }
+  </script>
+
+</body>
+</html>
