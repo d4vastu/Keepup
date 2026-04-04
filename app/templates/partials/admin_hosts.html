@@ -11,8 +11,8 @@
         <th class="text-left px-5 py-3 text-xs font-medium text-slate-500 uppercase tracking-wider">Name</th>
         <th class="text-left px-5 py-3 text-xs font-medium text-slate-500 uppercase tracking-wider">Host / IP</th>
         <th class="text-left px-5 py-3 text-xs font-medium text-slate-500 uppercase tracking-wider">User</th>
-        <th class="text-left px-5 py-3 text-xs font-medium text-slate-500 uppercase tracking-wider">Auth</th>
-        <th class="px-5 py-3 w-44"></th>
+        <th class="text-left px-5 py-3 text-xs font-medium text-slate-500 uppercase tracking-wider">Credentials</th>
+        <th class="px-5 py-3 w-52"></th>
       </tr>
     </thead>
     <tbody class="divide-y divide-slate-700/50">
@@ -23,24 +23,35 @@
         <td class="px-5 py-3 text-sm text-slate-400">
           {% if host.user %}{{ host.user }}{% else %}<span class="text-slate-600">default</span>{% endif %}
         </td>
-        <td class="px-5 py-3 text-sm">
-          {% if host.password %}
-          <span class="inline-flex items-center gap-1 text-xs text-slate-400">
-            <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/>
-            </svg>
-            Password
-          </span>
-          {% else %}
-          <span class="inline-flex items-center gap-1 text-xs text-slate-400">
-            <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z"/>
-            </svg>
-            SSH Key
-          </span>
-          {% endif %}
+        <td class="px-5 py-3">
+          <div class="flex items-center gap-1.5 flex-wrap">
+            {% if host.has_ssh_key %}
+            <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs bg-blue-900/40 text-blue-300 border border-blue-800">
+              <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                  d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z"/>
+              </svg>
+              SSH Key
+            </span>
+            {% elif host.has_ssh_password %}
+            <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs bg-slate-700 text-slate-300 border border-slate-600">
+              <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                  d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/>
+              </svg>
+              Password
+            </span>
+            {% else %}
+            <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs bg-amber-900/40 text-amber-400 border border-amber-800">
+              Not set
+            </span>
+            {% endif %}
+            {% if host.has_sudo_password %}
+            <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs bg-slate-700 text-slate-400 border border-slate-600">
+              sudo &#10003;
+            </span>
+            {% endif %}
+          </div>
         </td>
         <td class="px-5 py-3 text-right">
           <div class="flex items-center justify-end gap-2">
@@ -53,6 +64,13 @@
                 Test
               </button>
             </div>
+            <button
+              hx-get="/admin/hosts/{{ host.slug }}/credentials"
+              hx-target="#host-creds-{{ host.slug }}"
+              hx-swap="innerHTML"
+              class="text-xs px-2.5 py-1 rounded bg-slate-700 hover:bg-slate-600 text-slate-300 transition-colors">
+              Credentials
+            </button>
             <button
               hx-get="/admin/hosts/{{ host.slug }}/edit"
               hx-target="#host-row-{{ host.slug }}"
@@ -71,6 +89,18 @@
           </div>
         </td>
       </tr>
+      <!-- Credentials panel row (hidden by default, expanded by "Credentials" button) -->
+      <tr>
+        <td colspan="5" class="p-0">
+          <div id="host-creds-{{ host.slug }}"
+            {% if open_creds is defined and open_creds == host.slug %}
+            hx-get="/admin/hosts/{{ host.slug }}/credentials"
+            hx-trigger="load"
+            hx-swap="innerHTML"
+            {% endif %}
+          ></div>
+        </td>
+      </tr>
       {% endfor %}
     </tbody>
   </table>
@@ -80,78 +110,14 @@
 </div>
 
 <!-- Add host form -->
-<div class="bg-slate-800/50 rounded-xl border border-slate-700 p-5 space-y-5">
-  <div>
-    <p class="text-sm font-medium text-slate-300 mb-1">Add Host</p>
-    <p class="text-xs text-slate-500">Fields marked <span class="text-red-400">*</span> are required.</p>
-  </div>
+<div class="bg-slate-800/50 rounded-xl border border-slate-700 p-5 space-y-4">
+  <p class="text-sm font-medium text-slate-300">Add Host</p>
 
-  <!-- How connections work -->
-  <div class="rounded-lg border border-slate-600 bg-slate-900/50 p-4 space-y-3 text-xs text-slate-400">
-    <p class="font-medium text-slate-300">How host connections work</p>
-    <p>
-      The dashboard connects to each host over <strong class="text-slate-200">SSH</strong> to run
-      package checks and upgrades. Choose an auth method and make sure the remote host accepts it.
-    </p>
-
-    <div class="grid sm:grid-cols-2 gap-4 pt-1">
-      <!-- SSH Key -->
-      <div class="space-y-1.5">
-        <p class="font-medium text-slate-300 flex items-center gap-1.5">
-          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-              d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z"/>
-          </svg>
-          SSH Key <span class="text-slate-500 font-normal">(recommended)</span>
-        </p>
-        <ol class="space-y-1.5 list-decimal list-inside text-slate-500 leading-relaxed">
-          <li>Generate a dedicated key pair next to your <code class="text-slate-400 bg-slate-800 px-1 rounded">docker-compose.yml</code>:<br>
-            <code class="text-slate-400 bg-slate-800 px-1 rounded block mt-1">ssh-keygen -t ed25519 -f keys/id_ed25519 -N ""</code>
-          </li>
-          <li>Authorize it on each remote host:<br>
-            <code class="text-slate-400 bg-slate-800 px-1 rounded block mt-1">ssh-copy-id -i keys/id_ed25519.pub user@host</code>
-          </li>
-          <li>The <code class="text-slate-400">keys/</code> directory is already mounted into the container by default. Set the key path per-host below, or leave it blank to use the default from SSH Settings.</li>
-        </ol>
-      </div>
-
-      <!-- Password -->
-      <div class="space-y-1.5">
-        <p class="font-medium text-slate-300 flex items-center gap-1.5">
-          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-              d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/>
-          </svg>
-          Password
-        </p>
-        <ol class="space-y-1.5 list-decimal list-inside text-slate-500 leading-relaxed">
-          <li>Create a dedicated user on the remote host:<br>
-            <code class="text-slate-400 bg-slate-800 px-1 rounded block mt-1">adduser dashboard</code>
-          </li>
-          <li>Grant it sudo without a password prompt for apt:<br>
-            <code class="text-slate-400 bg-slate-800 px-1 rounded block mt-1">echo "dashboard ALL=(ALL) NOPASSWD: /usr/bin/apt*" &gt; /etc/sudoers.d/dashboard</code>
-          </li>
-          <li>Ensure <code class="text-slate-400">PasswordAuthentication yes</code> is set in <code class="text-slate-400">/etc/ssh/sshd_config</code>, then restart SSH:<br>
-            <code class="text-slate-400 bg-slate-800 px-1 rounded block mt-1">systemctl restart sshd</code>
-          </li>
-        </ol>
-        <p class="text-amber-500/80 flex items-start gap-1.5 pt-1">
-          <svg class="w-3.5 h-3.5 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-              d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/>
-          </svg>
-          Passwords are stored in plaintext in <code class="text-amber-500/70">config.yml</code>. Always use a dedicated user — never root.
-        </p>
-      </div>
-    </div>
-  </div>
-
-  <!-- Form -->
   <form
     hx-post="/admin/hosts"
     hx-target="#admin-hosts"
     hx-swap="innerHTML"
-    hx-on::after-request="if(event.detail.successful){ this.reset(); document.getElementById('key-fields').style.display='block'; document.getElementById('password-fields').style.display='none'; }"
+    hx-on::after-request="if(event.detail.successful){ this.reset(); }"
     class="space-y-4">
 
     <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -177,40 +143,9 @@
       </div>
     </div>
 
-    <!-- Auth method toggle -->
-    <div>
-      <label class="block text-xs font-medium text-slate-400 mb-2">Authentication Method</label>
-      <div class="flex gap-4">
-        <label class="flex items-center gap-2 cursor-pointer">
-          <input type="radio" name="auth_method" value="key" checked
-            onchange="document.getElementById('key-fields').style.display='block'; document.getElementById('password-fields').style.display='none';"
-            class="accent-blue-500" />
-          <span class="text-sm text-slate-300">SSH Key</span>
-        </label>
-        <label class="flex items-center gap-2 cursor-pointer">
-          <input type="radio" name="auth_method" value="password"
-            onchange="document.getElementById('key-fields').style.display='none'; document.getElementById('password-fields').style.display='block';"
-            class="accent-blue-500" />
-          <span class="text-sm text-slate-300">Password</span>
-        </label>
-      </div>
-    </div>
-
-    <!-- SSH Key fields -->
-    <div id="key-fields">
-      <label class="block text-xs font-medium text-slate-400 mb-1.5">SSH Key Path <span class="text-slate-600 font-normal">(optional)</span></label>
-      <input type="text" name="key" placeholder="e.g. /app/keys/id_ed25519  —  leave blank to use SSH default"
-        class="w-full bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-200 placeholder-slate-600 font-mono focus:outline-none focus:border-blue-500 transition-colors" />
-      <p class="mt-1 text-xs text-slate-600">Key files must be mounted inside the container under <code class="text-slate-500">/app/keys/</code></p>
-    </div>
-
-    <!-- Password fields -->
-    <div id="password-fields" style="display:none;">
-      <label class="block text-xs font-medium text-slate-400 mb-1.5">Password <span class="text-red-400">*</span></label>
-      <input type="password" name="password" placeholder="SSH password for this host"
-        class="w-full bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-200 placeholder-slate-600 focus:outline-none focus:border-blue-500 transition-colors" />
-      <p class="mt-1 text-xs text-amber-700">Stored in plaintext in config.yml — use a dedicated user, never root.</p>
-    </div>
+    <p class="text-xs text-slate-500">
+      After adding a host, click <span class="text-slate-300">Credentials</span> to configure its SSH key or password.
+    </p>
 
     <div class="flex justify-end">
       <button type="submit"

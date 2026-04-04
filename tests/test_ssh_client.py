@@ -10,10 +10,12 @@ from app.ssh_client import (
     verify_connection,
 )
 
-HOST_KEY = {"name": "Test", "host": "10.0.0.1"}
-HOST_PW = {"name": "Test", "host": "10.0.0.1", "password": "secret"}
+HOST = {"name": "Test", "host": "10.0.0.1"}
+HOST_KEY = HOST  # alias used by key-auth tests
 SSH_CFG = {"default_user": "root", "default_port": 22, "default_key": "/app/keys/id_ed25519",
            "connect_timeout": 15, "command_timeout": 60}
+CREDS_PW = {"ssh_password": "secret"}
+CREDS_EMPTY = {}
 
 
 def _make_conn(stdout: str = "", returncode: int = 0, stderr: str = "") -> MagicMock:
@@ -59,7 +61,7 @@ async def test_connection_failure():
 async def test_connection_uses_password_when_set():
     conn = _make_conn(stdout="ok\n")
     with patch("app.ssh_client.asyncssh.connect", new=AsyncMock(return_value=conn)) as mock_connect:
-        await verify_connection(HOST_PW, SSH_CFG)
+        await verify_connection(HOST, SSH_CFG, creds=CREDS_PW)
     call_kwargs = mock_connect.call_args.kwargs
     assert call_kwargs.get("password") == "secret"
     assert call_kwargs.get("preferred_auth") == "password"

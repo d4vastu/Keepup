@@ -10,8 +10,15 @@ from .config_manager import (
     delete_host,
     get_hosts,
     get_ssh_config,
+    slugify,
     update_host,
     update_ssh_config,
+)
+from .credentials import (
+    credential_status,
+    delete_credentials,
+    rename_credentials,
+    save_credentials,
 )
 from .ssh_client import verify_connection
 
@@ -28,6 +35,13 @@ def _connection_status() -> dict:
     }
 
 
+def _hosts_with_status() -> list[dict]:
+    return [
+        {**h, **credential_status(h["slug"])}
+        for h in get_hosts()
+    ]
+
+
 # ---------------------------------------------------------------------------
 # Admin page
 # ---------------------------------------------------------------------------
@@ -38,7 +52,7 @@ async def admin_page(request: Request) -> HTMLResponse:
         "admin.html",
         {
             "request": request,
-            "hosts": get_hosts(),
+            "hosts": _hosts_with_status(),
             "ssh": get_ssh_config(),
             "conn": _connection_status(),
         },
@@ -46,14 +60,14 @@ async def admin_page(request: Request) -> HTMLResponse:
 
 
 # ---------------------------------------------------------------------------
-# Hosts
+# Hosts — CRUD
 # ---------------------------------------------------------------------------
 
 @router.get("/hosts", response_class=HTMLResponse)
 async def admin_hosts(request: Request) -> HTMLResponse:
     return templates.TemplateResponse(
         "partials/admin_hosts.html",
-        {"request": request, "hosts": get_hosts()},
+        {"request": request, "hosts": _hosts_with_status()},
     )
 
 
@@ -64,29 +78,25 @@ async def admin_add_host(
     host: str = Form(...),
     user: str = Form(""),
     port: str = Form(""),
-    auth_method: str = Form("key"),
-    key: str = Form(""),
-    password: str = Form(""),
 ) -> HTMLResponse:
     try:
         if not name.strip() or not host.strip():
             raise ValueError("Name and IP / hostname are required.")
-        add_host(
+        slug = add_host(
             name=name.strip(),
             host=host.strip(),
             user=user.strip() or None,
             port=int(port) if port.strip() else None,
-            key=key.strip() or None if auth_method == "key" else None,
-            password=password.strip() or None if auth_method == "password" else None,
         )
     except Exception as exc:
         return templates.TemplateResponse(
             "partials/admin_hosts.html",
-            {"request": request, "hosts": get_hosts(), "error": str(exc)},
+            {"request": request, "hosts": _hosts_with_status(), "error": str(exc)},
         )
+    # Return hosts list + open credential form for the new host
     return templates.TemplateResponse(
         "partials/admin_hosts.html",
-        {"request": request, "hosts": get_hosts()},
+        {"request": request, "hosts": _hosts_with_status(), "open_creds": slug},
     )
 
 
@@ -110,28 +120,24 @@ async def admin_update_host(
     host: str = Form(...),
     user: str = Form(""),
     port: str = Form(""),
-    auth_method: str = Form("key"),
-    key: str = Form(""),
-    password: str = Form(""),
 ) -> HTMLResponse:
     try:
-        update_host(
+        new_slug = update_host(
             slug=slug,
             name=name.strip(),
             host=host.strip(),
             user=user.strip() or None,
             port=int(port) if port.strip() else None,
-            key=key.strip() or None if auth_method == "key" else None,
-            password=password.strip() or None if auth_method == "password" else None,
         )
+        rename_credentials(slug, new_slug)
     except Exception as exc:
         return templates.TemplateResponse(
             "partials/admin_hosts.html",
-            {"request": request, "hosts": get_hosts(), "error": str(exc)},
+            {"request": request, "hosts": _hosts_with_status(), "error": str(exc)},
         )
     return templates.TemplateResponse(
         "partials/admin_hosts.html",
-        {"request": request, "hosts": get_hosts()},
+        {"request": request, "hosts": _hosts_with_status()},
     )
 
 
@@ -139,26 +145,76 @@ async def admin_update_host(
 async def admin_delete_host(request: Request, slug: str) -> HTMLResponse:
     try:
         delete_host(slug)
+        delete_credentials(slug)
     except Exception as exc:
         return templates.TemplateResponse(
             "partials/admin_hosts.html",
-            {"request": request, "hosts": get_hosts(), "error": str(exc)},
+            {"request": request, "hosts": _hosts_with_status(), "error": str(exc)},
         )
     return templates.TemplateResponse(
         "partials/admin_hosts.html",
-        {"request": request, "hosts": get_hosts()},
+        {"request": request, "hosts": _hosts_with_status()},
     )
 
+
+# ---------------------------------------------------------------------------
+# Hosts — credentials
+# ---------------------------------------------------------------------------
+
+@router.get("/hosts/{slug}/credentials", response_class=HTMLResponse)
+async def admin_credentials_form(request: Request, slug: str) -> HTMLResponse:
+    hosts = get_hosts()
+    host = next((h for h in hosts if h["slug"] == slug), None)
+    if not host:
+        return HTMLResponse("<span class='text-red-400 text-xs'>Host not found</span>")
+    status = credential_status(slug)
+    return templates.TemplateResponse(
+        "partials/admin_host_credentials.html",
+        {"request": request, "host": host, "status": status},
+    )
+
+
+@router.post("/hosts/{slug}/credentials", response_class=HTMLResponse)
+async def admin_save_credentials(
+    request: Request,
+    slug: str,
+    auth_method: str = Form("password"),
+    ssh_password: str = Form(""),
+    ssh_key: str = Form(""),
+    sudo_password: str = Form(""),
+) -> HTMLResponse:
+    try:
+        save_credentials(
+            slug=slug,
+            ssh_password=ssh_password.strip() or None if auth_method == "password" else "",
+            ssh_key=ssh_key.strip() or None if auth_method == "key" else "",
+            sudo_password=sudo_password.strip() or None,
+        )
+    except Exception as exc:
+        hosts = get_hosts()
+        host = next((h for h in hosts if h["slug"] == slug), {})
+        return templates.TemplateResponse(
+            "partials/admin_host_credentials.html",
+            {"request": request, "host": host, "status": credential_status(slug), "error": str(exc)},
+        )
+    return templates.TemplateResponse(
+        "partials/admin_hosts.html",
+        {"request": request, "hosts": _hosts_with_status()},
+    )
+
+
+# ---------------------------------------------------------------------------
+# Hosts — connection test
+# ---------------------------------------------------------------------------
 
 @router.post("/hosts/{slug}/test", response_class=HTMLResponse)
 async def admin_test_host(request: Request, slug: str) -> HTMLResponse:
     hosts = get_hosts()
     host = next((h for h in hosts if h["slug"] == slug), None)
     if not host:
-        return HTMLResponse(
-            "<span class='text-red-400 text-xs'>Host not found</span>"
-        )
-    result = await verify_connection(host, get_ssh_config())
+        return HTMLResponse("<span class='text-red-400 text-xs'>Host not found</span>")
+    from .credentials import get_credentials
+    result = await verify_connection(host, get_ssh_config(), get_credentials(slug))
     return templates.TemplateResponse(
         "partials/admin_host_test_result.html",
         {"request": request, "slug": slug, "result": result},

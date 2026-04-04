@@ -1,0 +1,39 @@
+<!-- Sudo password modal — injected into the action cell -->
+<div class="bg-slate-800/80 rounded-xl border border-amber-700/60 p-4 space-y-3">
+  <div class="flex items-center gap-2">
+    <svg class="w-4 h-4 text-amber-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+        d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z"/>
+    </svg>
+    <p class="text-xs font-medium text-amber-300">Sudo password required</p>
+  </div>
+  <p class="text-xs text-slate-400 leading-relaxed">
+    This host's SSH user needs <code class="text-slate-300 bg-slate-700 px-1 rounded">sudo</code> to run apt.
+    Enter the sudo password to continue.
+  </p>
+
+  <input type="password" name="sudo_password" id="sudo-pw-{{ slug }}" placeholder="sudo password"
+    autofocus
+    class="w-full bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-200 placeholder-slate-600 focus:outline-none focus:border-amber-500 transition-colors" />
+
+  <div class="flex gap-2">
+    <button
+      hx-post="/api/host/{{ slug }}/{{ action }}"
+      hx-target="#host-{{ slug }}-action"
+      hx-swap="innerHTML"
+      hx-include="#sudo-pw-{{ slug }}"
+      hx-vals='{"save_sudo": ""}'
+      class="flex-1 px-3 py-1.5 rounded-lg bg-slate-700 hover:bg-slate-600 text-xs font-medium text-slate-300 transition-colors">
+      Use once
+    </button>
+    <button
+      hx-post="/api/host/{{ slug }}/{{ action }}"
+      hx-target="#host-{{ slug }}-action"
+      hx-swap="innerHTML"
+      hx-include="#sudo-pw-{{ slug }}"
+      hx-vals='{"save_sudo": "save"}'
+      class="flex-1 px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-xs font-medium text-white transition-colors">
+      Save &amp; run
+    </button>
+  </div>
+</div>
