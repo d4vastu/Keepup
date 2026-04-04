@@ -132,6 +132,18 @@ def save_integration_credentials(key: str, **fields) -> None:
     _save_store(store)
 
 
+def delete_integration_credentials(key: str) -> None:
+    """Remove an integration credential entry entirely."""
+    store = _load_store()
+    store.pop(f"__integration_{key}__", None)
+    _save_store(store)
+
+
+def wipe_credential_store() -> None:
+    """Erase all credentials (factory reset)."""
+    _save_store({})
+
+
 def credential_status(slug: str) -> dict:
     """Returns which credentials are configured for a host (no secrets exposed)."""
     creds = get_credentials(slug)

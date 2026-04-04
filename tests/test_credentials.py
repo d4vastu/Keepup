@@ -170,3 +170,39 @@ def test_credentials_file_is_not_plaintext(data_dir):
     raw = _CREDS_FILE.read_bytes()
     assert b"supersecret" not in raw
     assert b"myhost" not in raw
+
+
+# ---------------------------------------------------------------------------
+# Integration credentials — delete and wipe (PR1 additions)
+# ---------------------------------------------------------------------------
+
+def test_delete_integration_credentials_removes_entry(data_dir):
+    from app.credentials import save_integration_credentials, get_integration_credentials, delete_integration_credentials
+    save_integration_credentials("portainer", api_key="mykey")
+    assert get_integration_credentials("portainer").get("api_key") == "mykey"
+    delete_integration_credentials("portainer")
+    assert get_integration_credentials("portainer") == {}
+
+
+def test_delete_integration_credentials_safe_for_nonexistent(data_dir):
+    from app.credentials import delete_integration_credentials
+    # Should not raise even if key doesn't exist
+    delete_integration_credentials("nonexistent-key")
+
+
+def test_wipe_credential_store_clears_everything(data_dir):
+    from app.credentials import save_credentials, save_integration_credentials, wipe_credential_store, get_credentials, get_integration_credentials
+    save_credentials("myhost", ssh_password="pass")
+    save_integration_credentials("portainer", api_key="key")
+    wipe_credential_store()
+    assert get_credentials("myhost") == {}
+    assert get_integration_credentials("portainer") == {}
+
+
+def test_wipe_credential_store_then_get_returns_empty(data_dir):
+    from app.credentials import save_credentials, wipe_credential_store, get_credentials
+    save_credentials("host-a", ssh_password="aaa")
+    save_credentials("host-b", ssh_password="bbb")
+    wipe_credential_store()
+    assert get_credentials("host-a") == {}
+    assert get_credentials("host-b") == {}

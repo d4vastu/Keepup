@@ -9,14 +9,18 @@ from fastapi.templating import Jinja2Templates
 from .auth import (
     admin_exists,
     create_admin,
+    delete_admin,
+    get_admin_username,
     get_totp_uri,
     mfa_enrolled,
     new_totp_secret,
     reset_password_with_backup_key,
     verify_backup_key,
+    verify_login,
     verify_password,
     verify_totp,
 )
+from .credentials import get_integration_credentials
 
 router = APIRouter()
 templates = Jinja2Templates(directory=Path(__file__).parent / "templates")
@@ -74,6 +78,7 @@ async def setup_page(request: Request) -> HTMLResponse:
 @router.post("/setup", response_class=HTMLResponse)
 async def setup_submit(
     request: Request,
+    username: str = Form(""),
     password: str = Form(""),
     password_confirm: str = Form(""),
     totp_code: str = Form(""),
@@ -82,7 +87,14 @@ async def setup_submit(
     if admin_exists():
         return RedirectResponse("/", status_code=302)
 
+    import re
     errors: list[str] = []
+    username = username.strip()
+
+    if len(username) < 2:
+        errors.append("Username must be at least 2 characters.")
+    elif not re.match(r'^[a-zA-Z0-9_-]+$', username):
+        errors.append("Username may only contain letters, numbers, hyphens, and underscores.")
 
     if len(password) < 8:
         errors.append("Password must be at least 8 characters.")
@@ -110,9 +122,10 @@ async def setup_submit(
             "totp_secret": secret,
             "errors": errors,
             "enable_mfa_checked": enable_mfa == "on",
+            "username_value": username,
         })
 
-    backup_key = create_admin(password=password, totp_secret=totp_secret)
+    backup_key = create_admin(username=username, password=password, totp_secret=totp_secret)
     request.session.pop("setup_totp_secret", None)
     request.session["setup_backup_key"] = backup_key
 
@@ -149,28 +162,32 @@ async def login_page(request: Request) -> HTMLResponse:
     return templates.TemplateResponse("login.html", {
         "request": request,
         "needs_mfa": mfa_enrolled(),
+        "needs_username": bool(get_integration_credentials("admin").get("username")),
     })
 
 
 @router.post("/login", response_class=HTMLResponse)
 async def login_submit(
     request: Request,
+    username: str = Form(""),
     password: str = Form(""),
     totp_code: str = Form(""),
     remember_me: str = Form(""),
 ) -> HTMLResponse:
     ip = _client_ip(request)
     allowed, remaining = _check_rate_limit(ip)
+    needs_username = bool(get_integration_credentials("admin").get("username"))
 
     if not allowed:
         mins = remaining // 60 + 1
         return templates.TemplateResponse("login.html", {
             "request": request,
             "needs_mfa": mfa_enrolled(),
+            "needs_username": needs_username,
             "error": f"Too many failed attempts. Try again in {mins} minute{'s' if mins != 1 else ''}.",
         })
 
-    ok = verify_password(password)
+    ok = verify_login(username, password)
     if ok and mfa_enrolled():
         ok = verify_totp(totp_code)
 
@@ -183,10 +200,11 @@ async def login_submit(
         elif attempts_left <= 2:
             error = f"Incorrect credentials. {attempts_left} attempt{'s' if attempts_left != 1 else ''} remaining before lockout."
         else:
-            error = "Incorrect password or authenticator code."
+            error = "Incorrect username, password, or authenticator code."
         return templates.TemplateResponse("login.html", {
             "request": request,
             "needs_mfa": mfa_enrolled(),
+            "needs_username": needs_username,
             "error": error,
         })
 
