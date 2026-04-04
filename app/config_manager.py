@@ -65,7 +65,12 @@ def update_host(slug: str, name: str, host: str, user: str | None, port: int | N
     hosts = config.get("hosts", [])
     for i, h in enumerate(hosts):
         if slugify(h["name"]) == slug:
-            hosts[i] = _build_host_entry(name, host, user, port)
+            entry = _build_host_entry(name, host, user, port)
+            # Preserve docker monitoring settings across renames
+            for key in ("docker_mode", "docker_stacks"):
+                if key in h:
+                    entry[key] = h[key]
+            hosts[i] = entry
             break
     save_config(config)
     return slugify(name)
@@ -74,6 +79,32 @@ def update_host(slug: str, name: str, host: str, user: str | None, port: int | N
 def delete_host(slug: str) -> None:
     config = load_config()
     config["hosts"] = [h for h in config.get("hosts", []) if slugify(h["name"]) != slug]
+    save_config(config)
+
+
+# ---------------------------------------------------------------------------
+# Docker monitoring settings
+# ---------------------------------------------------------------------------
+
+def set_docker_monitoring(
+    slug: str,
+    mode: str,  # "all" | "all_and_new" | "selected" | "none"
+    stacks: list[str] | None = None,
+) -> None:
+    """Configure Docker Compose monitoring for a host."""
+    config = load_config()
+    for h in config.get("hosts", []):
+        if slugify(h["name"]) == slug:
+            if mode == "none":
+                h.pop("docker_mode", None)
+                h.pop("docker_stacks", None)
+            else:
+                h["docker_mode"] = mode
+                if mode == "selected" and stacks is not None:
+                    h["docker_stacks"] = stacks
+                else:
+                    h.pop("docker_stacks", None)
+            break
     save_config(config)
 
 

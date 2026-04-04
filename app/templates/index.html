@@ -91,13 +91,13 @@
             d="M20 7l-8-4-8 4m16 0v10l-8 4M4 7v10l8 4"/>
         </svg>
         Docker Stacks
-        {% if not portainer_configured %}
-        <span class="text-xs font-normal text-amber-400 ml-2">(Portainer API key not set in config.yml)</span>
+        {% if not docker_configured %}
+        <span class="text-xs font-normal text-amber-400 ml-2">(No container backends configured — add a host with Docker or set Portainer env vars)</span>
         {% endif %}
       </h2>
 
       <div class="bg-slate-800/50 rounded-xl border border-slate-700 p-5">
-        {% if portainer_configured %}
+        {% if docker_configured %}
         <div
           id="docker-status"
           data-check
@@ -110,7 +110,8 @@
         <span id="docker-spinner" class="spinner text-xs text-slate-500">Refreshing...</span>
         {% else %}
         <p class="text-sm text-slate-500">
-          Add your Portainer API key to <code class="text-slate-300 bg-slate-700 px-1 rounded">config.yml</code> to enable Docker stack management.
+          Enable Docker monitoring by adding a host in Admin and setting credentials — the dashboard will detect running stacks automatically.
+          Alternatively, set <code class="text-slate-300 bg-slate-700 px-1 rounded">PORTAINER_URL</code> and <code class="text-slate-300 bg-slate-700 px-1 rounded">PORTAINER_API_KEY</code> to use Portainer.
         </p>
         {% endif %}
       </div>

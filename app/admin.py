@@ -10,6 +10,7 @@ from .config_manager import (
     delete_host,
     get_hosts,
     get_ssh_config,
+    set_docker_monitoring,
     slugify,
     update_host,
     update_ssh_config,
@@ -197,9 +198,14 @@ async def admin_save_credentials(
             "partials/admin_host_credentials.html",
             {"request": request, "host": host, "status": credential_status(slug), "error": str(exc)},
         )
+    # Return hosts list and trigger Docker auto-discovery for this host
     return templates.TemplateResponse(
         "partials/admin_hosts.html",
-        {"request": request, "hosts": _hosts_with_status()},
+        {
+            "request": request,
+            "hosts": _hosts_with_status(),
+            "discover_docker": slug,   # triggers auto-discovery in the template
+        },
     )
 
 
@@ -224,6 +230,59 @@ async def admin_test_host(request: Request, slug: str) -> HTMLResponse:
 # ---------------------------------------------------------------------------
 # SSH settings
 # ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# Docker monitoring — discover and configure
+# ---------------------------------------------------------------------------
+
+@router.delete("/hosts/{slug}/docker-prompt", response_class=HTMLResponse)
+async def admin_dismiss_docker_prompt(request: Request, slug: str) -> HTMLResponse:
+    """Dismiss the Docker discovery prompt without saving anything."""
+    return HTMLResponse("")
+
+
+@router.get("/hosts/{slug}/docker-discover", response_class=HTMLResponse)
+async def admin_docker_discover(request: Request, slug: str) -> HTMLResponse:
+    """SSH into the host and return found Compose stacks, or empty if none."""
+    hosts = get_hosts()
+    host = next((h for h in hosts if h["slug"] == slug), None)
+    if not host:
+        return HTMLResponse("")
+    from .credentials import get_credentials
+    from .backends.ssh_docker_backend import SSHDockerBackend
+    backend = SSHDockerBackend()
+    stacks = await backend.discover_stacks(host)
+    if not stacks:
+        return HTMLResponse("")
+    return templates.TemplateResponse(
+        "partials/admin_docker_prompt.html",
+        {"request": request, "slug": slug, "host": host, "stacks": stacks},
+    )
+
+
+@router.post("/hosts/{slug}/docker-monitoring", response_class=HTMLResponse)
+async def admin_save_docker_monitoring(
+    request: Request,
+    slug: str,
+    docker_mode: str = Form("none"),
+    docker_stacks: list[str] = Form(default=[]),
+) -> HTMLResponse:
+    try:
+        set_docker_monitoring(
+            slug=slug,
+            mode=docker_mode,
+            stacks=docker_stacks if docker_mode == "selected" else None,
+        )
+    except Exception as exc:
+        return templates.TemplateResponse(
+            "partials/error.html",
+            {"request": request, "message": str(exc)},
+        )
+    return templates.TemplateResponse(
+        "partials/admin_hosts.html",
+        {"request": request, "hosts": _hosts_with_status()},
+    )
+
 
 @router.put("/ssh", response_class=HTMLResponse)
 async def admin_update_ssh(
