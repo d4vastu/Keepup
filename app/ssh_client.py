@@ -2,6 +2,8 @@ import asyncio
 
 import asyncssh
 
+from .package_managers import DETECT_CMD, get_package_manager
+
 
 def _needs_sudo(host: dict, ssh_cfg: dict) -> bool:
     user = host.get("user") or ssh_cfg.get("default_user", "root")
@@ -24,7 +26,6 @@ async def _connect(host: dict, ssh_cfg: dict, creds: dict | None = None) -> asyn
         key = asyncssh.import_private_key(creds["ssh_key"])
         kwargs["client_keys"] = [key]
     else:
-        # Fall back to key file (legacy / existing setups)
         key_path = host.get("key", ssh_cfg.get("default_key"))
         if key_path:
             kwargs["client_keys"] = [key_path]
@@ -52,6 +53,11 @@ async def _run(
     return await coro
 
 
+async def _detect_pm(conn: asyncssh.SSHClientConnection, sudo_password: str | None, needs_sudo: bool):
+    result = await _run(conn, DETECT_CMD, sudo_password=sudo_password, needs_sudo=needs_sudo)
+    return get_package_manager(result.stdout.strip())
+
+
 async def verify_connection(host: dict, ssh_cfg: dict, creds: dict | None = None) -> dict:
     """Returns {"ok": bool, "message": str}."""
     try:
@@ -72,6 +78,7 @@ async def check_host_updates(
       {
         "packages": [{"name": str, "current": str, "available": str}, ...],
         "reboot_required": bool,
+        "package_manager": str,
       }
     """
     creds = creds or {}
@@ -79,39 +86,16 @@ async def check_host_updates(
     sudo_password = creds.get("sudo_password")
 
     async with await _connect(host, ssh_cfg, creds) as conn:
+        pm = await _detect_pm(conn, sudo_password, use_sudo)
         result = await _run(
             conn,
-            "sh -c 'apt-get update -qq 2>/dev/null;"
-            " apt list --upgradable 2>/dev/null;"
-            " echo __REBOOT__;"
-            " [ -f /var/run/reboot-required ] && echo yes || echo no'",
+            pm.list_cmd(),
             sudo_password=sudo_password,
             needs_sudo=use_sudo,
         )
 
-    output = result.stdout
-    reboot_required = False
-
-    if "__REBOOT__" in output:
-        apt_part, reboot_part = output.split("__REBOOT__", 1)
-        reboot_required = reboot_part.strip().startswith("yes")
-    else:
-        apt_part = output
-
-    packages = []
-    for line in apt_part.splitlines():
-        if "[upgradable from:" not in line:
-            continue
-        try:
-            name = line.split("/")[0]
-            parts = line.split()
-            available = parts[1] if len(parts) > 1 else "?"
-            current = parts[-1].rstrip("]") if len(parts) > 3 else "?"
-            packages.append({"name": name, "current": current, "available": available})
-        except Exception:
-            continue
-
-    return {"packages": packages, "reboot_required": reboot_required}
+    packages, reboot_required = pm.parse(result.stdout)
+    return {"packages": packages, "reboot_required": reboot_required, "package_manager": pm.name}
 
 
 async def reboot_host(
@@ -135,16 +119,17 @@ async def reboot_host(
 async def run_host_update_buffered(
     host: dict, ssh_cfg: dict, creds: dict | None = None
 ) -> list[str]:
-    """Runs apt-get upgrade and returns all output lines when complete."""
+    """Detects the package manager, runs the appropriate upgrade command, returns all output lines."""
     creds = creds or {}
     use_sudo = _needs_sudo(host, ssh_cfg)
     sudo_password = creds.get("sudo_password")
     timeout = ssh_cfg.get("command_timeout", 600)
 
     async with await _connect(host, ssh_cfg, creds) as conn:
+        pm = await _detect_pm(conn, sudo_password, use_sudo)
         result = await _run(
             conn,
-            "DEBIAN_FRONTEND=noninteractive apt-get upgrade -y 2>&1",
+            pm.upgrade_cmd(),
             sudo_password=sudo_password,
             needs_sudo=use_sudo,
             timeout=timeout,
