@@ -2,7 +2,8 @@
 <div class="mb-3 px-4 py-2 rounded-lg bg-red-900/40 border border-red-700 text-red-300 text-sm">{{ error }}</div>
 {% endif %}
 
-<div class="bg-slate-800/50 rounded-xl border border-slate-700 overflow-hidden">
+<!-- Hosts table -->
+<div class="bg-slate-800/50 rounded-xl border border-slate-700 overflow-hidden mb-4">
   {% if hosts %}
   <table class="w-full">
     <thead>
@@ -14,16 +15,16 @@
         <th class="px-5 py-3 w-28"></th>
       </tr>
     </thead>
-    <tbody id="hosts-tbody" class="divide-y divide-slate-700/50">
+    <tbody class="divide-y divide-slate-700/50">
       {% for host in hosts %}
       <tr id="host-row-{{ host.slug }}" class="hover:bg-slate-700/20 transition-colors">
         <td class="px-5 py-3 text-sm font-medium text-slate-200">{{ host.name }}</td>
         <td class="px-5 py-3 text-sm font-mono text-slate-400">{{ host.host }}</td>
         <td class="px-5 py-3 text-sm text-slate-400">
-          {% if host.user %}{{ host.user }}{% else %}<span class="text-slate-600">—</span>{% endif %}
+          {% if host.user %}{{ host.user }}{% else %}<span class="text-slate-600">default</span>{% endif %}
         </td>
         <td class="px-5 py-3 text-sm text-slate-400">
-          {% if host.port %}{{ host.port }}{% else %}<span class="text-slate-600">—</span>{% endif %}
+          {% if host.port %}{{ host.port }}{% else %}<span class="text-slate-600">default</span>{% endif %}
         </td>
         <td class="px-5 py-3 text-right">
           <div class="flex items-center justify-end gap-2">
@@ -49,28 +50,74 @@
     </tbody>
   </table>
   {% else %}
-  <div class="px-5 py-6 text-sm text-slate-500 text-center">No hosts configured yet.</div>
+  <div class="px-5 py-8 text-sm text-slate-500 text-center">
+    No hosts configured yet. Add one below.
+  </div>
   {% endif %}
+</div>
 
-  <!-- Add host form -->
+<!-- Add host form -->
+<div class="bg-slate-800/50 rounded-xl border border-slate-700 p-5">
+  <p class="text-sm font-medium text-slate-300 mb-1">Add Host</p>
+  <p class="text-xs text-slate-500 mb-4">
+    Fields marked <span class="text-red-400">*</span> are required.
+    Leave optional fields blank to use the SSH defaults configured below.
+  </p>
+
   <form
     hx-post="/admin/hosts"
     hx-target="#admin-hosts"
     hx-swap="innerHTML"
-    class="border-t border-slate-700 px-5 py-4 bg-slate-900/30">
-    <p class="text-xs font-medium text-slate-400 uppercase tracking-wider mb-3">Add Host</p>
-    <div class="grid grid-cols-2 sm:grid-cols-5 gap-3">
-      <input type="text" name="name" placeholder="Name *" required
-        class="col-span-2 sm:col-span-1 bg-slate-800 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:border-blue-500" />
-      <input type="text" name="host" placeholder="IP / hostname *" required
-        class="col-span-2 sm:col-span-1 bg-slate-800 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:border-blue-500 font-mono" />
-      <input type="text" name="user" placeholder="User (opt)"
-        class="bg-slate-800 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:border-blue-500" />
-      <input type="number" name="port" placeholder="Port (opt)"
-        class="bg-slate-800 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:border-blue-500" />
+    hx-on::after-request="if(event.detail.successful) this.reset()"
+    class="space-y-4">
+
+    <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+      <div>
+        <label class="block text-xs font-medium text-slate-400 mb-1.5">
+          Display Name <span class="text-red-400">*</span>
+        </label>
+        <input type="text" name="name" placeholder="e.g. Proxmox Main" required
+          class="w-full bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-200 placeholder-slate-600 focus:outline-none focus:border-blue-500 transition-colors" />
+      </div>
+
+      <div>
+        <label class="block text-xs font-medium text-slate-400 mb-1.5">
+          IP Address or Hostname <span class="text-red-400">*</span>
+        </label>
+        <input type="text" name="host" placeholder="e.g. 192.168.1.10" required
+          class="w-full bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-200 placeholder-slate-600 font-mono focus:outline-none focus:border-blue-500 transition-colors" />
+      </div>
+
+      <div>
+        <label class="block text-xs font-medium text-slate-400 mb-1.5">
+          SSH User <span class="text-slate-600 font-normal">(optional)</span>
+        </label>
+        <input type="text" name="user" placeholder="Defaults to SSH default user"
+          class="w-full bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-200 placeholder-slate-600 focus:outline-none focus:border-blue-500 transition-colors" />
+      </div>
+
+      <div>
+        <label class="block text-xs font-medium text-slate-400 mb-1.5">
+          SSH Port <span class="text-slate-600 font-normal">(optional)</span>
+        </label>
+        <input type="number" name="port" placeholder="Defaults to SSH default port" min="1" max="65535"
+          class="w-full bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-200 placeholder-slate-600 focus:outline-none focus:border-blue-500 transition-colors" />
+      </div>
+
+      <div class="sm:col-span-2">
+        <label class="block text-xs font-medium text-slate-400 mb-1.5">
+          SSH Key Path <span class="text-slate-600 font-normal">(optional)</span>
+        </label>
+        <input type="text" name="key" placeholder="Defaults to SSH default key, e.g. /app/keys/id_ed25519"
+          class="w-full bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-200 placeholder-slate-600 font-mono focus:outline-none focus:border-blue-500 transition-colors" />
+        <p class="mt-1 text-xs text-slate-600">Key files must be mounted inside the container under <code class="text-slate-500">/app/keys/</code></p>
+      </div>
+    </div>
+
+    <div class="flex justify-end">
       <button type="submit"
-        class="bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium rounded-lg px-4 py-2 transition-colors">
-        Add
+        class="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-sm font-medium text-white transition-colors">
+        Add Host
       </button>
     </div>
   </form>

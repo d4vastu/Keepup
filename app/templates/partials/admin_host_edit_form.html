@@ -1,29 +1,52 @@
 <tr id="host-row-{{ host.slug }}">
-  <td colspan="5" class="px-5 py-3">
+  <td colspan="5" class="px-5 py-4 bg-slate-700/20">
     <form
       hx-put="/admin/hosts/{{ host.slug }}"
       hx-target="#admin-hosts"
       hx-swap="innerHTML"
-      class="flex flex-wrap items-center gap-3">
-      <input type="text" name="name" value="{{ host.name }}" placeholder="Name *" required
-        class="w-36 bg-slate-800 border border-blue-500 rounded-lg px-3 py-1.5 text-sm text-slate-200 placeholder-slate-500 focus:outline-none" />
-      <input type="text" name="host" value="{{ host.host }}" placeholder="IP / hostname *" required
-        class="w-40 bg-slate-800 border border-blue-500 rounded-lg px-3 py-1.5 text-sm text-slate-200 placeholder-slate-500 focus:outline-none font-mono" />
-      <input type="text" name="user" value="{{ host.user or '' }}" placeholder="User (opt)"
-        class="w-28 bg-slate-800 border border-slate-600 rounded-lg px-3 py-1.5 text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:border-blue-500" />
-      <input type="number" name="port" value="{{ host.port or '' }}" placeholder="Port (opt)"
-        class="w-24 bg-slate-800 border border-slate-600 rounded-lg px-3 py-1.5 text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:border-blue-500" />
-      <div class="flex gap-2">
-        <button type="submit"
-          class="text-xs px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-medium transition-colors">
-          Save
-        </button>
+      class="space-y-3">
+
+      <p class="text-xs font-medium text-slate-400">Editing <span class="text-slate-200">{{ host.name }}</span></p>
+
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <div>
+          <label class="block text-xs text-slate-500 mb-1">Display Name <span class="text-red-400">*</span></label>
+          <input type="text" name="name" value="{{ host.name }}" required
+            class="w-full bg-slate-900 border border-blue-500 rounded-lg px-3 py-1.5 text-sm text-slate-200 focus:outline-none" />
+        </div>
+        <div>
+          <label class="block text-xs text-slate-500 mb-1">IP / Hostname <span class="text-red-400">*</span></label>
+          <input type="text" name="host" value="{{ host.host }}" required
+            class="w-full bg-slate-900 border border-blue-500 rounded-lg px-3 py-1.5 text-sm text-slate-200 font-mono focus:outline-none" />
+        </div>
+        <div>
+          <label class="block text-xs text-slate-500 mb-1">SSH User <span class="text-slate-600">(optional)</span></label>
+          <input type="text" name="user" value="{{ host.user or '' }}" placeholder="Use SSH default"
+            class="w-full bg-slate-900 border border-slate-600 rounded-lg px-3 py-1.5 text-sm text-slate-200 placeholder-slate-600 focus:outline-none focus:border-blue-500" />
+        </div>
+        <div>
+          <label class="block text-xs text-slate-500 mb-1">SSH Port <span class="text-slate-600">(optional)</span></label>
+          <input type="number" name="port" value="{{ host.port or '' }}" placeholder="Use SSH default" min="1" max="65535"
+            class="w-full bg-slate-900 border border-slate-600 rounded-lg px-3 py-1.5 text-sm text-slate-200 placeholder-slate-600 focus:outline-none focus:border-blue-500" />
+        </div>
+        <div class="sm:col-span-2">
+          <label class="block text-xs text-slate-500 mb-1">SSH Key Path <span class="text-slate-600">(optional)</span></label>
+          <input type="text" name="key" value="{{ host.key or '' }}" placeholder="Use SSH default key"
+            class="w-full bg-slate-900 border border-slate-600 rounded-lg px-3 py-1.5 text-sm text-slate-200 placeholder-slate-600 font-mono focus:outline-none focus:border-blue-500" />
+        </div>
+      </div>
+
+      <div class="flex gap-2 justify-end">
         <button type="button"
           hx-get="/admin/hosts"
           hx-target="#admin-hosts"
           hx-swap="innerHTML"
           class="text-xs px-3 py-1.5 rounded-lg bg-slate-700 hover:bg-slate-600 text-slate-300 transition-colors">
           Cancel
+        </button>
+        <button type="submit"
+          class="text-xs px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-medium transition-colors">
+          Save Changes
         </button>
       </div>
     </form>
