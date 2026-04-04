@@ -9,15 +9,11 @@ from fastapi.templating import Jinja2Templates
 from .auth import (
     admin_exists,
     create_admin,
-    delete_admin,
-    get_admin_username,
     get_totp_uri,
     mfa_enrolled,
     new_totp_secret,
-    reset_password_with_backup_key,
     verify_backup_key,
     verify_login,
-    verify_password,
     verify_totp,
 )
 from .config_manager import (
@@ -374,7 +370,6 @@ async def setup_add_host(
             "form": {"name": name, "host": host_addr, "user": user_val or "", "port": port or "", "auth_method": auth_method, "key_file": key_file, "docker_mode": docker_mode},
         })
 
-    from .config_manager import slugify
     slug = add_host(name=name, host=host_addr, user=user_val, port=port_val,
                     key_path=key_path,
                     docker_mode=docker_mode if docker_mode else None)

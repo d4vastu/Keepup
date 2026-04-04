@@ -234,10 +234,8 @@ def test_get_available_ssh_keys_empty_dir(tmp_path, monkeypatch):
     import app.config_manager as cm
     monkeypatch.setattr(cm, "Path", lambda p: keys_dir if p == "/app/keys" else type('P', (), {'exists': lambda s: False})())
     # Use the actual function with a patched path
-    from pathlib import Path as RealPath
     import app.config_manager as cm2
     # Monkey-patch at function level
-    original = cm2.get_available_ssh_keys
     def patched():
         if not keys_dir.exists():
             return []

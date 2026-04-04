@@ -9,7 +9,6 @@ from fastapi.templating import Jinja2Templates
 
 from .auth import (
     change_password,
-    delete_admin,
     enroll_mfa,
     get_admin_username,
     get_totp_uri,
@@ -35,7 +34,6 @@ from .config_manager import (
     save_portainer_config,
     save_ssl_config,
     set_docker_monitoring,
-    slugify,
     update_host,
     update_ssh_config,
 )
@@ -304,7 +302,6 @@ async def admin_docker_discover(request: Request, slug: str) -> HTMLResponse:
     host = next((h for h in hosts if h["slug"] == slug), None)
     if not host:
         return HTMLResponse("")
-    from .credentials import get_credentials
     from .backends.ssh_docker_backend import SSHDockerBackend
     backend = SSHDockerBackend()
     stacks = await backend.discover_stacks(host)
