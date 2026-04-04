@@ -1,11 +1,13 @@
+import os
 import uuid
 from pathlib import Path
 
-import yaml
 from fastapi import BackgroundTasks, FastAPI, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 
+from .admin import router as admin_router
+from .config_manager import get_hosts, get_ssh_config
 from .portainer_client import PortainerClient
 from .ssh_client import check_host_updates, reboot_host, run_host_update_buffered
 
@@ -14,46 +16,42 @@ from .ssh_client import check_host_updates, reboot_host, run_host_update_buffere
 # ---------------------------------------------------------------------------
 
 app = FastAPI(title="Update Dashboard")
+app.include_router(admin_router)
 templates = Jinja2Templates(directory=Path(__file__).parent / "templates")
 
 # ---------------------------------------------------------------------------
-# Config
+# Config — secrets from env vars, structure from config.yml
 # ---------------------------------------------------------------------------
 
-_config_path = Path("/app/config.yml")
-config: dict = yaml.safe_load(_config_path.read_text())
-
-ssh_cfg: dict = config.get("ssh", {})
-dockerhub_creds: dict | None = config.get("dockerhub")
-
 portainer: PortainerClient | None = None
+
+# DockerHub credentials (optional, raises registry pull rate limit)
+_dockerhub_user = os.getenv("DOCKERHUB_USERNAME", "")
+_dockerhub_token = os.getenv("DOCKERHUB_TOKEN", "")
+dockerhub_creds: dict | None = (
+    {"username": _dockerhub_user, "token": _dockerhub_token}
+    if _dockerhub_user and _dockerhub_token
+    else None
+)
 
 
 @app.on_event("startup")
 async def _startup() -> None:
     global portainer
-    pcfg = config.get("portainer", {})
-    url = pcfg.get("url", "")
-    key = pcfg.get("api_key", "")
-    if url and key and key != "YOUR_PORTAINER_API_KEY_HERE":
-        portainer = PortainerClient(
-            url=url,
-            api_key=key,
-            verify_ssl=pcfg.get("verify_ssl", False),
-        )
+    url = os.getenv("PORTAINER_URL", "")
+    key = os.getenv("PORTAINER_API_KEY", "")
+    verify_ssl = os.getenv("PORTAINER_VERIFY_SSL", "false").lower() == "true"
+    if url and key:
+        portainer = PortainerClient(url=url, api_key=key, verify_ssl=verify_ssl)
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _slugify(name: str) -> str:
-    return name.lower().replace(" ", "-").replace("_", "-")
-
-
 def _get_host(slug: str) -> dict:
-    for h in config.get("hosts", []):
-        if _slugify(h["name"]) == slug:
+    for h in get_hosts():
+        if h["slug"] == slug:
             return h
     raise KeyError(f"Host {slug!r} not in config")
 
@@ -68,7 +66,7 @@ _jobs: dict[str, dict] = {}
 
 async def _job_run_host_update(job_id: str, host: dict) -> None:
     try:
-        lines = await run_host_update_buffered(host, ssh_cfg)
+        lines = await run_host_update_buffered(host, get_ssh_config())
         _jobs[job_id]["lines"] = lines
         _jobs[job_id]["status"] = "done"
     except Exception as exc:
@@ -80,7 +78,7 @@ async def _job_run_host_update(job_id: str, host: dict) -> None:
 
 async def _job_run_host_restart(job_id: str, host: dict) -> None:
     try:
-        lines = await reboot_host(host, ssh_cfg)
+        lines = await reboot_host(host, get_ssh_config())
         _jobs[job_id]["lines"] = lines
         _jobs[job_id]["status"] = "done"
     except Exception as exc:
@@ -109,14 +107,9 @@ async def _job_run_stack_update(job_id: str, stack_id: int, endpoint_id: int) ->
 
 @app.get("/", response_class=HTMLResponse)
 async def dashboard(request: Request) -> HTMLResponse:
-    hosts = [
-        {**h, "slug": _slugify(h["name"])}
-        for h in config.get("hosts", [])
-        if "XXX" not in str(h.get("host", ""))   # skip unfilled placeholders
-    ]
     return templates.TemplateResponse(
         "index.html",
-        {"request": request, "hosts": hosts, "portainer_configured": portainer is not None},
+        {"request": request, "hosts": get_hosts(), "portainer_configured": portainer is not None},
     )
 
 
@@ -128,7 +121,7 @@ async def dashboard(request: Request) -> HTMLResponse:
 async def host_check(request: Request, slug: str) -> HTMLResponse:
     try:
         host = _get_host(slug)
-        result = await check_host_updates(host, ssh_cfg)
+        result = await check_host_updates(host, get_ssh_config())
         return templates.TemplateResponse(
             "partials/host_status.html",
             {

@@ -1,10 +1,20 @@
 services:
   update-dashboard:
-    build: .
+    image: ghcr.io/d4vastu/update-dashboard:latest  # or use 'build: .' to build locally
+    # build: .
     container_name: update-dashboard
     ports:
       - "8765:8000"
     volumes:
-      - ./config.yml:/app/config.yml:ro
-      - ./keys:/app/keys:ro
+      - ./config.yml:/app/config.yml        # hosts + SSH settings (writable for admin panel)
+      - ./keys:/app/keys:ro                  # SSH private keys
+    environment:
+      # --- Portainer (required for Docker stack monitoring) ---
+      - PORTAINER_URL=https://192.168.1.x:9443
+      - PORTAINER_API_KEY=your_portainer_api_key_here
+      - PORTAINER_VERIFY_SSL=false           # set to true if using a valid cert
+
+      # --- Docker Hub (optional — raises anonymous pull rate limit) ---
+      # - DOCKERHUB_USERNAME=your_username
+      # - DOCKERHUB_TOKEN=your_access_token
     restart: unless-stopped
