@@ -20,7 +20,24 @@ from .auth import (
     verify_password,
     verify_totp,
 )
-from .credentials import get_integration_credentials
+from .config_manager import (
+    add_host,
+    delete_host,
+    get_available_ssh_keys,
+    get_hosts,
+    get_portainer_config,
+    get_ssh_config,
+    save_dockerhub_config,
+    save_portainer_config,
+)
+from .credentials import (
+    delete_credentials,
+    get_integration_credentials,
+    save_credentials,
+    save_integration_credentials,
+)
+from .ssh_client import verify_connection
+from .backend_loader import reload_backends
 
 router = APIRouter()
 templates = Jinja2Templates(directory=Path(__file__).parent / "templates")
@@ -146,7 +163,7 @@ async def setup_backup_key(request: Request) -> HTMLResponse:
 @router.post("/setup/backup-key/confirm", response_class=HTMLResponse)
 async def setup_backup_key_confirm(request: Request) -> HTMLResponse:
     request.session.pop("setup_backup_key", None)
-    return RedirectResponse("/login", status_code=303)
+    return RedirectResponse("/setup/hosts", status_code=303)
 
 
 # ---------------------------------------------------------------------------
@@ -283,3 +300,179 @@ async def forgot_password_reset(
         "request": request,
         "step": "done",
     })
+
+
+# ---------------------------------------------------------------------------
+# Setup — hosts & connections (step 3)
+# ---------------------------------------------------------------------------
+
+@router.get("/setup/hosts", response_class=HTMLResponse)
+async def setup_hosts_page(request: Request) -> HTMLResponse:
+    if not admin_exists():
+        return RedirectResponse("/setup", status_code=302)
+    port_cfg = get_portainer_config()
+    port_creds = get_integration_credentials("portainer")
+    portainer_connected = bool(port_cfg.get("url") and port_creds.get("api_key"))
+    return templates.TemplateResponse("setup_hosts.html", {
+        "request": request,
+        "hosts": get_hosts(),
+        "available_keys": get_available_ssh_keys(),
+        "portainer_url": port_cfg.get("url", ""),
+        "portainer_connected": portainer_connected,
+        "step": 3,
+    })
+
+
+@router.post("/setup/hosts/add", response_class=HTMLResponse)
+async def setup_add_host(
+    request: Request,
+    name: str = Form(""),
+    host: str = Form(""),
+    user: str = Form(""),
+    port: str = Form(""),
+    auth_method: str = Form("password"),
+    ssh_password: str = Form(""),
+    key_file: str = Form(""),
+    docker_mode: str = Form(""),
+) -> HTMLResponse:
+    name = name.strip()
+    host_addr = host.strip()
+    user_val = user.strip() or None
+    port_val = int(port) if port.strip().isdigit() else None
+    key_path = f"/app/keys/{key_file}" if auth_method == "key" and key_file else None
+
+    if not name or not host_addr:
+        return templates.TemplateResponse("partials/setup_ssh_section.html", {
+            "request": request,
+            "hosts": get_hosts(),
+            "available_keys": get_available_ssh_keys(),
+            "add_error": "Name and host/IP are required.",
+            "form": {"name": name, "host": host_addr, "user": user_val or "", "port": port or "", "auth_method": auth_method, "key_file": key_file, "docker_mode": docker_mode},
+        })
+
+    host_entry = {"name": name, "host": host_addr}
+    if user_val:
+        host_entry["user"] = user_val
+    if port_val:
+        host_entry["port"] = port_val
+    if key_path:
+        host_entry["key"] = key_path
+
+    creds: dict = {}
+    if auth_method == "password" and ssh_password.strip():
+        creds = {"ssh_password": ssh_password.strip()}
+    elif auth_method == "key" and key_path:
+        pass  # key stored in host entry
+
+    result = await verify_connection(host_entry, get_ssh_config(), creds)
+    if not result["ok"]:
+        return templates.TemplateResponse("partials/setup_ssh_section.html", {
+            "request": request,
+            "hosts": get_hosts(),
+            "available_keys": get_available_ssh_keys(),
+            "add_error": f"Could not connect: {result['message']}",
+            "form": {"name": name, "host": host_addr, "user": user_val or "", "port": port or "", "auth_method": auth_method, "key_file": key_file, "docker_mode": docker_mode},
+        })
+
+    from .config_manager import slugify
+    slug = add_host(name=name, host=host_addr, user=user_val, port=port_val,
+                    key_path=key_path,
+                    docker_mode=docker_mode if docker_mode else None)
+    if auth_method == "password" and ssh_password.strip():
+        save_credentials(slug, ssh_password=ssh_password.strip())
+
+    return templates.TemplateResponse("partials/setup_ssh_section.html", {
+        "request": request,
+        "hosts": get_hosts(),
+        "available_keys": get_available_ssh_keys(),
+        "add_success": f"{name} added successfully.",
+    })
+
+
+@router.post("/setup/hosts/{slug}/remove", response_class=HTMLResponse)
+async def setup_remove_host(request: Request, slug: str) -> HTMLResponse:
+    delete_host(slug)
+    delete_credentials(slug)
+    return templates.TemplateResponse("partials/setup_ssh_section.html", {
+        "request": request,
+        "hosts": get_hosts(),
+        "available_keys": get_available_ssh_keys(),
+    })
+
+
+@router.post("/setup/portainer/test", response_class=HTMLResponse)
+async def setup_test_portainer(
+    request: Request,
+    portainer_url: str = Form(""),
+    portainer_api_key: str = Form(""),
+    portainer_verify_ssl: str = Form(""),
+) -> HTMLResponse:
+    url = portainer_url.strip().rstrip("/")
+    key = portainer_api_key.strip()
+    verify_ssl = portainer_verify_ssl == "on"
+    if not url or not key:
+        return HTMLResponse('<span class="text-amber-400 text-sm">Enter a URL and API token first.</span>')
+    try:
+        from .portainer_client import PortainerClient
+        client = PortainerClient(url=url, api_key=key, verify_ssl=verify_ssl)
+        endpoints = await client.get_endpoints()
+        count = len(endpoints)
+        return HTMLResponse(
+            f'<span class="text-green-400 text-sm">&#10003; Connected — {count} environment{"s" if count != 1 else ""} found. Click Save to apply.</span>'
+        )
+    except Exception as exc:
+        msg = str(exc)
+        if "401" in msg or "403" in msg:
+            hint = "Invalid API token."
+        elif "connect" in msg.lower() or "Name or service" in msg:
+            hint = "Can&#39;t reach that address — check the URL."
+        elif "SSL" in msg or "certificate" in msg.lower():
+            hint = "SSL error — try disabling SSL verification."
+        else:
+            hint = msg[:120]
+        return HTMLResponse(f'<span class="text-red-400 text-sm">&#10007; {hint}</span>')
+
+
+@router.post("/setup/portainer/save", response_class=HTMLResponse)
+async def setup_save_portainer(
+    request: Request,
+    portainer_url: str = Form(""),
+    portainer_api_key: str = Form(""),
+    portainer_verify_ssl: str = Form(""),
+) -> HTMLResponse:
+    url = portainer_url.strip().rstrip("/")
+    key = portainer_api_key.strip()
+    verify_ssl = portainer_verify_ssl == "on"
+    save_portainer_config(url=url, verify_ssl=verify_ssl)
+    if key:
+        save_integration_credentials("portainer", api_key=key)
+    await reload_backends()
+    port_cfg = get_portainer_config()
+    port_creds = get_integration_credentials("portainer")
+    portainer_connected = bool(port_cfg.get("url") and port_creds.get("api_key"))
+    return templates.TemplateResponse("partials/setup_portainer_section.html", {
+        "request": request,
+        "portainer_url": port_cfg.get("url", ""),
+        "portainer_connected": portainer_connected,
+        "portainer_saved": True,
+    })
+
+
+@router.post("/setup/dockerhub/save", response_class=HTMLResponse)
+async def setup_save_dockerhub(
+    request: Request,
+    dockerhub_username: str = Form(""),
+    dockerhub_token: str = Form(""),
+) -> HTMLResponse:
+    username = dockerhub_username.strip()
+    token = dockerhub_token.strip()
+    save_dockerhub_config(username=username)
+    if token:
+        save_integration_credentials("dockerhub", token=token)
+    await reload_backends()
+    return HTMLResponse('<p class="text-sm text-green-400">&#10003; DockerHub credentials saved.</p>')
+
+
+@router.post("/setup/finish")
+async def setup_finish(request: Request):
+    return RedirectResponse("/login", status_code=303)
