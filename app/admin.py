@@ -1,10 +1,22 @@
 import os
 from pathlib import Path
 
+import pyotp
 from fastapi import APIRouter, Form, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 
+from .auth import (
+    change_password,
+    enroll_mfa,
+    get_totp_uri,
+    mfa_enrolled,
+    new_totp_secret,
+    regenerate_backup_key,
+    remove_mfa,
+    verify_password,
+    verify_totp,
+)
 from .backend_loader import reload_backends
 from .config_manager import (
     add_host,
@@ -82,6 +94,7 @@ async def admin_page(request: Request) -> HTMLResponse:
             "hosts": _hosts_with_status(),
             "ssh": get_ssh_config(),
             "conn": _connection_status(),
+            **_account_context(),
         },
     )
 
@@ -437,4 +450,123 @@ async def admin_update_ssh(
     return templates.TemplateResponse(
         "partials/admin_ssh.html",
         {"request": request, "ssh": get_ssh_config(), "saved": saved},
+    )
+
+
+# ---------------------------------------------------------------------------
+# Account management
+# ---------------------------------------------------------------------------
+
+def _account_context() -> dict:
+    return {"mfa_enrolled": mfa_enrolled()}
+
+
+@router.get("/account", response_class=HTMLResponse)
+async def admin_account(request: Request) -> HTMLResponse:
+    return templates.TemplateResponse(
+        "partials/admin_account.html",
+        {"request": request, **_account_context()},
+    )
+
+
+@router.post("/account/password", response_class=HTMLResponse)
+async def admin_change_password(
+    request: Request,
+    current_password: str = Form(""),
+    new_password: str = Form(""),
+    new_password_confirm: str = Form(""),
+) -> HTMLResponse:
+    errors: list[str] = []
+    if not verify_password(current_password):
+        errors.append("Current password is incorrect.")
+    if len(new_password) < 8:
+        errors.append("New password must be at least 8 characters.")
+    if new_password != new_password_confirm:
+        errors.append("New passwords do not match.")
+    if errors:
+        return templates.TemplateResponse(
+            "partials/admin_account.html",
+            {"request": request, **_account_context(), "pw_errors": errors},
+        )
+    change_password(new_password)
+    return templates.TemplateResponse(
+        "partials/admin_account.html",
+        {"request": request, **_account_context(), "pw_saved": True},
+    )
+
+
+@router.get("/account/mfa/setup", response_class=HTMLResponse)
+async def admin_mfa_setup_page(request: Request) -> HTMLResponse:
+    secret = new_totp_secret()
+    request.session["mfa_setup_secret"] = secret
+    return templates.TemplateResponse(
+        "partials/admin_account.html",
+        {
+            "request": request,
+            **_account_context(),
+            "mfa_setup": True,
+            "totp_uri": get_totp_uri(secret),
+            "totp_secret": secret,
+        },
+    )
+
+
+@router.post("/account/mfa/setup", response_class=HTMLResponse)
+async def admin_mfa_setup_submit(
+    request: Request,
+    totp_code: str = Form(""),
+) -> HTMLResponse:
+    secret = request.session.get("mfa_setup_secret", "")
+    if not secret or not pyotp.TOTP(secret).verify(totp_code.strip(), valid_window=1):
+        return templates.TemplateResponse(
+            "partials/admin_account.html",
+            {
+                "request": request,
+                **_account_context(),
+                "mfa_setup": True,
+                "totp_uri": get_totp_uri(secret) if secret else "",
+                "totp_secret": secret,
+                "mfa_error": "Code is incorrect — make sure your phone's time is synced and try again.",
+            },
+        )
+    enroll_mfa(secret)
+    request.session.pop("mfa_setup_secret", None)
+    return templates.TemplateResponse(
+        "partials/admin_account.html",
+        {"request": request, **_account_context(), "mfa_enrolled_now": True},
+    )
+
+
+@router.post("/account/mfa/remove", response_class=HTMLResponse)
+async def admin_mfa_remove(
+    request: Request,
+    current_password: str = Form(""),
+    totp_code: str = Form(""),
+) -> HTMLResponse:
+    if not verify_password(current_password) or not verify_totp(totp_code):
+        return templates.TemplateResponse(
+            "partials/admin_account.html",
+            {"request": request, **_account_context(), "mfa_remove_error": "Password or code incorrect."},
+        )
+    remove_mfa()
+    return templates.TemplateResponse(
+        "partials/admin_account.html",
+        {"request": request, **_account_context(), "mfa_removed": True},
+    )
+
+
+@router.post("/account/backup-key", response_class=HTMLResponse)
+async def admin_regenerate_backup_key(
+    request: Request,
+    current_password: str = Form(""),
+) -> HTMLResponse:
+    if not verify_password(current_password):
+        return templates.TemplateResponse(
+            "partials/admin_account.html",
+            {"request": request, **_account_context(), "bk_error": "Current password is incorrect."},
+        )
+    new_key = regenerate_backup_key()
+    return templates.TemplateResponse(
+        "partials/admin_account.html",
+        {"request": request, **_account_context(), "new_backup_key": new_key},
     )

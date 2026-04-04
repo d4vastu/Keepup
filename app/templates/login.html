@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Sign in — Update Dashboard</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>body { background-color: #0f172a; }</style>
+</head>
+<body class="min-h-full text-slate-200 font-sans flex items-center justify-center px-4 py-16">
+
+  <div class="w-full max-w-sm">
+
+    <!-- Logo / title -->
+    <div class="text-center mb-8">
+      <div class="inline-flex items-center justify-center w-12 h-12 rounded-xl bg-blue-600 mb-4">
+        <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+            d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+        </svg>
+      </div>
+      <h1 class="text-2xl font-bold text-white">Update Dashboard</h1>
+      <p class="text-sm text-slate-500 mt-1">Sign in to continue</p>
+    </div>
+
+    <!-- Card -->
+    <div class="bg-slate-800/60 border border-slate-700 rounded-2xl p-6 shadow-xl">
+
+      {% if error %}
+      <div class="mb-4 px-4 py-3 rounded-lg bg-red-900/30 border border-red-700/50 text-sm text-red-300">
+        {{ error }}
+      </div>
+      {% endif %}
+
+      <form method="post" action="/login" class="space-y-4">
+
+        <div>
+          <label class="block text-xs font-medium text-slate-400 mb-1">Password</label>
+          <input type="password" name="password" autofocus required
+            class="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2.5 text-sm text-slate-200 focus:outline-none focus:border-blue-500 placeholder:text-slate-500">
+        </div>
+
+        {% if needs_mfa %}
+        <div>
+          <label class="block text-xs font-medium text-slate-400 mb-1">Authenticator code</label>
+          <input type="text" name="totp_code" inputmode="numeric" autocomplete="one-time-code"
+            maxlength="6" placeholder="6-digit code"
+            class="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2.5 text-sm text-slate-200 font-mono tracking-widest focus:outline-none focus:border-blue-500 placeholder:text-slate-500 placeholder:tracking-normal">
+          <p class="text-xs text-slate-500 mt-1">Open your authenticator app and enter the current code.</p>
+        </div>
+        {% endif %}
+
+        <label class="flex items-center gap-2.5 cursor-pointer select-none pt-1">
+          <input type="checkbox" name="remember_me" value="on" class="w-4 h-4 rounded accent-blue-500">
+          <span class="text-sm text-slate-300">Stay signed in</span>
+        </label>
+
+        <button type="submit"
+          class="w-full py-2.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-sm font-semibold text-white transition-colors mt-2">
+          Sign in
+        </button>
+
+      </form>
+
+    </div>
+
+    <p class="text-center text-xs text-slate-600 mt-6">
+      <a href="/forgot-password" class="hover:text-slate-400 transition-colors">Forgot password?</a>
+    </p>
+
+  </div>
+
+</body>
+</html>

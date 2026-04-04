@@ -6,6 +6,7 @@
   <title>Admin — Update Dashboard</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://unpkg.com/htmx.org@1.9.12"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
   <style>
     body { background-color: #0f172a; }
   </style>
@@ -69,6 +70,14 @@
       <h2 class="text-base font-semibold text-slate-300 mb-3">SSH Defaults</h2>
       <div id="admin-ssh">
         {% include "partials/admin_ssh.html" %}
+      </div>
+    </section>
+
+    <!-- Account -->
+    <section class="mb-8">
+      <h2 class="text-base font-semibold text-slate-300 mb-3">Account</h2>
+      <div id="admin-account">
+        {% include "partials/admin_account.html" %}
       </div>
     </section>
 

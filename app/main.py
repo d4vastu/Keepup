@@ -4,10 +4,14 @@ import uuid
 from pathlib import Path
 
 from fastapi import BackgroundTasks, FastAPI, Form, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.middleware.sessions import SessionMiddleware
 
 from .admin import router as admin_router
+from .auth import admin_exists, get_session_secret
+from .auth_router import router as auth_router
 from .auto_update_log import get_recent, get_unread_error_count, mark_all_read
 from .auto_update_scheduler import apply_all_schedules, scheduler
 from .auto_updates_router import router as auto_updates_router
@@ -17,10 +21,39 @@ from .credentials import get_credentials, save_sudo_password
 from .ssh_client import _needs_sudo, check_host_updates, reboot_host, run_host_update_buffered
 
 # ---------------------------------------------------------------------------
+# Auth middleware
+# ---------------------------------------------------------------------------
+
+_PUBLIC_PATHS = {"/login", "/logout", "/setup", "/setup/backup-key",
+                 "/setup/backup-key/confirm", "/forgot-password",
+                 "/forgot-password/reset"}
+
+
+class AuthMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        path = request.url.path
+        if path in _PUBLIC_PATHS:
+            return await call_next(request)
+        if not admin_exists():
+            return RedirectResponse("/setup", status_code=302)
+        if not request.session.get("authenticated"):
+            return RedirectResponse(f"/login?next={path}", status_code=302)
+        return await call_next(request)
+
+
+# ---------------------------------------------------------------------------
 # App setup
 # ---------------------------------------------------------------------------
 
 app = FastAPI(title="Update Dashboard")
+app.add_middleware(SessionMiddleware,
+                   secret_key=get_session_secret(),
+                   session_cookie="ud_session",
+                   max_age=30 * 24 * 3600,   # 30 days max; login sets shorter if no remember_me
+                   https_only=False,
+                   same_site="lax")
+app.add_middleware(AuthMiddleware)
+app.include_router(auth_router)
 app.include_router(admin_router)
 app.include_router(auto_updates_router)
 templates = Jinja2Templates(directory=Path(__file__).parent / "templates")
