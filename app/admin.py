@@ -10,7 +10,6 @@ from .config_manager import (
     delete_host,
     get_hosts,
     get_ssh_config,
-    slugify,
     update_host,
     update_ssh_config,
 )
@@ -67,6 +66,8 @@ async def admin_add_host(
     key: str = Form(""),
 ) -> HTMLResponse:
     try:
+        if not name.strip() or not host.strip():
+            raise ValueError("Name and IP / hostname are required.")
         add_host(
             name=name.strip(),
             host=host.strip(),
