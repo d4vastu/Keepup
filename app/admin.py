@@ -3,7 +3,7 @@ import os
 from pathlib import Path
 
 import pyotp
-from fastapi import APIRouter, BackgroundTasks, Form, Request
+from fastapi import APIRouter, Form, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 
