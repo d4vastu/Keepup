@@ -1,0 +1,84 @@
+<div id="admin-https" class="space-y-4">
+
+  {% if ssl_enabled %}
+  <!-- HTTPS active state -->
+  <div class="bg-slate-800/50 rounded-xl border border-slate-700 overflow-hidden">
+    <div class="flex items-center justify-between px-5 py-4 border-b border-slate-700">
+      <h3 class="text-sm font-semibold text-slate-200">HTTPS / TLS</h3>
+      <span class="flex items-center gap-1.5 text-xs text-green-400 font-medium">
+        <span class="w-2 h-2 rounded-full bg-green-400"></span> Enabled
+      </span>
+    </div>
+    <div class="px-5 py-4 space-y-4">
+      {% if cert_info %}
+      <div class="text-xs text-slate-400 space-y-1">
+        <div><span class="text-slate-500">Mode:</span> <span class="text-slate-300">{{ 'Self-signed' if ssl_mode == 'self-signed' else 'Custom certificate' }}</span></div>
+        {% if ssl_hostname %}<div><span class="text-slate-500">Hostname:</span> <span class="text-slate-300 font-mono">{{ ssl_hostname }}</span></div>{% endif %}
+        <div><span class="text-slate-500">Expires:</span> <span class="text-slate-300">{{ cert_info.expires }}</span></div>
+      </div>
+      {% endif %}
+      <div class="flex gap-3 pt-1">
+        <form hx-post="/admin/https/disable" hx-target="#admin-https" hx-swap="outerHTML">
+          <button type="submit"
+            onclick="return confirm('Disable HTTPS? The container will restart and switch back to HTTP.')"
+            class="px-4 py-2 rounded-lg bg-slate-700 hover:bg-slate-600 text-sm font-medium text-slate-300 transition-colors">
+            Disable HTTPS
+          </button>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  {% else %}
+  <!-- HTTPS disabled state -->
+  <div class="bg-slate-800/50 rounded-xl border border-slate-700 overflow-hidden">
+    <div class="flex items-center justify-between px-5 py-4 border-b border-slate-700">
+      <h3 class="text-sm font-semibold text-slate-200">HTTPS / TLS</h3>
+      <span class="flex items-center gap-1.5 text-xs text-slate-500">
+        <span class="w-2 h-2 rounded-full bg-slate-600"></span> HTTP only
+      </span>
+    </div>
+    <div class="px-5 py-4 space-y-5">
+
+      {% if error %}
+      <p class="text-sm text-red-400">{{ error }}</p>
+      {% endif %}
+
+      <p class="text-xs text-slate-400">
+        Encrypt traffic to and from Update Dashboard. Choose the option that fits your setup.
+      </p>
+
+      <!-- Self-signed -->
+      <div class="bg-slate-900/40 rounded-xl border border-slate-700 p-4 space-y-3">
+        <div>
+          <h4 class="text-sm font-semibold text-slate-200">Self-signed certificate</h4>
+          <p class="text-xs text-slate-500 mt-0.5">For internal / homelab use. Your browser will show a one-time warning — click <strong class="text-slate-400">Advanced → Proceed</strong> to accept it.</p>
+        </div>
+        <form hx-post="/admin/https/self-signed" hx-target="#admin-https" hx-swap="outerHTML" class="flex gap-2 items-end">
+          <div class="flex-1">
+            <label class="block text-xs font-medium text-slate-400 mb-1">Your server's IP or hostname</label>
+            <input type="text" name="hostname" placeholder="192.168.1.x" required
+              class="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-200 font-mono focus:outline-none focus:border-blue-500 placeholder:text-slate-500 placeholder:font-sans">
+          </div>
+          <button type="submit"
+            class="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-sm font-medium text-white transition-colors flex-shrink-0">
+            Generate &amp; enable
+          </button>
+        </form>
+        <p class="text-xs text-slate-500">
+          Certificate is generated locally and stored in <code class="text-slate-400">/app/data/ssl/</code>. Valid for 2 years.
+        </p>
+      </div>
+
+      <!-- Custom cert (PR 2 placeholder, shown as collapsed hint) -->
+      <p class="text-xs text-slate-500">
+        Have a Let's Encrypt or other certificate?
+        <a hx-get="/admin/https/custom-form" hx-target="#admin-https" hx-swap="outerHTML"
+          class="text-blue-400 hover:text-blue-300 cursor-pointer">Upload your own cert →</a>
+      </p>
+
+    </div>
+  </div>
+  {% endif %}
+
+</div>

@@ -1,8 +1,9 @@
+import asyncio
 import os
 from pathlib import Path
 
 import pyotp
-from fastapi import APIRouter, Form, Request
+from fastapi import APIRouter, BackgroundTasks, Form, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 
@@ -22,14 +23,17 @@ from .auth import (
 from .backend_loader import reload_backends
 from .config_manager import (
     add_host,
+    clear_ssl_config,
     delete_host,
     get_dockerhub_config,
     get_hosts,
     get_portainer_config,
+    get_ssl_config,
     get_ssh_config,
     reset_config,
     save_dockerhub_config,
     save_portainer_config,
+    save_ssl_config,
     set_docker_monitoring,
     slugify,
     update_host,
@@ -99,6 +103,7 @@ async def admin_page(request: Request) -> HTMLResponse:
             "ssh": get_ssh_config(),
             "conn": _connection_status(),
             **_account_context(),
+            **_ssl_context(),
         },
     )
 
@@ -599,3 +604,68 @@ async def admin_factory_reset(
     resp = Response(status_code=200)
     resp.headers["HX-Redirect"] = "/setup"
     return resp
+
+
+# ---------------------------------------------------------------------------
+# HTTPS / TLS
+# ---------------------------------------------------------------------------
+
+async def _restart_after_delay() -> None:
+    """Send SIGTERM to PID 1 (uvicorn) after a brief delay so the response is sent first."""
+    import signal
+    await asyncio.sleep(3)
+    os.kill(1, signal.SIGTERM)
+
+
+def _ssl_context() -> dict:
+    from .ssl_manager import ssl_enabled, get_cert_info
+    ssl_cfg = get_ssl_config()
+    return {
+        "ssl_enabled": ssl_enabled(),
+        "ssl_mode": ssl_cfg.get("mode", ""),
+        "ssl_hostname": ssl_cfg.get("hostname", ""),
+        "cert_info": get_cert_info(),
+    }
+
+
+@router.get("/https", response_class=HTMLResponse)
+async def admin_https(request: Request) -> HTMLResponse:
+    return templates.TemplateResponse(
+        "partials/admin_https.html",
+        {"request": request, **_ssl_context()},
+    )
+
+
+@router.post("/https/self-signed", response_class=HTMLResponse)
+async def admin_https_self_signed(
+    request: Request,
+    hostname: str = Form(""),
+) -> HTMLResponse:
+    from .ssl_manager import generate_self_signed_cert, save_ssl_files
+    hostname = hostname.strip()
+    if not hostname:
+        return templates.TemplateResponse(
+            "partials/admin_https.html",
+            {"request": request, **_ssl_context(), "error": "Enter your server's IP address or hostname."},
+        )
+    cert_pem, key_pem = generate_self_signed_cert(hostname)
+    save_ssl_files(cert_pem, key_pem)
+    save_ssl_config(mode="self-signed", hostname=hostname)
+    asyncio.ensure_future(_restart_after_delay())
+    return templates.TemplateResponse(
+        "partials/admin_https_restarting.html",
+        {"request": request, "new_url": f"https://{hostname}:8765", "action": "enabling"},
+    )
+
+
+@router.post("/https/disable", response_class=HTMLResponse)
+async def admin_https_disable(request: Request) -> HTMLResponse:
+    from .ssl_manager import remove_ssl_files
+    remove_ssl_files()
+    clear_ssl_config()
+    asyncio.ensure_future(_restart_after_delay())
+    host = request.headers.get("host", "").split(":")[0]
+    return templates.TemplateResponse(
+        "partials/admin_https_restarting.html",
+        {"request": request, "new_url": f"http://{host}:8765", "action": "disabling"},
+    )
