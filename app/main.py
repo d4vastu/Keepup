@@ -1,3 +1,4 @@
+import asyncio
 import os
 import uuid
 from pathlib import Path
@@ -9,7 +10,6 @@ from fastapi.templating import Jinja2Templates
 from .admin import router as admin_router
 from .config_manager import get_hosts, get_ssh_config
 from .credentials import get_credentials, save_sudo_password
-from .portainer_client import PortainerClient
 from .ssh_client import _needs_sudo, check_host_updates, reboot_host, run_host_update_buffered
 
 # ---------------------------------------------------------------------------
@@ -21,10 +21,10 @@ app.include_router(admin_router)
 templates = Jinja2Templates(directory=Path(__file__).parent / "templates")
 
 # ---------------------------------------------------------------------------
-# Config — secrets from env vars, structure from config.yml
+# Config
 # ---------------------------------------------------------------------------
 
-portainer: PortainerClient | None = None
+_backends: list = []
 
 _dockerhub_user = os.getenv("DOCKERHUB_USERNAME", "")
 _dockerhub_token = os.getenv("DOCKERHUB_TOKEN", "")
@@ -37,12 +37,23 @@ dockerhub_creds: dict | None = (
 
 @app.on_event("startup")
 async def _startup() -> None:
-    global portainer
+    global _backends
+    backends = []
+
+    # Portainer backend — opt-in via env vars
     url = os.getenv("PORTAINER_URL", "")
     key = os.getenv("PORTAINER_API_KEY", "")
     verify_ssl = os.getenv("PORTAINER_VERIFY_SSL", "false").lower() == "true"
     if url and key:
-        portainer = PortainerClient(url=url, api_key=key, verify_ssl=verify_ssl)
+        from .portainer_client import PortainerClient
+        from .backends import PortainerBackend
+        backends.append(PortainerBackend(PortainerClient(url=url, api_key=key, verify_ssl=verify_ssl)))
+
+    # SSH Docker backend — always registered; only activates for hosts with docker_mode set
+    from .backends import SSHDockerBackend
+    backends.append(SSHDockerBackend())
+
+    _backends = backends
 
 
 # ---------------------------------------------------------------------------
@@ -87,9 +98,12 @@ async def _job_run_host_restart(job_id: str, host: dict, creds: dict) -> None:
         _jobs[job_id]["done"] = True
 
 
-async def _job_run_stack_update(job_id: str, stack_id: int, endpoint_id: int) -> None:
+async def _job_run_stack_update(job_id: str, backend_key: str, ref: str) -> None:
     try:
-        await portainer.update_stack(stack_id, endpoint_id)
+        backend = next((b for b in _backends if b.BACKEND_KEY == backend_key), None)
+        if backend is None:
+            raise ValueError(f"Backend {backend_key!r} not available")
+        await backend.update_stack(ref)
         _jobs[job_id]["lines"] = ["Stack updated — containers restarted with new images."]
         _jobs[job_id]["status"] = "done"
     except Exception as exc:
@@ -105,9 +119,14 @@ async def _job_run_stack_update(job_id: str, stack_id: int, endpoint_id: int) ->
 
 @app.get("/", response_class=HTMLResponse)
 async def dashboard(request: Request) -> HTMLResponse:
+    hosts = get_hosts()
+    docker_configured = (
+        any(b.BACKEND_KEY == "portainer" for b in _backends)
+        or any(h.get("docker_mode") for h in hosts)
+    )
     return templates.TemplateResponse(
         "index.html",
-        {"request": request, "hosts": get_hosts(), "portainer_configured": portainer is not None},
+        {"request": request, "hosts": hosts, "docker_configured": docker_configured},
     )
 
 
@@ -149,7 +168,6 @@ async def host_update(
         host = _get_host(slug)
         creds = get_credentials(slug)
 
-        # Sudo check: need it, don't have it → show modal
         if _needs_sudo(host, get_ssh_config()):
             effective_sudo = sudo_password.strip() or creds.get("sudo_password", "")
             if not effective_sudo:
@@ -218,13 +236,25 @@ async def host_restart(
 
 @app.get("/api/docker/check", response_class=HTMLResponse)
 async def docker_check(request: Request) -> HTMLResponse:
-    if not portainer:
+    hosts = get_hosts()
+    active = [
+        b for b in _backends
+        if b.BACKEND_KEY != "ssh" or any(h.get("docker_mode") for h in hosts)
+    ]
+    if not active:
         return templates.TemplateResponse(
             "partials/error.html",
-            {"request": request, "message": "Portainer API key not configured."},
+            {"request": request, "message": "No container backends configured."},
         )
     try:
-        stacks = await portainer.get_stacks_with_update_status(dockerhub_creds)
+        results = await asyncio.gather(
+            *[b.get_stacks_with_update_status(dockerhub_creds) for b in active],
+            return_exceptions=True,
+        )
+        stacks = []
+        for r in results:
+            if isinstance(r, list):
+                stacks.extend(r)
         return templates.TemplateResponse(
             "partials/docker_status.html",
             {"request": request, "stacks": stacks},
@@ -236,21 +266,22 @@ async def docker_check(request: Request) -> HTMLResponse:
         )
 
 
-@app.post("/api/docker/stack/{stack_id}/update", response_class=HTMLResponse)
+@app.post("/api/docker/stack/{backend_key}/{ref:path}/update", response_class=HTMLResponse)
 async def stack_update(
     request: Request,
-    stack_id: int,
-    endpoint_id: int,
+    backend_key: str,
+    ref: str,
     background_tasks: BackgroundTasks,
 ) -> HTMLResponse:
-    if not portainer:
+    backend = next((b for b in _backends if b.BACKEND_KEY == backend_key), None)
+    if not backend:
         return templates.TemplateResponse(
             "partials/error.html",
-            {"request": request, "message": "Portainer not configured."},
+            {"request": request, "message": f"Backend {backend_key!r} not configured."},
         )
     job_id = uuid.uuid4().hex[:8]
     _jobs[job_id] = {"done": False, "status": "running", "error": None, "lines": []}
-    background_tasks.add_task(_job_run_stack_update, job_id, stack_id, endpoint_id)
+    background_tasks.add_task(_job_run_stack_update, job_id, backend_key, ref)
     return templates.TemplateResponse(
         "partials/job_poll.html",
         {"request": request, "job_id": job_id},

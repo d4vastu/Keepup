@@ -11,14 +11,15 @@
     </thead>
     <tbody class="divide-y divide-slate-800">
       {% for stack in needs_update %}
+      {% set action_id = stack.update_path | replace('/', '-') | replace(':', '-') %}
       <tr class="text-slate-300">
         <td class="py-2 pr-4 font-mono text-xs">{{ stack.name }}</td>
         <td class="py-2 pr-4 text-slate-400 text-xs">{{ stack.endpoint_name }}</td>
         <td class="py-2">
-          <div id="stack-{{ stack.id }}-action">
+          <div id="stack-{{ action_id }}-action">
             <button
-              hx-post="/api/docker/stack/{{ stack.id }}/update?endpoint_id={{ stack.endpoint_id }}"
-              hx-target="#stack-{{ stack.id }}-action"
+              hx-post="/api/docker/stack/{{ stack.update_path }}/update"
+              hx-target="#stack-{{ action_id }}-action"
               hx-swap="innerHTML"
               hx-confirm="Pull and redeploy stack '{{ stack.name }}'?"
               class="px-3 py-1 text-xs rounded bg-blue-600 hover:bg-blue-500 text-white font-medium transition-colors">
