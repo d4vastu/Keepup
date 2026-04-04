@@ -242,3 +242,19 @@ def update_ssh_config(
         "command_timeout": command_timeout,
     }
     save_config(config)
+
+
+def get_ssl_config() -> dict:
+    return load_config().get("ssl", {})
+
+
+def save_ssl_config(mode: str, hostname: str = "") -> None:
+    config = load_config()
+    config["ssl"] = {"mode": mode, "hostname": hostname}
+    save_config(config)
+
+
+def clear_ssl_config() -> None:
+    config = load_config()
+    config.pop("ssl", None)
+    save_config(config)

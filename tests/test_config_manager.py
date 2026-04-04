@@ -212,3 +212,27 @@ def test_update_ssh_config_writes_to_file(config_file):
     update_ssh_config("admin", 22, "/app/keys/id_ed25519", 10, 120)
     raw = yaml.safe_load(config_file.read_text())
     assert raw["ssh"]["default_user"] == "admin"
+
+
+# ---------------------------------------------------------------------------
+# SSL config
+# ---------------------------------------------------------------------------
+
+def test_get_ssl_config_default_empty(config_file):
+    from app.config_manager import get_ssl_config
+    assert get_ssl_config() == {}
+
+
+def test_save_ssl_config(config_file):
+    from app.config_manager import save_ssl_config, get_ssl_config
+    save_ssl_config(mode="self-signed", hostname="192.168.1.10")
+    cfg = get_ssl_config()
+    assert cfg["mode"] == "self-signed"
+    assert cfg["hostname"] == "192.168.1.10"
+
+
+def test_clear_ssl_config(config_file):
+    from app.config_manager import save_ssl_config, clear_ssl_config, get_ssl_config
+    save_ssl_config(mode="self-signed", hostname="192.168.1.10")
+    clear_ssl_config()
+    assert get_ssl_config() == {}
