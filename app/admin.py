@@ -8,7 +8,9 @@ from fastapi.templating import Jinja2Templates
 
 from .auth import (
     change_password,
+    delete_admin,
     enroll_mfa,
+    get_admin_username,
     get_totp_uri,
     mfa_enrolled,
     new_totp_secret,
@@ -25,6 +27,7 @@ from .config_manager import (
     get_hosts,
     get_portainer_config,
     get_ssh_config,
+    reset_config,
     save_dockerhub_config,
     save_portainer_config,
     set_docker_monitoring,
@@ -39,6 +42,7 @@ from .credentials import (
     rename_credentials,
     save_credentials,
     save_integration_credentials,
+    wipe_credential_store,
 )
 from .ssh_client import verify_connection
 
@@ -458,7 +462,7 @@ async def admin_update_ssh(
 # ---------------------------------------------------------------------------
 
 def _account_context() -> dict:
-    return {"mfa_enrolled": mfa_enrolled()}
+    return {"mfa_enrolled": mfa_enrolled(), "admin_username": get_admin_username()}
 
 
 @router.get("/account", response_class=HTMLResponse)
@@ -570,3 +574,28 @@ async def admin_regenerate_backup_key(
         "partials/admin_account.html",
         {"request": request, **_account_context(), "new_backup_key": new_key},
     )
+
+
+@router.post("/account/factory-reset", response_class=HTMLResponse)
+async def admin_factory_reset(
+    request: Request,
+    current_password: str = Form(""),
+    confirm_text: str = Form(""),
+) -> HTMLResponse:
+    if not verify_password(current_password):
+        return templates.TemplateResponse(
+            "partials/admin_account.html",
+            {"request": request, **_account_context(), "reset_error": "Password is incorrect."},
+        )
+    if confirm_text.strip().upper() != "RESET":
+        return templates.TemplateResponse(
+            "partials/admin_account.html",
+            {"request": request, **_account_context(), "reset_error": 'Type "RESET" in the confirmation field.'},
+        )
+    wipe_credential_store()
+    reset_config()
+    request.session.clear()
+    from fastapi.responses import Response
+    resp = Response(status_code=200)
+    resp.headers["HX-Redirect"] = "/setup"
+    return resp

@@ -186,6 +186,41 @@
     </div>
   </div>
 
+  <!-- Danger zone — factory reset -->
+  <div class="bg-red-950/20 rounded-xl border border-red-900/50 overflow-hidden">
+    <div class="px-5 py-4 border-b border-red-900/50">
+      <h3 class="text-sm font-semibold text-red-400">Danger zone</h3>
+      <p class="text-xs text-slate-500 mt-0.5">Reset everything and start the setup wizard from scratch.</p>
+    </div>
+    <div class="px-5 py-4 space-y-4">
+      <div class="flex items-start gap-2 bg-red-900/20 border border-red-800/30 rounded-lg px-4 py-3">
+        <span class="text-red-400 flex-shrink-0">&#9888;</span>
+        <p class="text-xs text-red-300">
+          <strong>This is irreversible.</strong> All settings will be deleted: your admin account, all configured hosts, Portainer/DockerHub credentials, and auto-update schedules. You will be signed out and sent to the setup wizard.
+        </p>
+      </div>
+      {% if reset_error %}
+      <p class="text-sm text-red-400">{{ reset_error }}</p>
+      {% endif %}
+      <form hx-post="/admin/account/factory-reset" hx-target="#admin-account" hx-swap="outerHTML" class="space-y-3">
+        <div>
+          <label class="block text-xs font-medium text-slate-400 mb-1">Current password</label>
+          <input type="password" name="current_password" required
+            class="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-blue-500">
+        </div>
+        <div>
+          <label class="block text-xs font-medium text-slate-400 mb-1">Type <code class="text-red-400">RESET</code> to confirm</label>
+          <input type="text" name="confirm_text" autocomplete="off" placeholder="RESET"
+            class="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-200 font-mono focus:outline-none focus:border-red-500">
+        </div>
+        <button type="submit"
+          class="px-4 py-2 rounded-lg bg-red-700 hover:bg-red-600 text-sm font-medium text-white transition-colors">
+          Reset everything
+        </button>
+      </form>
+    </div>
+  </div>
+
   <!-- Sign out -->
   <div class="flex justify-end">
     <form method="post" action="/logout">

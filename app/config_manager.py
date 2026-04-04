@@ -40,21 +40,39 @@ def get_hosts() -> list[dict]:
     ]
 
 
-def _build_host_entry(name: str, host: str, user: str | None, port: int | None) -> dict:
+def _build_host_entry(
+    name: str,
+    host: str,
+    user: str | None,
+    port: int | None,
+    key_path: str | None = None,
+    docker_mode: str | None = None,
+) -> dict:
     """Builds a host entry for config.yml — no credentials stored here."""
     entry: dict = {"name": name, "host": host}
     if user:
         entry["user"] = user
     if port:
         entry["port"] = port
+    if key_path:
+        entry["key"] = key_path
+    if docker_mode and docker_mode != "none":
+        entry["docker_mode"] = docker_mode
     return entry
 
 
-def add_host(name: str, host: str, user: str | None, port: int | None) -> str:
+def add_host(
+    name: str,
+    host: str,
+    user: str | None,
+    port: int | None,
+    key_path: str | None = None,
+    docker_mode: str | None = None,
+) -> str:
     """Add a host to config and return its slug."""
     config = load_config()
     hosts = config.setdefault("hosts", [])
-    hosts.append(_build_host_entry(name, host, user, port))
+    hosts.append(_build_host_entry(name, host, user, port, key_path=key_path, docker_mode=docker_mode))
     save_config(config)
     return slugify(name)
 
@@ -190,6 +208,22 @@ def set_stack_auto_update(
 
 def get_all_stack_auto_updates() -> dict:
     return load_config().get("stack_auto_update", {})
+
+
+def get_available_ssh_keys() -> list[str]:
+    """List key files in /app/keys/."""
+    keys_dir = Path("/app/keys")
+    if not keys_dir.exists():
+        return []
+    return sorted(f.name for f in keys_dir.iterdir() if f.is_file() and not f.name.startswith('.'))
+
+
+def reset_config() -> None:
+    """Remove all user-configured data (factory reset). Preserves the config file itself."""
+    config = load_config()
+    for key in ("hosts", "portainer", "dockerhub", "stack_auto_update"):
+        config.pop(key, None)
+    save_config(config)
 
 
 def update_ssh_config(

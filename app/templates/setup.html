@@ -13,7 +13,7 @@
   <div class="w-full max-w-lg">
 
     <!-- Header -->
-    <div class="text-center mb-8">
+    <div class="text-center mb-6">
       <div class="inline-flex items-center justify-center w-12 h-12 rounded-xl bg-blue-600 mb-4">
         <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
@@ -22,6 +22,24 @@
       </div>
       <h1 class="text-2xl font-bold text-white">Welcome to Update Dashboard</h1>
       <p class="text-sm text-slate-400 mt-1">Create your admin account to get started.</p>
+    </div>
+
+    <!-- Step indicator -->
+    <div class="flex items-center justify-center gap-3 mb-8 text-xs">
+      <div class="flex items-center gap-2">
+        <div class="w-6 h-6 rounded-full bg-blue-600 flex items-center justify-center text-white font-bold text-xs">1</div>
+        <span class="text-slate-300 font-medium">Account</span>
+      </div>
+      <div class="w-8 h-px bg-slate-700"></div>
+      <div class="flex items-center gap-2">
+        <div class="w-6 h-6 rounded-full bg-slate-700 flex items-center justify-center text-white font-bold text-xs">2</div>
+        <span class="text-slate-600">Backup Key</span>
+      </div>
+      <div class="w-8 h-px bg-slate-700"></div>
+      <div class="flex items-center gap-2">
+        <div class="w-6 h-6 rounded-full bg-slate-700 flex items-center justify-center text-white font-bold text-xs">3</div>
+        <span class="text-slate-600">Connect</span>
+      </div>
     </div>
 
     {% if errors %}

@@ -1,0 +1,143 @@
+<div id="ssh-hosts-section" class="bg-slate-800/60 border border-slate-700 rounded-2xl overflow-hidden">
+  <!-- header -->
+  <div class="px-5 py-4 border-b border-slate-700">
+    <h2 class="text-sm font-semibold text-slate-200">SSH hosts</h2>
+    <p class="text-xs text-slate-500 mt-0.5">Add Linux servers to monitor OS package updates. Requires SSH access.</p>
+  </div>
+  <div class="px-5 py-4 space-y-4">
+
+    <!-- note about docker-only -->
+    <div class="text-xs text-slate-500">
+      Only need Docker/container monitoring? Skip this section and configure Portainer below.
+    </div>
+
+    <!-- host list -->
+    {% if hosts %}
+    <div class="space-y-2">
+      {% for h in hosts %}
+      <div class="flex items-center justify-between bg-slate-700/50 rounded-lg px-3 py-2">
+        <div>
+          <span class="text-sm text-slate-200 font-medium">{{ h.name }}</span>
+          <span class="text-xs text-slate-500 ml-2">{{ h.host }}</span>
+          {% if h.get('user') %}<span class="text-xs text-slate-500"> · {{ h.user }}</span>{% endif %}
+          {% if h.get('docker_mode') %}<span class="text-xs text-blue-400 ml-1"> · Docker: on</span>{% endif %}
+        </div>
+        <button
+          hx-post="/setup/hosts/{{ h.slug }}/remove"
+          hx-target="#ssh-hosts-section"
+          hx-swap="outerHTML"
+          class="text-slate-500 hover:text-red-400 text-xs transition-colors px-2 py-1">
+          Remove
+        </button>
+      </div>
+      {% endfor %}
+    </div>
+    {% else %}
+    <p class="text-xs text-slate-500 italic">No hosts added yet.</p>
+    {% endif %}
+
+    <!-- success/error messages -->
+    {% if add_error %}
+    <p class="text-sm text-red-400">{{ add_error }}</p>
+    {% endif %}
+    {% if add_success %}
+    <p class="text-sm text-green-400">&#10003; {{ add_success }}</p>
+    {% endif %}
+
+    <!-- Add host form -->
+    <details {% if form or add_error %}open{% endif %} class="group">
+      <summary class="cursor-pointer text-sm text-blue-400 hover:text-blue-300 list-none flex items-center gap-1 select-none">
+        <svg class="w-4 h-4 group-open:rotate-90 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
+        </svg>
+        {% if hosts %}Add another host{% else %}Add a host{% endif %}
+      </summary>
+
+      <form hx-post="/setup/hosts/add"
+            hx-target="#ssh-hosts-section"
+            hx-swap="outerHTML"
+            class="mt-3 space-y-3 bg-slate-900/40 rounded-xl p-4">
+
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-xs font-medium text-slate-400 mb-1">Display name</label>
+            <input type="text" name="name" value="{{ form.name if form else '' }}" placeholder="Home Server" required
+              class="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-blue-500 placeholder:text-slate-500">
+          </div>
+          <div>
+            <label class="block text-xs font-medium text-slate-400 mb-1">Host / IP address</label>
+            <input type="text" name="host" value="{{ form.host if form else '' }}" placeholder="192.168.1.10" required
+              class="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-blue-500 placeholder:text-slate-500">
+          </div>
+        </div>
+
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-xs font-medium text-slate-400 mb-1">SSH user</label>
+            <input type="text" name="user" value="{{ form.user if form else '' }}" placeholder="ubuntu"
+              class="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-blue-500 placeholder:text-slate-500">
+          </div>
+          <div>
+            <label class="block text-xs font-medium text-slate-400 mb-1">Port</label>
+            <input type="number" name="port" value="{{ form.port if form else '' }}" placeholder="22"
+              class="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-blue-500 placeholder:text-slate-500">
+          </div>
+        </div>
+
+        <div>
+          <label class="block text-xs font-medium text-slate-400 mb-2">Authentication</label>
+          <div class="space-y-2">
+            <label class="flex items-center gap-2 cursor-pointer">
+              <input type="radio" name="auth_method" value="password"
+                {% if not form or form.auth_method == 'password' %}checked{% endif %}
+                onchange="document.getElementById('pw-auth').classList.remove('hidden');document.getElementById('key-auth').classList.add('hidden')"
+                class="accent-blue-500">
+              <span class="text-sm text-slate-300">Password</span>
+            </label>
+            <div id="pw-auth" class="{% if form and form.auth_method == 'key' %}hidden{% endif %} ml-6">
+              <input type="password" name="ssh_password" placeholder="SSH password"
+                class="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-blue-500 placeholder:text-slate-500">
+            </div>
+
+            <label class="flex items-center gap-2 cursor-pointer">
+              <input type="radio" name="auth_method" value="key"
+                {% if form and form.auth_method == 'key' %}checked{% endif %}
+                onchange="document.getElementById('pw-auth').classList.add('hidden');document.getElementById('key-auth').classList.remove('hidden')"
+                class="accent-blue-500">
+              <span class="text-sm text-slate-300">SSH key file</span>
+            </label>
+            <div id="key-auth" class="{% if not form or form.auth_method != 'key' %}hidden{% endif %} ml-6">
+              {% if available_keys %}
+              <select name="key_file"
+                class="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-blue-500">
+                <option value="">Select a key file…</option>
+                {% for k in available_keys %}
+                <option value="{{ k }}" {% if form and form.key_file == k %}selected{% endif %}>{{ k }}</option>
+                {% endfor %}
+              </select>
+              {% else %}
+              <p class="text-xs text-slate-500">No key files found in <code class="text-slate-400">/app/keys/</code>. Mount your keys volume or use password auth.</p>
+              <input type="hidden" name="key_file" value="">
+              {% endif %}
+            </div>
+          </div>
+        </div>
+
+        <label class="flex items-center gap-2 cursor-pointer select-none">
+          <input type="checkbox" name="docker_mode" value="all"
+            {% if form and form.docker_mode %}checked{% endif %}
+            class="w-4 h-4 rounded accent-blue-500">
+          <span class="text-sm text-slate-300">Monitor Docker Compose stacks on this host</span>
+        </label>
+        <p class="text-xs text-slate-500 -mt-1 ml-6">Enable if Docker is running on this server and you want to track container image updates.</p>
+
+        <button type="submit"
+          class="w-full py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-sm font-medium text-white transition-colors">
+          Test connection &amp; add host
+        </button>
+
+      </form>
+    </details>
+
+  </div>
+</div>
