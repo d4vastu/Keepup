@@ -60,13 +60,13 @@ def test_host_check_shows_reboot_required(client):
 # ---------------------------------------------------------------------------
 
 def test_docker_check_without_backends_returns_error(client, monkeypatch):
-    import app.main as m
+    import app.backend_loader as bl
     # SSH backend present but no hosts with docker_mode → treated as unconfigured
     from unittest.mock import MagicMock, AsyncMock
     ssh_b = MagicMock()
     ssh_b.BACKEND_KEY = "ssh"
     ssh_b.get_stacks_with_update_status = AsyncMock(return_value=[])
-    monkeypatch.setattr(m, "_backends", [ssh_b])
+    monkeypatch.setattr(bl, "_backends", [ssh_b])
     response = client.get("/api/docker/check")
     assert response.status_code == 200
     assert "not configured" in response.text.lower() or "No container" in response.text

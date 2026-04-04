@@ -200,7 +200,6 @@ async def test_update_stack_unknown_host_raises(config_file, data_dir):
 
 @pytest.mark.asyncio
 async def test_update_stack_runs_pull_and_up(config_file, data_dir, monkeypatch):
-    import app.config_manager as cm
     import yaml
 
     # Add docker_mode to the test host
