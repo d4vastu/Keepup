@@ -6,16 +6,18 @@ Built with FastAPI + HTMX. No JavaScript frameworks, no database — just a sing
 
 ## Features
 
-- **OS package updates** — checks `apt` on each host via SSH, shows pending updates with version diffs
-- **One-click apt upgrade** — runs `apt upgrade` remotely with live output
-- **Reboot detection** — shows a "Reboot required" badge and restart button when `/var/run/reboot-required` exists
+- **OS package updates** — checks `apt`, `dnf`, `yum`, `zypper`, `pacman`, and `apk` on each host via SSH, shows pending updates with version diffs
+- **One-click upgrade** — runs the appropriate upgrade command remotely with live output
+- **Reboot detection** — shows a "Reboot required" badge and restart button after kernel/system updates
 - **Docker Compose monitoring** — connects to hosts via SSH to discover running stacks, compares image digests against the registry to detect available updates — no Portainer required
 - **Portainer support** — optionally use a Portainer API as an alternative Docker backend
 - **One-click stack redeploy** — pulls latest images and restarts the stack
 - **Auto-discovery** — when you add a host and save credentials, the dashboard checks for running Compose stacks and offers to monitor them
-- **Encrypted credential store** — SSH keys, SSH passwords, and sudo passwords are stored encrypted on disk; nothing sensitive ever touches `config.yml`
+- **Auto-updates** — schedule unattended OS upgrades and Docker stack redeployments per host/stack with individual cron schedules; optional auto-reboot per host
+- **Notification bell** — persists auto-update run history; badge turns red on failures so you know when something needs attention
+- **Encrypted credential store** — SSH keys, SSH passwords, sudo passwords, API keys, and tokens are stored encrypted on disk; nothing sensitive ever touches `config.yml`
 - **Sudo modal** — non-root users are prompted for their sudo password inline on Update/Restart, with an option to save it for future runs
-- **Admin panel** — manage hosts, credentials, and SSH settings through the UI, no file editing required
+- **Fully UI-managed** — hosts, credentials, SSH settings, Portainer, DockerHub, and auto-update schedules are all configured through the admin panel; no file editing or env vars required after initial setup
 
 ---
 
@@ -39,17 +41,10 @@ services:
       - "8765:8000"
     volumes:
       - ./config:/app/config    # hosts + SSH settings
-      - ./data:/app/data         # encrypted credentials + encryption key
+      - ./data:/app/data        # encrypted credentials + encryption key
     environment:
       - CONFIG_PATH=/app/config/config.yml
       - DATA_PATH=/app/data
-      # Optional: Portainer backend
-      # - PORTAINER_URL=https://192.168.1.x:9443
-      # - PORTAINER_API_KEY=your_portainer_api_key_here
-      # - PORTAINER_VERIFY_SSL=false
-      # Optional: Docker Hub credentials (raises anonymous pull rate limit)
-      # - DOCKERHUB_USERNAME=your_username
-      # - DOCKERHUB_TOKEN=your_access_token
     restart: unless-stopped
 ```
 
@@ -59,7 +54,9 @@ services:
 docker compose up -d
 ```
 
-Open **http://localhost:8765** — then go to **/admin** to add your hosts.
+Open **http://localhost:8765** — then go to **/admin** to add your hosts and configure connections.
+
+> **Portainer and DockerHub** are configured through **Admin → Connections**, not via environment variables. See [Connections](#connections) below.
 
 ---
 
@@ -130,14 +127,47 @@ Docker monitoring works over the same SSH connection used for OS updates — no 
 
 ### Portainer (optional)
 
-If you already run Portainer, set these environment variables and both backends will operate simultaneously:
+If you already run Portainer, you can use it as an additional Docker backend alongside SSH.
 
-```yaml
-environment:
-  - PORTAINER_URL=https://192.168.1.x:9443
-  - PORTAINER_API_KEY=your_portainer_api_key_here
-  - PORTAINER_VERIFY_SSL=false
-```
+Configure it in **Admin → Connections → Portainer** — enter the URL, paste your API token, and click **Test Connection** before saving. No environment variables needed.
+
+To get your Portainer API token: open Portainer → click your username (top-right) → **Account Settings** → **Access Tokens** → **Add access token**.
+
+---
+
+## Auto-Updates
+
+Schedule unattended updates in **Admin → Auto-Updates**.
+
+**OS updates (per host):**
+- Enable the toggle, set a cron schedule (UTC), and optionally enable auto-reboot
+- Uses `apt upgrade` (safe mode — never removes packages)
+- If auto-reboot is on, the host reboots immediately after the update if a reboot was required
+- Non-root hosts require a saved sudo password (set in Admin → Hosts → Credentials)
+
+**Docker stack redeployments (per stack):**
+- Enable the toggle and set a cron schedule
+- Pulls the latest image tag and restarts the stack
+- Note: if your image uses the `latest` tag, a breaking upstream change could be pulled automatically — pin your image versions if that's a concern
+
+**Notification bell:**
+- Appears in every page header
+- Badge turns red when an auto-update fails
+- Click to see recent run history and dismiss notifications
+
+---
+
+## Connections
+
+Configure Portainer and Docker Hub in **Admin → Connections** — no environment variables needed.
+
+**Portainer** — required to use the Portainer backend for Docker monitoring. Enter your Portainer URL and API token, click **Test Connection** to verify before saving.
+
+**Docker Hub** (optional) — without credentials, Docker Hub limits image update checks to 100/hour shared across your IP. A free account bumps this to 200/hour for you alone. Use an access token (not your password): hub.docker.com → Account Settings → Personal access tokens.
+
+Both integrations take effect immediately on save — no restart needed.
+
+> **Legacy:** Portainer and DockerHub can still be configured via environment variables (`PORTAINER_URL`, `PORTAINER_API_KEY`, `DOCKERHUB_USERNAME`, `DOCKERHUB_TOKEN`) if you prefer. The UI will show a nudge to migrate when env-var-only config is detected.
 
 ---
 
@@ -198,12 +228,12 @@ hosts:
 | Variable | Default | Description |
 |---|---|---|
 | `CONFIG_PATH` | `/app/config.yml` | Path to `config.yml` inside the container |
-| `DATA_PATH` | `/app/data` | Directory for the encrypted credential store |
-| `PORTAINER_URL` | — | Portainer instance URL (enables Portainer backend) |
-| `PORTAINER_API_KEY` | — | Portainer API key (generate in User settings → Access tokens) |
-| `PORTAINER_VERIFY_SSL` | `false` | Set `true` if Portainer uses a trusted certificate |
-| `DOCKERHUB_USERNAME` | — | Docker Hub username — raises rate limit from 100 to 200 pulls/6h |
-| `DOCKERHUB_TOKEN` | — | Docker Hub access token (not your login password) |
+| `DATA_PATH` | `/app/data` | Directory for the encrypted credential store and auto-update log |
+| `PORTAINER_URL` | — | *(Legacy)* Portainer URL — prefer Admin → Connections |
+| `PORTAINER_API_KEY` | — | *(Legacy)* Portainer API key — prefer Admin → Connections |
+| `PORTAINER_VERIFY_SSL` | `false` | *(Legacy)* Set `true` if Portainer uses a trusted certificate |
+| `DOCKERHUB_USERNAME` | — | *(Legacy)* Docker Hub username — prefer Admin → Connections |
+| `DOCKERHUB_TOKEN` | — | *(Legacy)* Docker Hub access token — prefer Admin → Connections |
 
 ---
 
@@ -212,13 +242,16 @@ hosts:
 ```
 FastAPI (Python)
 ├── SSH via asyncssh
-│   ├── apt check / upgrade / reboot on each host
+│   ├── multi-PM check / upgrade / reboot on each host (apt, dnf, yum, zypper, pacman, apk)
 │   └── docker compose ls / inspect / pull / up -d per host
 ├── Container backends (protocol-based, pluggable)
 │   ├── SSHDockerBackend  — direct SSH + docker CLI (no Portainer needed)
 │   └── PortainerBackend  — Portainer API via httpx (optional)
+├── Auto-update scheduler (APScheduler AsyncIOScheduler)
+│   ├── per-host OS upgrade jobs with optional auto-reboot
+│   └── per-stack Docker redeploy jobs
 ├── Encrypted credential store (Fernet)
-│   └── SSH keys, SSH passwords, sudo passwords — never in config.yml
+│   └── SSH keys, SSH passwords, sudo passwords, API keys, tokens — never in config.yml
 └── HTMX frontend — partial HTML responses, no page reloads
 ```
 
