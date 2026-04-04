@@ -53,30 +53,19 @@ templates = Jinja2Templates(directory=Path(__file__).parent / "templates")
 
 
 def _connection_status() -> dict:
-    """Read connection status from credential store, fall back to env vars."""
+    """Read connection status from the UI-managed credential store."""
     port_cfg = get_portainer_config()
     port_creds = get_integration_credentials("portainer")
     dh_cfg = get_dockerhub_config()
     dh_creds = get_integration_credentials("dockerhub")
 
-    portainer_url = port_cfg.get("url") or os.getenv("PORTAINER_URL", "")
-    portainer_key_set = bool(port_creds.get("api_key") or os.getenv("PORTAINER_API_KEY", ""))
-    portainer_verify_ssl = port_cfg.get("verify_ssl", False)
-    dockerhub_user = dh_cfg.get("username") or os.getenv("DOCKERHUB_USERNAME", "")
-    dockerhub_token_set = bool(dh_creds.get("token") or os.getenv("DOCKERHUB_TOKEN", ""))
-
-    # If values only exist in env vars, flag for migration nudge
-    portainer_env_only = (
-        not port_cfg.get("url") and bool(os.getenv("PORTAINER_URL", ""))
-    )
-
     return {
-        "portainer_url": portainer_url,
-        "portainer_key_set": portainer_key_set,
-        "portainer_verify_ssl": portainer_verify_ssl,
-        "portainer_env_only": portainer_env_only,
-        "dockerhub_user": dockerhub_user,
-        "dockerhub_token_set": dockerhub_token_set,
+        "portainer_url": port_cfg.get("url", ""),
+        "portainer_key_set": bool(port_creds.get("api_key")),
+        "portainer_verify_ssl": port_cfg.get("verify_ssl", False),
+        "portainer_env_only": False,
+        "dockerhub_user": dh_cfg.get("username", ""),
+        "dockerhub_token_set": bool(dh_creds.get("token")),
     }
 
 

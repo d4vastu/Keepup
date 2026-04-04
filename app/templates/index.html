@@ -110,7 +110,7 @@
         </svg>
         Docker Stacks
         {% if not docker_configured %}
-        <span class="text-xs font-normal text-amber-400 ml-2">(No container backends configured — add a host with Docker or set Portainer env vars)</span>
+        <span class="text-xs font-normal text-amber-400 ml-2">(No container backends configured — add a host with Docker monitoring, or configure Portainer in Admin → Connections)</span>
         {% endif %}
       </h2>
 
@@ -129,7 +129,7 @@
         {% else %}
         <p class="text-sm text-slate-500">
           Enable Docker monitoring by adding a host in Admin and setting credentials — the dashboard will detect running stacks automatically.
-          Alternatively, set <code class="text-slate-300 bg-slate-700 px-1 rounded">PORTAINER_URL</code> and <code class="text-slate-300 bg-slate-700 px-1 rounded">PORTAINER_API_KEY</code> to use Portainer.
+          To use Portainer instead, configure it in <strong class="text-slate-400">Admin → Connections</strong>.
         </p>
         {% endif %}
       </div>

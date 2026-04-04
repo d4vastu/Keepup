@@ -42,11 +42,8 @@ services:
     ports:
       - "8765:8000"
     volumes:
-      - ./config:/app/config    # hosts + SSH settings
-      - ./data:/app/data        # encrypted credentials + encryption key
-    environment:
-      - CONFIG_PATH=/app/config/config.yml
-      - DATA_PATH=/app/data
+      - ./config:/app/config    # config.yml — host list and SSH defaults
+      - ./data:/app/data        # encrypted credentials and session secret
     restart: unless-stopped
 ```
 
@@ -223,8 +220,6 @@ Configure Portainer and Docker Hub in **Admin → Connections** — no environme
 
 Both integrations take effect immediately on save — no restart needed.
 
-> **Legacy:** Portainer and DockerHub can still be configured via environment variables (`PORTAINER_URL`, `PORTAINER_API_KEY`, `DOCKERHUB_USERNAME`, `DOCKERHUB_TOKEN`) if you prefer. The UI will show a nudge to migrate when env-var-only config is detected.
-
 ---
 
 ## config.yml
@@ -285,11 +280,8 @@ hosts:
 |---|---|---|
 | `CONFIG_PATH` | `/app/config.yml` | Path to `config.yml` inside the container |
 | `DATA_PATH` | `/app/data` | Directory for the encrypted credential store and auto-update log |
-| `PORTAINER_URL` | — | *(Legacy)* Portainer URL — prefer Admin → Connections |
-| `PORTAINER_API_KEY` | — | *(Legacy)* Portainer API key — prefer Admin → Connections |
-| `PORTAINER_VERIFY_SSL` | `false` | *(Legacy)* Set `true` if Portainer uses a trusted certificate |
-| `DOCKERHUB_USERNAME` | — | *(Legacy)* Docker Hub username — prefer Admin → Connections |
-| `DOCKERHUB_TOKEN` | — | *(Legacy)* Docker Hub access token — prefer Admin → Connections |
+
+All other configuration (Portainer, DockerHub, hosts, SSH settings, HTTPS) is managed through the UI.
 
 ---
 

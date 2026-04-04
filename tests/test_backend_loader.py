@@ -3,12 +3,8 @@ import pytest
 
 
 @pytest.fixture(autouse=True)
-def _setup(config_file, data_dir, monkeypatch):
+def _setup(config_file, data_dir):
     """Each test gets isolated config and data dirs."""
-    monkeypatch.setenv("PORTAINER_URL", "")
-    monkeypatch.setenv("PORTAINER_API_KEY", "")
-    monkeypatch.setenv("DOCKERHUB_USERNAME", "")
-    monkeypatch.setenv("DOCKERHUB_TOKEN", "")
 
 
 @pytest.mark.asyncio
@@ -22,10 +18,12 @@ async def test_reload_backends_no_portainer_adds_ssh():
 
 
 @pytest.mark.asyncio
-async def test_reload_backends_with_portainer_env(monkeypatch):
-    """With PORTAINER_URL + PORTAINER_API_KEY env vars, Portainer backend is added."""
-    monkeypatch.setenv("PORTAINER_URL", "https://portainer.test:9443")
-    monkeypatch.setenv("PORTAINER_API_KEY", "test-api-key")
+async def test_reload_backends_with_portainer_ui_config():
+    """With Portainer configured via UI, Portainer backend is added."""
+    from app.config_manager import save_portainer_config
+    from app.credentials import save_integration_credentials
+    save_portainer_config(url="https://portainer.test:9443", verify_ssl=False)
+    save_integration_credentials("portainer", api_key="test-api-key")
 
     import app.backend_loader as bl
     backends = await bl.reload_backends()
@@ -44,18 +42,19 @@ async def test_get_backends_returns_current_list():
 
 
 @pytest.mark.asyncio
-async def test_get_dockerhub_creds_none_without_config(monkeypatch):
-    monkeypatch.setenv("DOCKERHUB_USERNAME", "")
-    monkeypatch.setenv("DOCKERHUB_TOKEN", "")
+async def test_get_dockerhub_creds_none_without_config():
     import app.backend_loader as bl
     creds = bl.get_dockerhub_creds()
     assert creds is None
 
 
 @pytest.mark.asyncio
-async def test_get_dockerhub_creds_from_env(monkeypatch):
-    monkeypatch.setenv("DOCKERHUB_USERNAME", "myuser")
-    monkeypatch.setenv("DOCKERHUB_TOKEN", "mytoken")
+async def test_get_dockerhub_creds_from_ui_config():
+    from app.config_manager import save_dockerhub_config
+    from app.credentials import save_integration_credentials
+    save_dockerhub_config(username="myuser")
+    save_integration_credentials("dockerhub", token="mytoken")
+
     import app.backend_loader as bl
     creds = bl.get_dockerhub_creds()
     assert creds is not None

@@ -33,18 +33,6 @@
         <strong class="text-slate-300">You only need this if you run Docker containers.</strong>
       </p>
 
-      {% if conn.portainer_env_only %}
-      <!-- Migration nudge -->
-      <div class="flex items-start gap-2 bg-amber-900/20 border border-amber-700/40 rounded-lg px-4 py-3">
-        <span class="text-amber-400 mt-0.5 flex-shrink-0">&#9888;</span>
-        <p class="text-xs text-amber-300">
-          Your Portainer credentials are currently set via environment variables in
-          <code class="bg-slate-800 px-1 rounded">docker-compose.yml</code>.
-          Save them here to manage everything through the UI instead.
-          The URL field will be pre-filled — you just need to paste your API token again.
-        </p>
-      </div>
-      {% endif %}
 
       <!-- How to get values -->
       <details class="group">
