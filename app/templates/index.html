@@ -32,6 +32,24 @@
           class="px-4 py-2 rounded-lg bg-slate-700 hover:bg-slate-600 text-sm font-medium text-slate-300 transition-colors">
           Admin
         </a>
+        <!-- Notification bell -->
+        <div class="relative">
+          <button id="notif-btn" onclick="toggleNotifPanel()"
+            class="relative p-2 rounded-lg bg-slate-700 hover:bg-slate-600 transition-colors"
+            aria-label="Notifications">
+            <svg class="w-5 h-5 text-slate-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6 6 0 00-9.33-5.003 6 6 0 00-2.67 5.003v3.159c0 .538-.214 1.055-.595 1.437L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"/>
+            </svg>
+            <span id="notif-badge"
+              hx-get="/api/notifications/badge"
+              hx-trigger="load, every 60s"
+              hx-swap="outerHTML"></span>
+          </button>
+          <div id="notif-panel"
+            class="hidden absolute right-0 top-full mt-2 w-96 bg-slate-800 border border-slate-700 rounded-xl shadow-2xl z-50 overflow-hidden">
+          </div>
+        </div>
       </div>
     </div>
 
@@ -123,6 +141,22 @@
     // The host_status partial puts the Update button into the status cell.
     // After clicking Update the result goes into #host-{slug}-action in the action cell.
     // This is wired by hx-target in the partial template itself.
+
+    function toggleNotifPanel() {
+      const panel = document.getElementById('notif-panel');
+      const isHidden = panel.classList.contains('hidden');
+      panel.classList.toggle('hidden');
+      if (isHidden) {
+        htmx.ajax('GET', '/api/notifications/panel', {target: '#notif-panel', swap: 'innerHTML'});
+      }
+    }
+    document.addEventListener('click', function(e) {
+      const btn = document.getElementById('notif-btn');
+      const panel = document.getElementById('notif-panel');
+      if (panel && btn && !panel.contains(e.target) && !btn.contains(e.target)) {
+        panel.classList.add('hidden');
+      }
+    });
   </script>
 
 </body>

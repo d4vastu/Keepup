@@ -116,6 +116,52 @@ def get_ssh_config() -> dict:
     return load_config().get("ssh", {})
 
 
+# ---------------------------------------------------------------------------
+# Auto-update settings
+# ---------------------------------------------------------------------------
+
+def set_host_auto_update(
+    slug: str,
+    os_enabled: bool,
+    os_schedule: str,
+    auto_reboot: bool,
+) -> None:
+    config = load_config()
+    for h in config.get("hosts", []):
+        if slugify(h["name"]) == slug:
+            if os_enabled:
+                h["auto_update"] = {
+                    "os_enabled": True,
+                    "os_schedule": os_schedule,
+                    "auto_reboot": auto_reboot,
+                }
+            else:
+                h.pop("auto_update", None)
+            break
+    save_config(config)
+
+
+def set_stack_auto_update(
+    update_path: str,
+    stack_name: str,
+    enabled: bool,
+    schedule: str,
+) -> None:
+    config = load_config()
+    sau = config.setdefault("stack_auto_update", {})
+    if enabled:
+        sau[update_path] = {"enabled": True, "schedule": schedule, "name": stack_name}
+    else:
+        sau.pop(update_path, None)
+    if not sau:
+        config.pop("stack_auto_update", None)
+    save_config(config)
+
+
+def get_all_stack_auto_updates() -> dict:
+    return load_config().get("stack_auto_update", {})
+
+
 def update_ssh_config(
     default_user: str,
     default_port: int,
