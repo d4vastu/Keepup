@@ -147,6 +147,7 @@ async def host_check(request: Request, slug: str) -> HTMLResponse:
                 "slug": slug,
                 "packages": result["packages"],
                 "reboot_required": result["reboot_required"],
+                "package_manager": result.get("package_manager", ""),
             },
         )
     except Exception as exc:
