@@ -5,11 +5,16 @@ from fastapi import APIRouter, Form, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 
+from .backend_loader import reload_backends
 from .config_manager import (
     add_host,
     delete_host,
+    get_dockerhub_config,
     get_hosts,
+    get_portainer_config,
     get_ssh_config,
+    save_dockerhub_config,
+    save_portainer_config,
     set_docker_monitoring,
     slugify,
     update_host,
@@ -18,8 +23,10 @@ from .config_manager import (
 from .credentials import (
     credential_status,
     delete_credentials,
+    get_integration_credentials,
     rename_credentials,
     save_credentials,
+    save_integration_credentials,
 )
 from .ssh_client import verify_connection
 
@@ -28,11 +35,30 @@ templates = Jinja2Templates(directory=Path(__file__).parent / "templates")
 
 
 def _connection_status() -> dict:
+    """Read connection status from credential store, fall back to env vars."""
+    port_cfg = get_portainer_config()
+    port_creds = get_integration_credentials("portainer")
+    dh_cfg = get_dockerhub_config()
+    dh_creds = get_integration_credentials("dockerhub")
+
+    portainer_url = port_cfg.get("url") or os.getenv("PORTAINER_URL", "")
+    portainer_key_set = bool(port_creds.get("api_key") or os.getenv("PORTAINER_API_KEY", ""))
+    portainer_verify_ssl = port_cfg.get("verify_ssl", False)
+    dockerhub_user = dh_cfg.get("username") or os.getenv("DOCKERHUB_USERNAME", "")
+    dockerhub_token_set = bool(dh_creds.get("token") or os.getenv("DOCKERHUB_TOKEN", ""))
+
+    # If values only exist in env vars, flag for migration nudge
+    portainer_env_only = (
+        not port_cfg.get("url") and bool(os.getenv("PORTAINER_URL", ""))
+    )
+
     return {
-        "portainer_url": os.getenv("PORTAINER_URL", ""),
-        "portainer_key_set": bool(os.getenv("PORTAINER_API_KEY", "")),
-        "dockerhub_user": os.getenv("DOCKERHUB_USERNAME", ""),
-        "dockerhub_token_set": bool(os.getenv("DOCKERHUB_TOKEN", "")),
+        "portainer_url": portainer_url,
+        "portainer_key_set": portainer_key_set,
+        "portainer_verify_ssl": portainer_verify_ssl,
+        "portainer_env_only": portainer_env_only,
+        "dockerhub_user": dockerhub_user,
+        "dockerhub_token_set": dockerhub_token_set,
     }
 
 
@@ -57,6 +83,14 @@ async def admin_page(request: Request) -> HTMLResponse:
             "ssh": get_ssh_config(),
             "conn": _connection_status(),
         },
+    )
+
+
+@router.get("/connections", response_class=HTMLResponse)
+async def admin_connections(request: Request) -> HTMLResponse:
+    return templates.TemplateResponse(
+        "partials/admin_connections.html",
+        {"request": request, "conn": _connection_status()},
     )
 
 
@@ -281,6 +315,99 @@ async def admin_save_docker_monitoring(
     return templates.TemplateResponse(
         "partials/admin_hosts.html",
         {"request": request, "hosts": _hosts_with_status()},
+    )
+
+
+# ---------------------------------------------------------------------------
+# Connections — Portainer
+# ---------------------------------------------------------------------------
+
+@router.post("/connections/portainer/test", response_class=HTMLResponse)
+async def admin_test_portainer(
+    request: Request,
+    portainer_url: str = Form(""),
+    portainer_api_key: str = Form(""),
+    portainer_verify_ssl: str = Form(""),
+) -> HTMLResponse:
+    """Test Portainer connection with provided (unsaved) values."""
+    url = portainer_url.strip().rstrip("/")
+    key = portainer_api_key.strip()
+    verify_ssl = portainer_verify_ssl == "on"
+
+    if not url or not key:
+        return HTMLResponse(
+            '<span class="text-amber-400 text-sm">Enter a URL and API token first.</span>'
+        )
+    try:
+        from .portainer_client import PortainerClient
+        client = PortainerClient(url=url, api_key=key, verify_ssl=verify_ssl)
+        endpoints = await client.get_endpoints()
+        count = len(endpoints)
+        return HTMLResponse(
+            f'<span class="text-green-400 text-sm">&#10003; Connected — '
+            f'{count} environment{"s" if count != 1 else ""} found. '
+            f'Click Save to apply.</span>'
+        )
+    except Exception as exc:
+        msg = str(exc)
+        if "401" in msg or "403" in msg:
+            hint = "Invalid API token — check you copied it correctly."
+        elif "Name or service not known" in msg or "ConnectionRefused" in msg.lower() or "connect" in msg.lower():
+            hint = "Can't reach that address — check the URL and that Portainer is running."
+        elif "SSL" in msg or "certificate" in msg.lower():
+            hint = "SSL error — try enabling &ldquo;Ignore SSL warnings&rdquo; below."
+        else:
+            hint = msg
+        return HTMLResponse(f'<span class="text-red-400 text-sm">&#10007; {hint}</span>')
+
+
+@router.post("/connections/portainer", response_class=HTMLResponse)
+async def admin_save_portainer(
+    request: Request,
+    portainer_url: str = Form(""),
+    portainer_api_key: str = Form(""),
+    portainer_verify_ssl: str = Form(""),
+) -> HTMLResponse:
+    url = portainer_url.strip().rstrip("/")
+    key = portainer_api_key.strip()
+    verify_ssl = portainer_verify_ssl == "on"
+
+    save_portainer_config(url=url, verify_ssl=verify_ssl)
+    if key:
+        save_integration_credentials("portainer", api_key=key)
+
+    await reload_backends()
+
+    return templates.TemplateResponse(
+        "partials/admin_connections.html",
+        {"request": request, "conn": _connection_status(), "portainer_saved": True},
+    )
+
+
+# ---------------------------------------------------------------------------
+# Connections — DockerHub
+# ---------------------------------------------------------------------------
+
+@router.post("/connections/dockerhub", response_class=HTMLResponse)
+async def admin_save_dockerhub(
+    request: Request,
+    dockerhub_username: str = Form(""),
+    dockerhub_token: str = Form(""),
+) -> HTMLResponse:
+    username = dockerhub_username.strip()
+    token = dockerhub_token.strip()
+
+    save_dockerhub_config(username=username)
+    if token:
+        save_integration_credentials("dockerhub", token=token)
+    elif not username:
+        save_integration_credentials("dockerhub", token="")
+
+    await reload_backends()
+
+    return templates.TemplateResponse(
+        "partials/admin_connections.html",
+        {"request": request, "conn": _connection_status(), "dockerhub_saved": True},
     )
 
 

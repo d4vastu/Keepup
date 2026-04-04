@@ -50,60 +50,10 @@
       </div>
     </div>
 
-    <!-- Connection Status -->
+    <!-- Connection Settings -->
     <section class="mb-8">
-      <h2 class="text-base font-semibold text-slate-300 mb-3">Connection Settings</h2>
-      <div class="bg-slate-800/50 rounded-xl border border-slate-700 p-5 space-y-4">
-        <p class="text-xs text-slate-500">These are set via environment variables in your <code class="text-slate-300 bg-slate-700 px-1 rounded">docker-compose.yml</code>.</p>
-
-        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <!-- Portainer -->
-          <div class="space-y-2">
-            <p class="text-xs font-medium text-slate-400 uppercase tracking-wider">Portainer</p>
-            <div class="flex items-center gap-2 text-sm">
-              {% if conn.portainer_url %}
-              <span class="w-2 h-2 rounded-full bg-green-400 flex-shrink-0"></span>
-              <span class="text-slate-300 font-mono text-xs truncate">{{ conn.portainer_url }}</span>
-              {% else %}
-              <span class="w-2 h-2 rounded-full bg-slate-600 flex-shrink-0"></span>
-              <span class="text-slate-500 text-xs">PORTAINER_URL not set</span>
-              {% endif %}
-            </div>
-            <div class="flex items-center gap-2 text-sm">
-              {% if conn.portainer_key_set %}
-              <span class="w-2 h-2 rounded-full bg-green-400 flex-shrink-0"></span>
-              <span class="text-slate-300 text-xs">API key configured</span>
-              {% else %}
-              <span class="w-2 h-2 rounded-full bg-amber-500 flex-shrink-0"></span>
-              <span class="text-slate-400 text-xs">PORTAINER_API_KEY not set</span>
-              {% endif %}
-            </div>
-          </div>
-
-          <!-- DockerHub -->
-          <div class="space-y-2">
-            <p class="text-xs font-medium text-slate-400 uppercase tracking-wider">Docker Hub <span class="normal-case font-normal text-slate-500">(optional)</span></p>
-            <div class="flex items-center gap-2 text-sm">
-              {% if conn.dockerhub_user %}
-              <span class="w-2 h-2 rounded-full bg-green-400 flex-shrink-0"></span>
-              <span class="text-slate-300 text-xs">{{ conn.dockerhub_user }}</span>
-              {% else %}
-              <span class="w-2 h-2 rounded-full bg-slate-600 flex-shrink-0"></span>
-              <span class="text-slate-500 text-xs">DOCKERHUB_USERNAME not set</span>
-              {% endif %}
-            </div>
-            <div class="flex items-center gap-2 text-sm">
-              {% if conn.dockerhub_token_set %}
-              <span class="w-2 h-2 rounded-full bg-green-400 flex-shrink-0"></span>
-              <span class="text-slate-300 text-xs">Token configured</span>
-              {% else %}
-              <span class="w-2 h-2 rounded-full bg-slate-600 flex-shrink-0"></span>
-              <span class="text-slate-500 text-xs">DOCKERHUB_TOKEN not set</span>
-              {% endif %}
-            </div>
-          </div>
-        </div>
-      </div>
+      <h2 class="text-base font-semibold text-slate-300 mb-3">Connections</h2>
+      {% include "partials/admin_connections.html" %}
     </section>
 
     <!-- Hosts -->
