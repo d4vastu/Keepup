@@ -70,12 +70,51 @@
         </p>
       </div>
 
-      <!-- Custom cert (PR 2 placeholder, shown as collapsed hint) -->
+      {% if show_custom_form %}
+      <!-- Custom cert form -->
+      <div class="bg-slate-900/40 rounded-xl border border-slate-700 p-4 space-y-3">
+        <div>
+          <h4 class="text-sm font-semibold text-slate-200">Custom certificate</h4>
+          <p class="text-xs text-slate-500 mt-0.5">
+            Paste a certificate and private key in PEM format. Useful if you already have a
+            <strong class="text-slate-400">Let's Encrypt</strong> or other certificate.
+          </p>
+        </div>
+        {% if errors %}
+        <div class="space-y-1">
+          {% for e in errors %}<p class="text-sm text-red-400">{{ e }}</p>{% endfor %}
+        </div>
+        {% endif %}
+        <form hx-post="/admin/https/custom" hx-target="#admin-https" hx-swap="outerHTML" class="space-y-3">
+          <div>
+            <label class="block text-xs font-medium text-slate-400 mb-1">Certificate (PEM)</label>
+            <textarea name="cert_pem" rows="6" placeholder="-----BEGIN CERTIFICATE-----&#10;...&#10;-----END CERTIFICATE-----"
+              class="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-xs font-mono text-slate-200 focus:outline-none focus:border-blue-500 placeholder:text-slate-500 resize-y">{{ cert_value if cert_value else '' }}</textarea>
+          </div>
+          <div>
+            <label class="block text-xs font-medium text-slate-400 mb-1">Private key (PEM)</label>
+            <textarea name="key_pem" rows="6" placeholder="-----BEGIN RSA PRIVATE KEY-----&#10;...&#10;-----END RSA PRIVATE KEY-----"
+              class="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-xs font-mono text-slate-200 focus:outline-none focus:border-blue-500 placeholder:text-slate-500 resize-y"></textarea>
+          </div>
+          <div class="flex gap-3">
+            <button type="submit"
+              class="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-sm font-medium text-white transition-colors">
+              Enable with this cert
+            </button>
+            <a hx-get="/admin/https" hx-target="#admin-https" hx-swap="outerHTML"
+              class="px-4 py-2 rounded-lg bg-slate-700 hover:bg-slate-600 text-sm font-medium text-slate-300 transition-colors cursor-pointer">
+              Cancel
+            </a>
+          </div>
+        </form>
+      </div>
+      {% else %}
       <p class="text-xs text-slate-500">
         Have a Let's Encrypt or other certificate?
         <a hx-get="/admin/https/custom-form" hx-target="#admin-https" hx-swap="outerHTML"
           class="text-blue-400 hover:text-blue-300 cursor-pointer">Upload your own cert →</a>
       </p>
+      {% endif %}
 
     </div>
   </div>

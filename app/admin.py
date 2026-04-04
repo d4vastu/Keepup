@@ -669,3 +669,63 @@ async def admin_https_disable(request: Request) -> HTMLResponse:
         "partials/admin_https_restarting.html",
         {"request": request, "new_url": f"http://{host}:8765", "action": "disabling"},
     )
+
+
+@router.get("/https/custom-form", response_class=HTMLResponse)
+async def admin_https_custom_form(request: Request) -> HTMLResponse:
+    return templates.TemplateResponse(
+        "partials/admin_https.html",
+        {"request": request, **_ssl_context(), "show_custom_form": True},
+    )
+
+
+@router.post("/https/custom", response_class=HTMLResponse)
+async def admin_https_custom(
+    request: Request,
+    cert_pem: str = Form(""),
+    key_pem: str = Form(""),
+) -> HTMLResponse:
+    from .ssl_manager import save_ssl_files
+    from cryptography import x509
+    from cryptography.hazmat.primitives.serialization import load_pem_private_key
+
+    errors: list[str] = []
+    cert_pem = cert_pem.strip()
+    key_pem = key_pem.strip()
+
+    if not cert_pem:
+        errors.append("Certificate is required.")
+    else:
+        try:
+            x509.load_pem_x509_certificate(cert_pem.encode())
+        except Exception as exc:
+            errors.append(f"Invalid certificate: {exc}")
+
+    if not key_pem:
+        errors.append("Private key is required.")
+    else:
+        try:
+            load_pem_private_key(key_pem.encode(), password=None)
+        except Exception as exc:
+            errors.append(f"Invalid private key: {exc}")
+
+    if errors:
+        return templates.TemplateResponse(
+            "partials/admin_https.html",
+            {
+                "request": request,
+                **_ssl_context(),
+                "show_custom_form": True,
+                "errors": errors,
+                "cert_value": cert_pem,
+            },
+        )
+
+    save_ssl_files(cert_pem, key_pem)
+    save_ssl_config(mode="custom")
+    asyncio.ensure_future(_restart_after_delay())
+    host = request.headers.get("host", "").split(":")[0]
+    return templates.TemplateResponse(
+        "partials/admin_https_restarting.html",
+        {"request": request, "new_url": f"https://{host}:8765", "action": "enabling"},
+    )
