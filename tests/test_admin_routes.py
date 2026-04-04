@@ -150,6 +150,34 @@ def test_update_ssh_settings(client, config_file):
     assert raw["ssh"]["default_port"] == 2222
 
 
+def test_update_ssh_invalid_port(client):
+    response = client.put("/admin/ssh", data={
+        "default_user": "root",
+        "default_port": "not-a-number",
+        "default_key": "/app/keys/id_ed25519",
+        "connect_timeout": "15",
+        "command_timeout": "600",
+    })
+    assert response.status_code == 200
+    assert "error" in response.text.lower() or "invalid" in response.text.lower()
+
+
+def test_delete_host_error_shows_message(client, monkeypatch):
+    import app.admin as a
+    monkeypatch.setattr(a, "delete_host", lambda slug: (_ for _ in ()).throw(Exception("disk full")))
+    response = client.delete("/admin/hosts/test-host")
+    assert response.status_code == 200
+    assert "disk full" in response.text
+
+
+def test_update_host_error_shows_message(client, monkeypatch):
+    import app.admin as a
+    monkeypatch.setattr(a, "update_host", lambda **kw: (_ for _ in ()).throw(Exception("write error")))
+    response = client.put("/admin/hosts/test-host", data={"name": "X", "host": "1.2.3.4"})
+    assert response.status_code == 200
+    assert "write error" in response.text
+
+
 # ---------------------------------------------------------------------------
 # Password auth
 # ---------------------------------------------------------------------------
@@ -197,7 +225,7 @@ def test_admin_table_shows_auth_method(client):
 
 def test_connection_test_success(client):
     mock_result = {"ok": True, "message": "Connected successfully."}
-    with patch("app.admin.test_connection", new=AsyncMock(return_value=mock_result)):
+    with patch("app.admin.verify_connection", new=AsyncMock(return_value=mock_result)):
         response = client.post("/admin/hosts/test-host/test")
     assert response.status_code == 200
     assert "Connected" in response.text
@@ -205,7 +233,7 @@ def test_connection_test_success(client):
 
 def test_connection_test_failure(client):
     mock_result = {"ok": False, "message": "Connection refused"}
-    with patch("app.admin.test_connection", new=AsyncMock(return_value=mock_result)):
+    with patch("app.admin.verify_connection", new=AsyncMock(return_value=mock_result)):
         response = client.post("/admin/hosts/test-host/test")
     assert response.status_code == 200
     assert "Failed" in response.text

@@ -64,6 +64,14 @@ def test_get_hosts_empty_config(tmp_path, monkeypatch):
     assert get_hosts() == []
 
 
+def test_load_config_missing_file_returns_defaults(tmp_path, monkeypatch):
+    import app.config_manager as cm
+
+    monkeypatch.setattr(cm, "_CONFIG_PATH", tmp_path / "nonexistent.yml")
+    config = cm.load_config()
+    assert config == {"hosts": [], "ssh": {}}
+
+
 # ---------------------------------------------------------------------------
 # add_host
 # ---------------------------------------------------------------------------

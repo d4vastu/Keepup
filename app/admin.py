@@ -13,7 +13,7 @@ from .config_manager import (
     update_host,
     update_ssh_config,
 )
-from .ssh_client import test_connection
+from .ssh_client import verify_connection
 
 router = APIRouter(prefix="/admin")
 templates = Jinja2Templates(directory=Path(__file__).parent / "templates")
@@ -158,7 +158,7 @@ async def admin_test_host(request: Request, slug: str) -> HTMLResponse:
         return HTMLResponse(
             "<span class='text-red-400 text-xs'>Host not found</span>"
         )
-    result = await test_connection(host, get_ssh_config())
+    result = await verify_connection(host, get_ssh_config())
     return templates.TemplateResponse(
         "partials/admin_host_test_result.html",
         {"request": request, "slug": slug, "result": result},

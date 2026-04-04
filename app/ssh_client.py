@@ -18,7 +18,7 @@ async def _connect(host: dict, ssh_cfg: dict) -> asyncssh.SSHClientConnection:
     return await asyncssh.connect(**kwargs)
 
 
-async def test_connection(host: dict, ssh_cfg: dict) -> dict:
+async def verify_connection(host: dict, ssh_cfg: dict) -> dict:
     """Returns {"ok": bool, "message": str}."""
     try:
         async with await _connect(host, ssh_cfg) as conn:
