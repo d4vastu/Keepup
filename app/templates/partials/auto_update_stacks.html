@@ -1,0 +1,56 @@
+{% if no_backends %}
+<p class="text-sm text-slate-500 px-5 py-4">
+  No container backends configured. Add a host with Docker monitoring or set Portainer env vars in Admin.
+</p>
+{% elif not stacks %}
+<p class="text-sm text-slate-500 px-5 py-4">No stacks found across configured backends.</p>
+{% else %}
+<tbody class="divide-y divide-slate-700/50" id="au-stacks-tbody">
+  {% for stack in stacks %}
+    {% set update_path = stack.update_path %}
+    {% set row_id = update_path | replace('/', '-') | replace(':', '-') %}
+    <tr id="au-stack-row-{{ row_id }}"
+      class="hover:bg-slate-700/20 transition-colors">
+      <td class="px-5 py-4">
+        <span class="font-medium text-slate-200 text-sm">{{ stack.name }}</span>
+        <div class="text-xs text-slate-500 font-mono">{{ update_path }}</div>
+      </td>
+      <td class="px-5 py-4">
+        <form
+          hx-post="/admin/auto-updates/stacks/{{ update_path }}"
+          hx-target="#au-stack-row-{{ row_id }}"
+          hx-swap="outerHTML"
+          class="flex flex-col gap-3">
+
+          <input type="hidden" name="stack_name" value="{{ stack.name }}">
+
+          <label class="flex items-center gap-2 cursor-pointer select-none">
+            <input type="checkbox" name="enabled" value="on"
+              {% if stack.auto_enabled %}checked{% endif %}
+              onchange="toggleStackSchedule('{{ row_id }}', this.checked)"
+              class="w-4 h-4 rounded accent-blue-500">
+            <span class="text-sm text-slate-300">Enable auto-redeploy on schedule</span>
+          </label>
+
+          <div id="au-stack-details-{{ row_id }}"
+            class="{% if not stack.auto_enabled %}hidden{% endif %} flex items-center gap-2 pl-6">
+            <label class="text-xs text-slate-400 w-20 flex-shrink-0">Schedule</label>
+            <input type="text" name="schedule"
+              value="{{ stack.auto_schedule }}"
+              placeholder="0 4 * * *"
+              class="flex-1 bg-slate-700 border border-slate-600 rounded px-2 py-1 text-sm text-slate-200 font-mono focus:outline-none focus:border-blue-500 max-w-xs">
+            <span class="text-xs text-slate-500">cron (UTC)</span>
+          </div>
+
+          <div class="flex items-center gap-3 pl-6">
+            <button type="submit"
+              class="px-3 py-1 rounded bg-blue-600 hover:bg-blue-500 text-xs font-medium text-white transition-colors">
+              Save
+            </button>
+          </div>
+        </form>
+      </td>
+    </tr>
+  {% endfor %}
+</tbody>
+{% endif %}

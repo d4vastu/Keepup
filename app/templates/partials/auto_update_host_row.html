@@ -1,0 +1,70 @@
+{% set au = host.get("auto_update", {}) %}
+<tr id="au-host-row-{{ host.slug }}" class="border-b border-slate-700/50 hover:bg-slate-700/20 transition-colors">
+  <td class="px-5 py-4">
+    <span class="font-medium text-slate-200 text-sm">{{ host.name }}</span>
+    <div class="text-xs text-slate-500 font-mono">{{ host.host }}</div>
+  </td>
+  <td class="px-5 py-4">
+    <form
+      hx-post="/admin/auto-updates/hosts/{{ host.slug }}"
+      hx-target="#au-host-row-{{ host.slug }}"
+      hx-swap="outerHTML"
+      class="flex flex-col gap-3"
+      id="au-host-form-{{ host.slug }}">
+
+      <!-- Enable toggle -->
+      <label class="flex items-center gap-2 cursor-pointer select-none">
+        <input type="checkbox" name="os_enabled" value="on"
+          {% if au.get("os_enabled") %}checked{% endif %}
+          onchange="toggleHostSchedule('{{ host.slug }}', this.checked)"
+          class="w-4 h-4 rounded accent-blue-500">
+        <span class="text-sm text-slate-300">Enable OS auto-update</span>
+      </label>
+
+      <!-- Schedule + reboot (hidden when disabled) -->
+      <div id="au-host-details-{{ host.slug }}"
+        class="{% if not au.get('os_enabled') %}hidden{% endif %} flex flex-col gap-2 pl-6">
+
+        <div class="flex items-center gap-2">
+          <label class="text-xs text-slate-400 w-20 flex-shrink-0">Schedule</label>
+          <input type="text" name="os_schedule"
+            value="{{ au.get('os_schedule', '0 3 * * *') }}"
+            placeholder="0 3 * * *"
+            class="flex-1 bg-slate-700 border border-slate-600 rounded px-2 py-1 text-sm text-slate-200 font-mono focus:outline-none focus:border-blue-500 max-w-xs">
+          <span class="text-xs text-slate-500">cron (UTC)</span>
+        </div>
+
+        <label class="flex items-center gap-2 cursor-pointer select-none">
+          <input type="checkbox" name="auto_reboot" value="on"
+            {% if au.get("auto_reboot") %}checked{% endif %}
+            class="w-4 h-4 rounded accent-amber-500">
+          <span class="text-sm text-slate-300">Auto-reboot if reboot required after update</span>
+          <span class="text-xs text-amber-400 ml-1">(risk)</span>
+        </label>
+      </div>
+
+      <div class="flex items-center gap-3 pl-6">
+        <button type="submit"
+          class="px-3 py-1 rounded bg-blue-600 hover:bg-blue-500 text-xs font-medium text-white transition-colors">
+          Save
+        </button>
+        {% if saved %}
+        <span class="text-xs text-green-400">Saved</span>
+        {% elif error %}
+        <span class="text-xs text-red-400">{{ error }}</span>
+        {% endif %}
+      </div>
+    </form>
+  </td>
+</tr>
+
+<script>
+function toggleHostSchedule(slug, enabled) {
+  const details = document.getElementById('au-host-details-' + slug);
+  if (enabled) {
+    details.classList.remove('hidden');
+  } else {
+    details.classList.add('hidden');
+  }
+}
+</script>

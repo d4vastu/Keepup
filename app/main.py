@@ -8,6 +8,10 @@ from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 
 from .admin import router as admin_router
+from .auto_update_log import get_recent, get_unread_error_count, mark_all_read
+from .auto_update_scheduler import apply_all_schedules, scheduler, set_backends
+from .auto_updates_router import router as auto_updates_router
+from .auto_updates_router import set_backends as set_auto_updates_backends
 from .config_manager import get_hosts, get_ssh_config
 from .credentials import get_credentials, save_sudo_password
 from .ssh_client import _needs_sudo, check_host_updates, reboot_host, run_host_update_buffered
@@ -18,6 +22,7 @@ from .ssh_client import _needs_sudo, check_host_updates, reboot_host, run_host_u
 
 app = FastAPI(title="Update Dashboard")
 app.include_router(admin_router)
+app.include_router(auto_updates_router)
 templates = Jinja2Templates(directory=Path(__file__).parent / "templates")
 
 # ---------------------------------------------------------------------------
@@ -54,6 +59,11 @@ async def _startup() -> None:
     backends.append(SSHDockerBackend())
 
     _backends = backends
+
+    set_backends(_backends)
+    set_auto_updates_backends(_backends)
+    apply_all_schedules()
+    scheduler.start()
 
 
 # ---------------------------------------------------------------------------
@@ -301,4 +311,44 @@ async def job_status(request: Request, job_id: str) -> HTMLResponse:
     return templates.TemplateResponse(
         "partials/job_status.html",
         {"request": request, "job_id": job_id, "job": job},
+    )
+
+
+# ---------------------------------------------------------------------------
+# Routes — Notifications
+# ---------------------------------------------------------------------------
+
+@app.get("/api/notifications/badge", response_class=HTMLResponse)
+async def notifications_badge(request: Request) -> HTMLResponse:
+    count = get_unread_error_count()
+    if count == 0:
+        return HTMLResponse(
+            '<span id="notif-badge" hx-get="/api/notifications/badge" '
+            'hx-trigger="every 60s" hx-swap="outerHTML"></span>'
+        )
+    label = str(count) if count < 10 else "9+"
+    return HTMLResponse(
+        f'<span id="notif-badge" hx-get="/api/notifications/badge" '
+        f'hx-trigger="every 60s" hx-swap="outerHTML" '
+        f'class="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-red-500 '
+        f'text-xs flex items-center justify-center text-white font-bold pointer-events-none">'
+        f'{label}</span>'
+    )
+
+
+@app.get("/api/notifications/panel", response_class=HTMLResponse)
+async def notifications_panel(request: Request) -> HTMLResponse:
+    entries = get_recent(20)
+    return templates.TemplateResponse(
+        "partials/notification_panel.html",
+        {"request": request, "entries": entries},
+    )
+
+
+@app.post("/api/notifications/read", response_class=HTMLResponse)
+async def notifications_read(request: Request) -> HTMLResponse:
+    mark_all_read()
+    return HTMLResponse(
+        '<span id="notif-badge" hx-get="/api/notifications/badge" '
+        'hx-trigger="every 60s" hx-swap="outerHTML"></span>'
     )

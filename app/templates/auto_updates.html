@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Auto-Updates — Update Dashboard</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/htmx.org@1.9.12"></script>
+  <style>
+    body { background-color: #0f172a; }
+  </style>
+</head>
+<body class="min-h-full text-slate-200 font-sans">
+
+  <div class="max-w-4xl mx-auto px-4 py-8">
+
+    <!-- Header -->
+    <div class="flex items-center justify-between mb-8">
+      <div>
+        <h1 class="text-2xl font-bold text-white">Auto-Updates</h1>
+        <p class="text-sm text-slate-500 mt-0.5">Schedule unattended OS and Docker stack updates</p>
+      </div>
+      <div class="flex items-center gap-3">
+        <a href="/admin"
+          class="px-4 py-2 rounded-lg bg-slate-700 hover:bg-slate-600 text-sm font-medium text-slate-300 transition-colors">
+          ← Admin
+        </a>
+        <a href="/"
+          class="px-4 py-2 rounded-lg bg-slate-700 hover:bg-slate-600 text-sm font-medium text-slate-300 transition-colors">
+          Dashboard
+        </a>
+        <!-- Notification bell -->
+        <div class="relative">
+          <button id="notif-btn" onclick="toggleNotifPanel()"
+            class="relative p-2 rounded-lg bg-slate-700 hover:bg-slate-600 transition-colors"
+            aria-label="Notifications">
+            <svg class="w-5 h-5 text-slate-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6 6 0 00-9.33-5.003 6 6 0 00-2.67 5.003v3.159c0 .538-.214 1.055-.595 1.437L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"/>
+            </svg>
+            <span id="notif-badge"
+              hx-get="/api/notifications/badge"
+              hx-trigger="load, every 60s"
+              hx-swap="outerHTML"></span>
+          </button>
+          <div id="notif-panel"
+            class="hidden absolute right-0 top-full mt-2 w-96 bg-slate-800 border border-slate-700 rounded-xl shadow-2xl z-50 overflow-hidden">
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Risk notice -->
+    <div class="mb-8 bg-amber-900/20 border border-amber-700/50 rounded-xl p-4 text-sm text-amber-300">
+      <p class="font-medium mb-1">Before enabling auto-updates</p>
+      <ul class="list-disc list-inside space-y-1 text-amber-400/80 text-xs">
+        <li>OS updates use <code class="bg-slate-800 px-1 rounded">apt upgrade</code> — safe mode, never removes packages.</li>
+        <li>Auto-reboot will reboot the host immediately after the update if a reboot is required. Enable only on hosts that can tolerate unplanned restarts.</li>
+        <li>Docker stack redeploys pull the latest image tag — pin your image versions if a breaking change would be disruptive.</li>
+        <li>Sudo password must be stored in Admin → Hosts → Credentials for OS updates on non-root users.</li>
+        <li>All schedules are in UTC.</li>
+      </ul>
+    </div>
+
+    <!-- OS Updates -->
+    <section class="mb-10">
+      <h2 class="text-base font-semibold text-slate-300 mb-3">OS Package Updates</h2>
+      <div class="bg-slate-800/50 rounded-xl border border-slate-700 overflow-hidden">
+        <table class="w-full">
+          <thead>
+            <tr class="border-b border-slate-700">
+              <th class="text-left px-5 py-3 text-xs font-medium text-slate-500 uppercase tracking-wider w-48">Host</th>
+              <th class="text-left px-5 py-3 text-xs font-medium text-slate-500 uppercase tracking-wider">Settings</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-slate-700/50">
+            {% for host in hosts %}
+              {% include "partials/auto_update_host_row.html" %}
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- Docker Stacks -->
+    <section>
+      <h2 class="text-base font-semibold text-slate-300 mb-3 flex items-center gap-3">
+        Docker Stack Updates
+        <button
+          hx-get="/admin/auto-updates/stacks"
+          hx-target="#au-stacks-container"
+          hx-swap="innerHTML"
+          hx-indicator="#au-stacks-spinner"
+          class="px-2 py-1 rounded bg-slate-700 hover:bg-slate-600 text-xs font-medium text-slate-400 transition-colors">
+          Refresh
+        </button>
+        <span id="au-stacks-spinner" class="htmx-indicator text-xs text-slate-500">Loading...</span>
+      </h2>
+      <div class="bg-slate-800/50 rounded-xl border border-slate-700 overflow-hidden">
+        <table class="w-full">
+          <thead>
+            <tr class="border-b border-slate-700">
+              <th class="text-left px-5 py-3 text-xs font-medium text-slate-500 uppercase tracking-wider w-48">Stack</th>
+              <th class="text-left px-5 py-3 text-xs font-medium text-slate-500 uppercase tracking-wider">Settings</th>
+            </tr>
+          </thead>
+          <div id="au-stacks-container"
+            hx-get="/admin/auto-updates/stacks"
+            hx-trigger="load"
+            hx-target="#au-stacks-container"
+            hx-swap="innerHTML">
+            <p class="text-sm text-slate-500 px-5 py-4 animate-pulse">Loading stacks...</p>
+          </div>
+        </table>
+      </div>
+    </section>
+
+  </div>
+
+  <script>
+  function toggleHostSchedule(slug, enabled) {
+    const details = document.getElementById('au-host-details-' + slug);
+    if (enabled) details.classList.remove('hidden');
+    else details.classList.add('hidden');
+  }
+  function toggleStackSchedule(rowId, enabled) {
+    const details = document.getElementById('au-stack-details-' + rowId);
+    if (enabled) details.classList.remove('hidden');
+    else details.classList.add('hidden');
+  }
+  function toggleNotifPanel() {
+    const panel = document.getElementById('notif-panel');
+    const isHidden = panel.classList.contains('hidden');
+    panel.classList.toggle('hidden');
+    if (isHidden) {
+      htmx.ajax('GET', '/api/notifications/panel', {target: '#notif-panel', swap: 'innerHTML'});
+    }
+  }
+  document.addEventListener('click', function(e) {
+    const btn = document.getElementById('notif-btn');
+    const panel = document.getElementById('notif-panel');
+    if (panel && btn && !panel.contains(e.target) && !btn.contains(e.target)) {
+      panel.classList.add('hidden');
+    }
+  });
+  </script>
+
+</body>
+</html>
