@@ -3,14 +3,31 @@ import asyncssh
 
 
 async def _connect(host: dict, ssh_cfg: dict) -> asyncssh.SSHClientConnection:
-    return await asyncssh.connect(
-        host["host"],
-        port=host.get("port", ssh_cfg.get("default_port", 22)),
-        username=host.get("user", ssh_cfg.get("default_user", "root")),
-        client_keys=[host.get("key", ssh_cfg.get("default_key"))],
-        known_hosts=None,
-        connect_timeout=ssh_cfg.get("connect_timeout", 15),
-    )
+    kwargs: dict = {
+        "host": host["host"],
+        "port": host.get("port", ssh_cfg.get("default_port", 22)),
+        "username": host.get("user", ssh_cfg.get("default_user", "root")),
+        "known_hosts": None,
+        "connect_timeout": ssh_cfg.get("connect_timeout", 15),
+    }
+    if host.get("password"):
+        kwargs["password"] = host["password"]
+        kwargs["preferred_auth"] = "password"
+    else:
+        kwargs["client_keys"] = [host.get("key", ssh_cfg.get("default_key"))]
+    return await asyncssh.connect(**kwargs)
+
+
+async def verify_connection(host: dict, ssh_cfg: dict) -> dict:
+    """Returns {"ok": bool, "message": str}."""
+    try:
+        async with await _connect(host, ssh_cfg) as conn:
+            result = await conn.run("echo ok", check=False)
+        if result.stdout.strip() == "ok":
+            return {"ok": True, "message": "Connected successfully."}
+        return {"ok": False, "message": "Connected but command returned unexpected output."}
+    except Exception as exc:
+        return {"ok": False, "message": str(exc)}
 
 
 async def check_host_updates(host: dict, ssh_cfg: dict) -> dict:
