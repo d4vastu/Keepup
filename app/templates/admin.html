@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Admin — Update Dashboard</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/htmx.org@1.9.12"></script>
+  <style>
+    body { background-color: #0f172a; }
+  </style>
+</head>
+<body class="min-h-full text-slate-200 font-sans">
+
+  <div class="max-w-4xl mx-auto px-4 py-8">
+
+    <!-- Header -->
+    <div class="flex items-center justify-between mb-8">
+      <div>
+        <h1 class="text-2xl font-bold text-white">Admin</h1>
+        <p class="text-sm text-slate-500 mt-0.5">Manage hosts and configuration</p>
+      </div>
+      <a href="/"
+        class="px-4 py-2 rounded-lg bg-slate-700 hover:bg-slate-600 text-sm font-medium text-slate-300 transition-colors">
+        ← Dashboard
+      </a>
+    </div>
+
+    <!-- Connection Status -->
+    <section class="mb-8">
+      <h2 class="text-base font-semibold text-slate-300 mb-3">Connection Settings</h2>
+      <div class="bg-slate-800/50 rounded-xl border border-slate-700 p-5 space-y-4">
+        <p class="text-xs text-slate-500">These are set via environment variables in your <code class="text-slate-300 bg-slate-700 px-1 rounded">docker-compose.yml</code>.</p>
+
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <!-- Portainer -->
+          <div class="space-y-2">
+            <p class="text-xs font-medium text-slate-400 uppercase tracking-wider">Portainer</p>
+            <div class="flex items-center gap-2 text-sm">
+              {% if conn.portainer_url %}
+              <span class="w-2 h-2 rounded-full bg-green-400 flex-shrink-0"></span>
+              <span class="text-slate-300 font-mono text-xs truncate">{{ conn.portainer_url }}</span>
+              {% else %}
+              <span class="w-2 h-2 rounded-full bg-slate-600 flex-shrink-0"></span>
+              <span class="text-slate-500 text-xs">PORTAINER_URL not set</span>
+              {% endif %}
+            </div>
+            <div class="flex items-center gap-2 text-sm">
+              {% if conn.portainer_key_set %}
+              <span class="w-2 h-2 rounded-full bg-green-400 flex-shrink-0"></span>
+              <span class="text-slate-300 text-xs">API key configured</span>
+              {% else %}
+              <span class="w-2 h-2 rounded-full bg-amber-500 flex-shrink-0"></span>
+              <span class="text-slate-400 text-xs">PORTAINER_API_KEY not set</span>
+              {% endif %}
+            </div>
+          </div>
+
+          <!-- DockerHub -->
+          <div class="space-y-2">
+            <p class="text-xs font-medium text-slate-400 uppercase tracking-wider">Docker Hub <span class="normal-case font-normal text-slate-500">(optional)</span></p>
+            <div class="flex items-center gap-2 text-sm">
+              {% if conn.dockerhub_user %}
+              <span class="w-2 h-2 rounded-full bg-green-400 flex-shrink-0"></span>
+              <span class="text-slate-300 text-xs">{{ conn.dockerhub_user }}</span>
+              {% else %}
+              <span class="w-2 h-2 rounded-full bg-slate-600 flex-shrink-0"></span>
+              <span class="text-slate-500 text-xs">DOCKERHUB_USERNAME not set</span>
+              {% endif %}
+            </div>
+            <div class="flex items-center gap-2 text-sm">
+              {% if conn.dockerhub_token_set %}
+              <span class="w-2 h-2 rounded-full bg-green-400 flex-shrink-0"></span>
+              <span class="text-slate-300 text-xs">Token configured</span>
+              {% else %}
+              <span class="w-2 h-2 rounded-full bg-slate-600 flex-shrink-0"></span>
+              <span class="text-slate-500 text-xs">DOCKERHUB_TOKEN not set</span>
+              {% endif %}
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Hosts -->
+    <section class="mb-8">
+      <h2 class="text-base font-semibold text-slate-300 mb-3">Hosts</h2>
+      <div id="admin-hosts">
+        {% include "partials/admin_hosts.html" %}
+      </div>
+    </section>
+
+    <!-- SSH Defaults -->
+    <section class="mb-8">
+      <h2 class="text-base font-semibold text-slate-300 mb-3">SSH Defaults</h2>
+      <div id="admin-ssh">
+        {% include "partials/admin_ssh.html" %}
+      </div>
+    </section>
+
+  </div>
+
+</body>
+</html>

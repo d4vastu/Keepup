@@ -22,11 +22,17 @@
         <h1 class="text-2xl font-bold text-white">Update Dashboard</h1>
         <p class="text-sm text-slate-500 mt-0.5">OS packages + Docker stacks across all hosts</p>
       </div>
-      <button
-        onclick="document.querySelectorAll('[data-check]').forEach(el => htmx.trigger(el, 'check'))"
-        class="px-4 py-2 rounded-lg bg-slate-700 hover:bg-slate-600 text-sm font-medium text-white transition-colors">
-        Refresh All
-      </button>
+      <div class="flex items-center gap-3">
+        <button
+          onclick="document.querySelectorAll('[data-check]').forEach(el => htmx.trigger(el, 'check'))"
+          class="px-4 py-2 rounded-lg bg-slate-700 hover:bg-slate-600 text-sm font-medium text-white transition-colors">
+          Refresh All
+        </button>
+        <a href="/admin"
+          class="px-4 py-2 rounded-lg bg-slate-700 hover:bg-slate-600 text-sm font-medium text-slate-300 transition-colors">
+          Admin
+        </a>
+      </div>
     </div>
 
     <!-- OS Updates -->

@@ -1,0 +1,48 @@
+<div class="bg-slate-800/50 rounded-xl border border-slate-700 p-5">
+  {% if saved is defined and saved %}
+  <div class="mb-4 px-4 py-2 rounded-lg bg-green-900/40 border border-green-700 text-green-300 text-sm">Settings saved.</div>
+  {% endif %}
+  {% if error is defined and error %}
+  <div class="mb-4 px-4 py-2 rounded-lg bg-red-900/40 border border-red-700 text-red-300 text-sm">{{ error }}</div>
+  {% endif %}
+
+  <form
+    hx-put="/admin/ssh"
+    hx-target="#admin-ssh"
+    hx-swap="innerHTML"
+    class="space-y-4">
+    <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+      <div>
+        <label class="block text-xs font-medium text-slate-400 mb-1.5">Default User</label>
+        <input type="text" name="default_user" value="{{ ssh.default_user or 'root' }}"
+          class="w-full bg-slate-800 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-blue-500" />
+      </div>
+      <div>
+        <label class="block text-xs font-medium text-slate-400 mb-1.5">Default Port</label>
+        <input type="number" name="default_port" value="{{ ssh.default_port or 22 }}"
+          class="w-full bg-slate-800 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-blue-500" />
+      </div>
+      <div class="sm:col-span-2">
+        <label class="block text-xs font-medium text-slate-400 mb-1.5">Default Key Path <span class="text-slate-500 font-normal">(inside container)</span></label>
+        <input type="text" name="default_key" value="{{ ssh.default_key or '/app/keys/id_ed25519' }}"
+          class="w-full bg-slate-800 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-200 font-mono focus:outline-none focus:border-blue-500" />
+      </div>
+      <div>
+        <label class="block text-xs font-medium text-slate-400 mb-1.5">Connect Timeout <span class="text-slate-500 font-normal">(seconds)</span></label>
+        <input type="number" name="connect_timeout" value="{{ ssh.connect_timeout or 15 }}"
+          class="w-full bg-slate-800 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-blue-500" />
+      </div>
+      <div>
+        <label class="block text-xs font-medium text-slate-400 mb-1.5">Command Timeout <span class="text-slate-500 font-normal">(seconds)</span></label>
+        <input type="number" name="command_timeout" value="{{ ssh.command_timeout or 600 }}"
+          class="w-full bg-slate-800 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-blue-500" />
+      </div>
+    </div>
+    <div class="flex justify-end">
+      <button type="submit"
+        class="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-sm font-medium text-white transition-colors">
+        Save SSH Settings
+      </button>
+    </div>
+  </form>
+</div>
