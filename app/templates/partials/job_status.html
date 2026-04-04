@@ -1,0 +1,18 @@
+{% if job.done %}
+  {% if job.status == "error" %}
+  <div class="text-xs text-red-400">
+    Failed: {{ job.error }}
+  </div>
+  {% else %}
+  <div class="text-xs text-green-400 font-medium">Done</div>
+  {% if job.lines %}
+  <pre class="mt-1 text-xs text-slate-400 max-h-32 overflow-y-auto whitespace-pre-wrap bg-slate-900 rounded p-2">{{ job.lines | join('\n') }}</pre>
+  {% endif %}
+  {% endif %}
+{% else %}
+<div hx-get="/api/jobs/{{ job_id }}"
+     hx-trigger="every 3s"
+     hx-swap="outerHTML">
+  <span class="text-xs text-blue-400 animate-pulse">Running...</span>
+</div>
+{% endif %}

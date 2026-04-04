@@ -1,0 +1,10 @@
+services:
+  update-dashboard:
+    build: .
+    container_name: update-dashboard
+    ports:
+      - "8765:8000"
+    volumes:
+      - ./config.yml:/app/config.yml:ro
+      - ./keys:/app/keys:ro
+    restart: unless-stopped

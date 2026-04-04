@@ -1,0 +1,33 @@
+# Update Dashboard Configuration
+# Copy this file to config.yml and fill in your values.
+# Place your SSH private key(s) in the ./keys/ directory next to this file.
+
+portainer:
+  url: https://192.168.X.X:9443
+  api_key: YOUR_PORTAINER_API_KEY
+  verify_ssl: false  # Portainer uses a self-signed cert
+
+ssh:
+  default_key: /app/keys/id_ed25519
+  default_user: root
+  default_port: 22
+  connect_timeout: 15   # seconds
+  command_timeout: 600  # seconds (10 min for apt upgrade)
+
+hosts:
+  - name: "Host 1"
+    host: 192.168.X.X
+
+  - name: "Host 2"
+    host: 192.168.X.X
+
+  # Add more hosts here:
+  # - name: "My LXC"
+  #   host: 192.168.X.X
+  #   user: root          # optional, overrides default_user
+
+# Optional: Docker Hub credentials to avoid anonymous pull rate limits.
+# A free Docker Hub account gives 200 requests/6hrs vs 100 anonymous.
+# dockerhub:
+#   username: your_username
+#   token: your_access_token

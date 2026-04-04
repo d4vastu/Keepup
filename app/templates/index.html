@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Update Dashboard</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/htmx.org@1.9.12"></script>
+  <style>
+    body { background-color: #0f172a; }
+    .htmx-request .spinner { display: inline-block; }
+    .spinner { display: none; }
+  </style>
+</head>
+<body class="min-h-full text-slate-200 font-sans">
+
+  <div class="max-w-6xl mx-auto px-4 py-8">
+
+    <!-- Header -->
+    <div class="flex items-center justify-between mb-8">
+      <div>
+        <h1 class="text-2xl font-bold text-white">Update Dashboard</h1>
+        <p class="text-sm text-slate-500 mt-0.5">OS packages + Docker stacks across all hosts</p>
+      </div>
+      <button
+        onclick="document.querySelectorAll('[data-check]').forEach(el => htmx.trigger(el, 'check'))"
+        class="px-4 py-2 rounded-lg bg-slate-700 hover:bg-slate-600 text-sm font-medium text-white transition-colors">
+        Refresh All
+      </button>
+    </div>
+
+    <!-- OS Updates -->
+    <section class="mb-10">
+      <h2 class="text-lg font-semibold text-slate-200 mb-4 flex items-center gap-2">
+        <svg class="w-5 h-5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+            d="M5 12h14M12 5l7 7-7 7"/>
+        </svg>
+        OS Package Updates
+      </h2>
+
+      <div class="bg-slate-800/50 rounded-xl border border-slate-700 overflow-hidden">
+        <table class="w-full">
+          <thead>
+            <tr class="border-b border-slate-700">
+              <th class="text-left px-5 py-3 text-xs font-medium text-slate-500 uppercase tracking-wider w-48">Host</th>
+              <th class="text-left px-5 py-3 text-xs font-medium text-slate-500 uppercase tracking-wider">Status / Packages</th>
+              <th class="text-left px-5 py-3 text-xs font-medium text-slate-500 uppercase tracking-wider w-32">Action</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-slate-700/50">
+            {% for host in hosts %}
+            <tr class="hover:bg-slate-700/20 transition-colors">
+              <td class="px-5 py-3">
+                <span class="font-medium text-slate-200 text-sm">{{ host.name }}</span>
+                <div class="text-xs text-slate-500 font-mono">{{ host.host }}</div>
+              </td>
+              <td class="px-5 py-3">
+                <div
+                  id="host-{{ host.slug }}-status"
+                  data-check
+                  hx-get="/api/host/{{ host.slug }}/check"
+                  hx-trigger="load, check"
+                  hx-swap="innerHTML"
+                  hx-indicator="#host-{{ host.slug }}-spinner">
+                  <span class="text-xs text-slate-500 animate-pulse">Checking...</span>
+                </div>
+                <span id="host-{{ host.slug }}-spinner" class="spinner text-xs text-slate-500">Refreshing...</span>
+              </td>
+              <td class="px-5 py-3">
+                <div id="host-{{ host.slug }}-action"></div>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- Docker Stacks -->
+    <section>
+      <h2 class="text-lg font-semibold text-slate-200 mb-4 flex items-center gap-2">
+        <svg class="w-5 h-5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+            d="M20 7l-8-4-8 4m16 0v10l-8 4M4 7v10l8 4"/>
+        </svg>
+        Docker Stacks
+        {% if not portainer_configured %}
+        <span class="text-xs font-normal text-amber-400 ml-2">(Portainer API key not set in config.yml)</span>
+        {% endif %}
+      </h2>
+
+      <div class="bg-slate-800/50 rounded-xl border border-slate-700 p-5">
+        {% if portainer_configured %}
+        <div
+          id="docker-status"
+          data-check
+          hx-get="/api/docker/check"
+          hx-trigger="load, check"
+          hx-swap="innerHTML"
+          hx-indicator="#docker-spinner">
+          <p class="text-sm text-slate-500 animate-pulse">Checking stacks and image digests...</p>
+        </div>
+        <span id="docker-spinner" class="spinner text-xs text-slate-500">Refreshing...</span>
+        {% else %}
+        <p class="text-sm text-slate-500">
+          Add your Portainer API key to <code class="text-slate-300 bg-slate-700 px-1 rounded">config.yml</code> to enable Docker stack management.
+        </p>
+        {% endif %}
+      </div>
+    </section>
+
+  </div>
+
+  <script>
+    // The host_status partial puts the Update button into the status cell.
+    // After clicking Update the result goes into #host-{slug}-action in the action cell.
+    // This is wired by hx-target in the partial template itself.
+  </script>
+
+</body>
+</html>

@@ -1,0 +1,37 @@
+{% if packages %}
+<span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium bg-amber-900/50 text-amber-300 border border-amber-700">
+  {{ packages | length }} update{{ 's' if packages | length != 1 }}
+</span>
+<div class="mt-2 text-xs text-slate-400 max-h-24 overflow-y-auto space-y-0.5">
+  {% for pkg in packages %}
+  <div>{{ pkg.name }} <span class="text-slate-500">{{ pkg.current }} → {{ pkg.available }}</span></div>
+  {% endfor %}
+</div>
+<button
+  hx-post="/api/host/{{ slug }}/update"
+  hx-target="#host-{{ slug }}-action"
+  hx-swap="innerHTML"
+  hx-confirm="Run apt upgrade on {{ slug }}?"
+  class="mt-2 px-3 py-1 text-xs rounded bg-blue-600 hover:bg-blue-500 text-white font-medium transition-colors">
+  Update
+</button>
+{% else %}
+<span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-900/50 text-green-300 border border-green-700">
+  Up to date
+</span>
+{% endif %}
+{% if reboot_required %}
+<div class="mt-2 flex items-center gap-2">
+  <span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-900/50 text-red-300 border border-red-700">
+    Reboot required
+  </span>
+  <button
+    hx-post="/api/host/{{ slug }}/restart"
+    hx-target="#host-{{ slug }}-action"
+    hx-swap="innerHTML"
+    hx-confirm="Reboot {{ slug }} now?"
+    class="px-3 py-1 text-xs rounded bg-red-700 hover:bg-red-600 text-white font-medium transition-colors">
+    Restart
+  </button>
+</div>
+{% endif %}
