@@ -1,8 +1,15 @@
 import asyncio
+
 import asyncssh
 
 
-async def _connect(host: dict, ssh_cfg: dict) -> asyncssh.SSHClientConnection:
+def _needs_sudo(host: dict, ssh_cfg: dict) -> bool:
+    user = host.get("user") or ssh_cfg.get("default_user", "root")
+    return user != "root"
+
+
+async def _connect(host: dict, ssh_cfg: dict, creds: dict | None = None) -> asyncssh.SSHClientConnection:
+    creds = creds or {}
     kwargs: dict = {
         "host": host["host"],
         "port": host.get("port", ssh_cfg.get("default_port", 22)),
@@ -10,18 +17,45 @@ async def _connect(host: dict, ssh_cfg: dict) -> asyncssh.SSHClientConnection:
         "known_hosts": None,
         "connect_timeout": ssh_cfg.get("connect_timeout", 15),
     }
-    if host.get("password"):
-        kwargs["password"] = host["password"]
+    if creds.get("ssh_password"):
+        kwargs["password"] = creds["ssh_password"]
         kwargs["preferred_auth"] = "password"
+    elif creds.get("ssh_key"):
+        key = asyncssh.import_private_key(creds["ssh_key"])
+        kwargs["client_keys"] = [key]
     else:
-        kwargs["client_keys"] = [host.get("key", ssh_cfg.get("default_key"))]
+        # Fall back to key file (legacy / existing setups)
+        key_path = host.get("key", ssh_cfg.get("default_key"))
+        if key_path:
+            kwargs["client_keys"] = [key_path]
     return await asyncssh.connect(**kwargs)
 
 
-async def verify_connection(host: dict, ssh_cfg: dict) -> dict:
+async def _run(
+    conn: asyncssh.SSHClientConnection,
+    cmd: str,
+    sudo_password: str | None,
+    needs_sudo: bool,
+    timeout: int | None = None,
+) -> asyncssh.SSHCompletedProcess:
+    """Run a command, wrapping with sudo -S if needed."""
+    if needs_sudo and sudo_password:
+        full_cmd = f"sudo -S {cmd}"
+        stdin_data = sudo_password + "\n"
+    else:
+        full_cmd = cmd
+        stdin_data = None
+
+    coro = conn.run(full_cmd, input=stdin_data, check=False)
+    if timeout:
+        return await asyncio.wait_for(coro, timeout=timeout)
+    return await coro
+
+
+async def verify_connection(host: dict, ssh_cfg: dict, creds: dict | None = None) -> dict:
     """Returns {"ok": bool, "message": str}."""
     try:
-        async with await _connect(host, ssh_cfg) as conn:
+        async with await _connect(host, ssh_cfg, creds) as conn:
             result = await conn.run("echo ok", check=False)
         if result.stdout.strip() == "ok":
             return {"ok": True, "message": "Connected successfully."}
@@ -30,7 +64,9 @@ async def verify_connection(host: dict, ssh_cfg: dict) -> dict:
         return {"ok": False, "message": str(exc)}
 
 
-async def check_host_updates(host: dict, ssh_cfg: dict) -> dict:
+async def check_host_updates(
+    host: dict, ssh_cfg: dict, creds: dict | None = None
+) -> dict:
     """
     Returns:
       {
@@ -38,13 +74,19 @@ async def check_host_updates(host: dict, ssh_cfg: dict) -> dict:
         "reboot_required": bool,
       }
     """
-    async with await _connect(host, ssh_cfg) as conn:
-        result = await conn.run(
-            "apt-get update -qq 2>/dev/null;"
+    creds = creds or {}
+    use_sudo = _needs_sudo(host, ssh_cfg)
+    sudo_password = creds.get("sudo_password")
+
+    async with await _connect(host, ssh_cfg, creds) as conn:
+        result = await _run(
+            conn,
+            "sh -c 'apt-get update -qq 2>/dev/null;"
             " apt list --upgradable 2>/dev/null;"
-            " echo '__REBOOT__';"
-            " [ -f /var/run/reboot-required ] && echo yes || echo no",
-            check=False,
+            " echo __REBOOT__;"
+            " [ -f /var/run/reboot-required ] && echo yes || echo no'",
+            sudo_password=sudo_password,
+            needs_sudo=use_sudo,
         )
 
     output = result.stdout
@@ -58,7 +100,6 @@ async def check_host_updates(host: dict, ssh_cfg: dict) -> dict:
 
     packages = []
     for line in apt_part.splitlines():
-        # Format: "nginx/stable 1.26.0-1 amd64 [upgradable from: 1.24.0-1]"
         if "[upgradable from:" not in line:
             continue
         try:
@@ -73,27 +114,39 @@ async def check_host_updates(host: dict, ssh_cfg: dict) -> dict:
     return {"packages": packages, "reboot_required": reboot_required}
 
 
-async def reboot_host(host: dict, ssh_cfg: dict) -> list[str]:
+async def reboot_host(
+    host: dict, ssh_cfg: dict, creds: dict | None = None
+) -> list[str]:
     """Schedules an immediate reboot and returns. The SSH connection will drop."""
-    async with await _connect(host, ssh_cfg) as conn:
-        await conn.run(
+    creds = creds or {}
+    use_sudo = _needs_sudo(host, ssh_cfg)
+    sudo_password = creds.get("sudo_password")
+
+    async with await _connect(host, ssh_cfg, creds) as conn:
+        await _run(
+            conn,
             "nohup sh -c 'sleep 2 && reboot' >/dev/null 2>&1 &",
-            check=False,
+            sudo_password=sudo_password,
+            needs_sudo=use_sudo,
         )
     return ["Reboot initiated — server will be back in ~30 seconds."]
 
 
-async def run_host_update_buffered(host: dict, ssh_cfg: dict) -> list[str]:
-    """
-    Runs apt-get upgrade and returns all output lines when complete.
-    Used by background job runner.
-    """
-    cmd = "DEBIAN_FRONTEND=noninteractive apt-get upgrade -y 2>&1"
+async def run_host_update_buffered(
+    host: dict, ssh_cfg: dict, creds: dict | None = None
+) -> list[str]:
+    """Runs apt-get upgrade and returns all output lines when complete."""
+    creds = creds or {}
+    use_sudo = _needs_sudo(host, ssh_cfg)
+    sudo_password = creds.get("sudo_password")
     timeout = ssh_cfg.get("command_timeout", 600)
 
-    async with await _connect(host, ssh_cfg) as conn:
-        result = await asyncio.wait_for(
-            conn.run(cmd, check=False),
+    async with await _connect(host, ssh_cfg, creds) as conn:
+        result = await _run(
+            conn,
+            "DEBIAN_FRONTEND=noninteractive apt-get upgrade -y 2>&1",
+            sudo_password=sudo_password,
+            needs_sudo=use_sudo,
             timeout=timeout,
         )
 

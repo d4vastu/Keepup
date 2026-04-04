@@ -2,6 +2,7 @@
 import pytest
 import yaml
 from fastapi.testclient import TestClient
+from pathlib import Path
 
 SAMPLE_CONFIG = {
     "ssh": {
@@ -31,8 +32,22 @@ def config_file(tmp_path, monkeypatch):
 
 
 @pytest.fixture
-def client(config_file, monkeypatch):
-    """TestClient with env vars set and config pointed at temp file."""
+def data_dir(tmp_path, monkeypatch):
+    """Create a temp data dir and point credentials module at it."""
+    d = tmp_path / "data"
+    d.mkdir()
+
+    import app.credentials as creds
+    monkeypatch.setattr(creds, "_DATA_DIR", d)
+    monkeypatch.setattr(creds, "_SECRET_FILE", d / ".secret")
+    monkeypatch.setattr(creds, "_CREDS_FILE", d / "credentials.json")
+
+    return d
+
+
+@pytest.fixture
+def client(config_file, data_dir, monkeypatch):
+    """TestClient with env vars set and config/data dirs pointed at temp paths."""
     monkeypatch.setenv("PORTAINER_URL", "https://portainer.test:9443")
     monkeypatch.setenv("PORTAINER_API_KEY", "test-api-key")
     monkeypatch.setenv("PORTAINER_VERIFY_SSL", "false")

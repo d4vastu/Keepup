@@ -2,14 +2,15 @@ import os
 import uuid
 from pathlib import Path
 
-from fastapi import BackgroundTasks, FastAPI, Request
+from fastapi import BackgroundTasks, FastAPI, Form, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 
 from .admin import router as admin_router
 from .config_manager import get_hosts, get_ssh_config
+from .credentials import get_credentials, save_sudo_password
 from .portainer_client import PortainerClient
-from .ssh_client import check_host_updates, reboot_host, run_host_update_buffered
+from .ssh_client import _needs_sudo, check_host_updates, reboot_host, run_host_update_buffered
 
 # ---------------------------------------------------------------------------
 # App setup
@@ -25,7 +26,6 @@ templates = Jinja2Templates(directory=Path(__file__).parent / "templates")
 
 portainer: PortainerClient | None = None
 
-# DockerHub credentials (optional, raises registry pull rate limit)
 _dockerhub_user = os.getenv("DOCKERHUB_USERNAME", "")
 _dockerhub_token = os.getenv("DOCKERHUB_TOKEN", "")
 dockerhub_creds: dict | None = (
@@ -56,7 +56,6 @@ def _get_host(slug: str) -> dict:
     raise KeyError(f"Host {slug!r} not in config")
 
 
-# In-memory job store  {job_id: {"done": bool, "error": str|None, "lines": [str]}}
 _jobs: dict[str, dict] = {}
 
 
@@ -64,9 +63,9 @@ _jobs: dict[str, dict] = {}
 # Background job runners
 # ---------------------------------------------------------------------------
 
-async def _job_run_host_update(job_id: str, host: dict) -> None:
+async def _job_run_host_update(job_id: str, host: dict, creds: dict) -> None:
     try:
-        lines = await run_host_update_buffered(host, get_ssh_config())
+        lines = await run_host_update_buffered(host, get_ssh_config(), creds)
         _jobs[job_id]["lines"] = lines
         _jobs[job_id]["status"] = "done"
     except Exception as exc:
@@ -76,9 +75,9 @@ async def _job_run_host_update(job_id: str, host: dict) -> None:
         _jobs[job_id]["done"] = True
 
 
-async def _job_run_host_restart(job_id: str, host: dict) -> None:
+async def _job_run_host_restart(job_id: str, host: dict, creds: dict) -> None:
     try:
-        lines = await reboot_host(host, get_ssh_config())
+        lines = await reboot_host(host, get_ssh_config(), creds)
         _jobs[job_id]["lines"] = lines
         _jobs[job_id]["status"] = "done"
     except Exception as exc:
@@ -98,7 +97,6 @@ async def _job_run_stack_update(job_id: str, stack_id: int, endpoint_id: int) ->
         _jobs[job_id]["error"] = str(exc)
     finally:
         _jobs[job_id]["done"] = True
-
 
 
 # ---------------------------------------------------------------------------
@@ -121,7 +119,8 @@ async def dashboard(request: Request) -> HTMLResponse:
 async def host_check(request: Request, slug: str) -> HTMLResponse:
     try:
         host = _get_host(slug)
-        result = await check_host_updates(host, get_ssh_config())
+        creds = get_credentials(slug)
+        result = await check_host_updates(host, get_ssh_config(), creds)
         return templates.TemplateResponse(
             "partials/host_status.html",
             {
@@ -140,13 +139,31 @@ async def host_check(request: Request, slug: str) -> HTMLResponse:
 
 @app.post("/api/host/{slug}/update", response_class=HTMLResponse)
 async def host_update(
-    request: Request, slug: str, background_tasks: BackgroundTasks
+    request: Request,
+    slug: str,
+    background_tasks: BackgroundTasks,
+    sudo_password: str = Form(""),
+    save_sudo: str = Form(""),
 ) -> HTMLResponse:
     try:
         host = _get_host(slug)
+        creds = get_credentials(slug)
+
+        # Sudo check: need it, don't have it → show modal
+        if _needs_sudo(host, get_ssh_config()):
+            effective_sudo = sudo_password.strip() or creds.get("sudo_password", "")
+            if not effective_sudo:
+                return templates.TemplateResponse(
+                    "partials/sudo_modal.html",
+                    {"request": request, "slug": slug, "action": "update"},
+                )
+            if sudo_password.strip() and save_sudo == "save":
+                save_sudo_password(slug, sudo_password.strip())
+            creds = {**creds, "sudo_password": effective_sudo}
+
         job_id = uuid.uuid4().hex[:8]
         _jobs[job_id] = {"done": False, "status": "running", "error": None, "lines": []}
-        background_tasks.add_task(_job_run_host_update, job_id, host)
+        background_tasks.add_task(_job_run_host_update, job_id, host, creds)
         return templates.TemplateResponse(
             "partials/job_poll.html",
             {"request": request, "job_id": job_id},
@@ -160,13 +177,30 @@ async def host_update(
 
 @app.post("/api/host/{slug}/restart", response_class=HTMLResponse)
 async def host_restart(
-    request: Request, slug: str, background_tasks: BackgroundTasks
+    request: Request,
+    slug: str,
+    background_tasks: BackgroundTasks,
+    sudo_password: str = Form(""),
+    save_sudo: str = Form(""),
 ) -> HTMLResponse:
     try:
         host = _get_host(slug)
+        creds = get_credentials(slug)
+
+        if _needs_sudo(host, get_ssh_config()):
+            effective_sudo = sudo_password.strip() or creds.get("sudo_password", "")
+            if not effective_sudo:
+                return templates.TemplateResponse(
+                    "partials/sudo_modal.html",
+                    {"request": request, "slug": slug, "action": "restart"},
+                )
+            if sudo_password.strip() and save_sudo == "save":
+                save_sudo_password(slug, sudo_password.strip())
+            creds = {**creds, "sudo_password": effective_sudo}
+
         job_id = uuid.uuid4().hex[:8]
         _jobs[job_id] = {"done": False, "status": "running", "error": None, "lines": []}
-        background_tasks.add_task(_job_run_host_restart, job_id, host)
+        background_tasks.add_task(_job_run_host_restart, job_id, host, creds)
         return templates.TemplateResponse(
             "partials/job_poll.html",
             {"request": request, "job_id": job_id},

@@ -70,6 +70,20 @@ def test_add_host_requires_name_and_host(client):
     assert "required" in response.text.lower()
 
 
+def test_add_host_no_credentials_in_config(client, config_file):
+    """Credentials must not be stored in config.yml."""
+    client.post("/admin/hosts", data={
+        "name": "Safe Host",
+        "host": "10.0.0.99",
+        "user": "dashboard",
+    })
+    raw = yaml.safe_load(config_file.read_text())
+    host = next(h for h in raw["hosts"] if h["name"] == "Safe Host")
+    assert "password" not in host
+    assert "key" not in host
+    assert "ssh_key" not in host
+
+
 # ---------------------------------------------------------------------------
 # GET /admin/hosts/{slug}/edit
 # ---------------------------------------------------------------------------
@@ -109,6 +123,17 @@ def test_update_host(client, config_file):
     assert "Test Host" not in names
 
 
+def test_update_host_renames_credentials(client, data_dir):
+    """Renaming a host must migrate its credentials to the new slug."""
+    from app.credentials import save_credentials, get_credentials
+    save_credentials("test-host", ssh_password="pass123")
+
+    client.put("/admin/hosts/test-host", data={"name": "Renamed Host", "host": "192.168.1.10"})
+
+    assert get_credentials("renamed-host")["ssh_password"] == "pass123"
+    assert get_credentials("test-host") == {}
+
+
 # ---------------------------------------------------------------------------
 # DELETE /admin/hosts/{slug}
 # ---------------------------------------------------------------------------
@@ -128,6 +153,94 @@ def test_delete_host_leaves_others(client, config_file):
     raw = yaml.safe_load(config_file.read_text())
     names = [h["name"] for h in raw["hosts"]]
     assert "Custom User Host" in names
+
+
+def test_delete_host_removes_credentials(client, data_dir):
+    from app.credentials import save_credentials, get_credentials
+    save_credentials("test-host", ssh_password="pass")
+    client.delete("/admin/hosts/test-host")
+    assert get_credentials("test-host") == {}
+
+
+# ---------------------------------------------------------------------------
+# GET/POST /admin/hosts/{slug}/credentials
+# ---------------------------------------------------------------------------
+
+def test_get_credentials_form_returns_200(client):
+    response = client.get("/admin/hosts/test-host/credentials")
+    assert response.status_code == 200
+
+
+def test_get_credentials_form_unknown_host(client):
+    response = client.get("/admin/hosts/does-not-exist/credentials")
+    assert response.status_code == 200
+    assert "not found" in response.text.lower()
+
+
+def test_get_credentials_form_shows_status_empty(client):
+    response = client.get("/admin/hosts/test-host/credentials")
+    assert response.status_code == 200
+    # No saved credentials yet — "saved" badge should not appear
+    assert "&#10003;" not in response.text
+
+
+def test_get_credentials_form_shows_saved_badge(client, data_dir):
+    from app.credentials import save_credentials
+    save_credentials("test-host", ssh_password="pass", sudo_password="sudo")
+    response = client.get("/admin/hosts/test-host/credentials")
+    # Checkmark badges appear when credentials are saved
+    assert "&#10003;" in response.text
+
+
+def test_post_credentials_saves_ssh_password(client, data_dir):
+    from app.credentials import get_credentials
+    response = client.post("/admin/hosts/test-host/credentials", data={
+        "auth_method": "password",
+        "ssh_password": "newpass",
+        "ssh_key": "",
+        "sudo_password": "",
+    })
+    assert response.status_code == 200
+    assert get_credentials("test-host")["ssh_password"] == "newpass"
+
+
+def test_post_credentials_saves_ssh_key(client, data_dir):
+    from app.credentials import get_credentials
+    key_data = "-----BEGIN OPENSSH PRIVATE KEY-----\nfakekey\n-----END OPENSSH PRIVATE KEY-----"
+    response = client.post("/admin/hosts/test-host/credentials", data={
+        "auth_method": "key",
+        "ssh_password": "",
+        "ssh_key": key_data,
+        "sudo_password": "",
+    })
+    assert response.status_code == 200
+    assert get_credentials("test-host")["ssh_key"] == key_data
+
+
+def test_post_credentials_saves_sudo_password(client, data_dir):
+    from app.credentials import get_credentials
+    client.post("/admin/hosts/test-host/credentials", data={
+        "auth_method": "key",
+        "ssh_password": "",
+        "ssh_key": "",
+        "sudo_password": "mysudopass",
+    })
+    assert get_credentials("test-host")["sudo_password"] == "mysudopass"
+
+
+def test_post_credentials_password_method_clears_key(client, data_dir):
+    """Selecting 'password' auth method should pass empty string for ssh_key, clearing it."""
+    from app.credentials import save_credentials, get_credentials
+    save_credentials("test-host", ssh_key="-----BEGIN...")
+    client.post("/admin/hosts/test-host/credentials", data={
+        "auth_method": "password",
+        "ssh_password": "newpass",
+        "ssh_key": "",
+        "sudo_password": "",
+    })
+    creds = get_credentials("test-host")
+    assert "ssh_key" not in creds
+    assert creds["ssh_password"] == "newpass"
 
 
 # ---------------------------------------------------------------------------
@@ -176,47 +289,6 @@ def test_update_host_error_shows_message(client, monkeypatch):
     response = client.put("/admin/hosts/test-host", data={"name": "X", "host": "1.2.3.4"})
     assert response.status_code == 200
     assert "write error" in response.text
-
-
-# ---------------------------------------------------------------------------
-# Password auth
-# ---------------------------------------------------------------------------
-
-def test_add_host_with_password(client, config_file):
-    response = client.post("/admin/hosts", data={
-        "name": "Password Host",
-        "host": "10.0.0.77",
-        "user": "dashboard",
-        "auth_method": "password",
-        "password": "s3cr3t",
-    })
-    assert response.status_code == 200
-    assert "Password Host" in response.text
-
-    raw = yaml.safe_load(config_file.read_text())
-    host = next(h for h in raw["hosts"] if h["name"] == "Password Host")
-    assert host["password"] == "s3cr3t"
-    assert "key" not in host
-
-
-def test_add_host_key_auth_does_not_store_password(client, config_file):
-    client.post("/admin/hosts", data={
-        "name": "Key Host",
-        "host": "10.0.0.78",
-        "auth_method": "key",
-        "key": "/app/keys/id_ed25519",
-        "password": "should-be-ignored",
-    })
-    raw = yaml.safe_load(config_file.read_text())
-    host = next(h for h in raw["hosts"] if h["name"] == "Key Host")
-    assert "password" not in host
-    assert host["key"] == "/app/keys/id_ed25519"
-
-
-def test_admin_table_shows_auth_method(client):
-    response = client.get("/admin/hosts")
-    assert response.status_code == 200
-    assert "SSH Key" in response.text
 
 
 # ---------------------------------------------------------------------------

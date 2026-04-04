@@ -31,39 +31,7 @@
         </div>
       </div>
 
-      <!-- Auth method -->
-      {% set edit_id = host.slug %}
-      {% set use_password = host.password %}
-      <div>
-        <label class="block text-xs text-slate-500 mb-1.5">Authentication Method</label>
-        <div class="flex gap-4">
-          <label class="flex items-center gap-2 cursor-pointer">
-            <input type="radio" name="auth_method" value="key" {% if not use_password %}checked{% endif %}
-              onchange="document.getElementById('edit-key-{{ edit_id }}').style.display='block'; document.getElementById('edit-pw-{{ edit_id }}').style.display='none';"
-              class="accent-blue-500" />
-            <span class="text-sm text-slate-300">SSH Key</span>
-          </label>
-          <label class="flex items-center gap-2 cursor-pointer">
-            <input type="radio" name="auth_method" value="password" {% if use_password %}checked{% endif %}
-              onchange="document.getElementById('edit-key-{{ edit_id }}').style.display='none'; document.getElementById('edit-pw-{{ edit_id }}').style.display='block';"
-              class="accent-blue-500" />
-            <span class="text-sm text-slate-300">Password</span>
-          </label>
-        </div>
-      </div>
-
-      <div id="edit-key-{{ edit_id }}" {% if use_password %}style="display:none;"{% endif %}>
-        <label class="block text-xs text-slate-500 mb-1">SSH Key Path <span class="text-slate-600">(optional)</span></label>
-        <input type="text" name="key" value="{{ host.key or '' }}" placeholder="Leave blank to use SSH default"
-          class="w-full bg-slate-900 border border-slate-600 rounded-lg px-3 py-1.5 text-sm text-slate-200 placeholder-slate-600 font-mono focus:outline-none focus:border-blue-500" />
-      </div>
-
-      <div id="edit-pw-{{ edit_id }}" {% if not use_password %}style="display:none;"{% endif %}>
-        <label class="block text-xs text-slate-500 mb-1">Password</label>
-        <input type="password" name="password" placeholder="Leave blank to keep existing password"
-          class="w-full bg-slate-900 border border-slate-600 rounded-lg px-3 py-1.5 text-sm text-slate-200 placeholder-slate-600 focus:outline-none focus:border-blue-500" />
-        <p class="mt-1 text-xs text-amber-700">Stored in plaintext in config.yml — use a dedicated user, never root.</p>
-      </div>
+      <p class="text-xs text-slate-500">To change credentials, use the <span class="text-slate-300">Credentials</span> button on the host row.</p>
 
       <div class="flex gap-2 justify-end">
         <button type="button"

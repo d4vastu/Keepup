@@ -40,37 +40,35 @@ def get_hosts() -> list[dict]:
     ]
 
 
-def _build_host_entry(name: str, host: str, user: str | None, port: int | None,
-                      key: str | None, password: str | None) -> dict:
+def _build_host_entry(name: str, host: str, user: str | None, port: int | None) -> dict:
+    """Builds a host entry for config.yml — no credentials stored here."""
     entry: dict = {"name": name, "host": host}
     if user:
         entry["user"] = user
     if port:
         entry["port"] = port
-    if password:
-        entry["password"] = password
-    elif key:
-        entry["key"] = key
     return entry
 
 
-def add_host(name: str, host: str, user: str | None, port: int | None,
-             key: str | None, password: str | None = None) -> None:
+def add_host(name: str, host: str, user: str | None, port: int | None) -> str:
+    """Add a host to config and return its slug."""
     config = load_config()
     hosts = config.setdefault("hosts", [])
-    hosts.append(_build_host_entry(name, host, user, port, key, password))
+    hosts.append(_build_host_entry(name, host, user, port))
     save_config(config)
+    return slugify(name)
 
 
-def update_host(slug: str, name: str, host: str, user: str | None, port: int | None,
-                key: str | None, password: str | None = None) -> None:
+def update_host(slug: str, name: str, host: str, user: str | None, port: int | None) -> str:
+    """Update a host entry and return the new slug (may differ if name changed)."""
     config = load_config()
     hosts = config.get("hosts", [])
     for i, h in enumerate(hosts):
         if slugify(h["name"]) == slug:
-            hosts[i] = _build_host_entry(name, host, user, port, key, password)
+            hosts[i] = _build_host_entry(name, host, user, port)
             break
     save_config(config)
+    return slugify(name)
 
 
 def delete_host(slug: str) -> None:

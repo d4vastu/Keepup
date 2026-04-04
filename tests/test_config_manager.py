@@ -77,35 +77,48 @@ def test_load_config_missing_file_returns_defaults(tmp_path, monkeypatch):
 # ---------------------------------------------------------------------------
 
 def test_add_host_minimal(config_file):
-    add_host(name="New Host", host="10.0.0.1", user=None, port=None, key=None)
+    add_host(name="New Host", host="10.0.0.1", user=None, port=None)
     hosts = get_hosts()
     names = [h["name"] for h in hosts]
     assert "New Host" in names
 
 
-def test_add_host_with_all_fields(config_file):
-    add_host(name="Full Host", host="10.0.0.2", user="ubuntu", port=2222, key="/app/keys/other")
+def test_add_host_with_user_and_port(config_file):
+    add_host(name="Full Host", host="10.0.0.2", user="ubuntu", port=2222)
     hosts = get_hosts()
     host = next(h for h in hosts if h["name"] == "Full Host")
     assert host["user"] == "ubuntu"
     assert host["port"] == 2222
-    assert host["key"] == "/app/keys/other"
 
 
 def test_add_host_persists_to_file(config_file):
-    add_host(name="Persisted", host="10.0.0.3", user=None, port=None, key=None)
+    add_host(name="Persisted", host="10.0.0.3", user=None, port=None)
     raw = yaml.safe_load(config_file.read_text())
     names = [h["name"] for h in raw["hosts"]]
     assert "Persisted" in names
 
 
 def test_add_host_does_not_store_none_fields(config_file):
-    add_host(name="Minimal", host="10.0.0.4", user=None, port=None, key=None)
+    add_host(name="Minimal", host="10.0.0.4", user=None, port=None)
     raw = yaml.safe_load(config_file.read_text())
     host = next(h for h in raw["hosts"] if h["name"] == "Minimal")
     assert "user" not in host
     assert "port" not in host
+
+
+def test_add_host_no_credentials_in_config(config_file):
+    """Credentials must never appear in config.yml."""
+    add_host(name="Secure Host", host="10.0.0.5", user="dashboard", port=None)
+    raw = yaml.safe_load(config_file.read_text())
+    host = next(h for h in raw["hosts"] if h["name"] == "Secure Host")
+    assert "password" not in host
     assert "key" not in host
+    assert "ssh_key" not in host
+
+
+def test_add_host_returns_slug(config_file):
+    slug = add_host(name="My Server", host="10.0.0.6", user=None, port=None)
+    assert slug == "my-server"
 
 
 # ---------------------------------------------------------------------------
@@ -113,7 +126,7 @@ def test_add_host_does_not_store_none_fields(config_file):
 # ---------------------------------------------------------------------------
 
 def test_update_host_changes_name(config_file):
-    update_host("test-host", name="Renamed Host", host="192.168.1.10", user=None, port=None, key=None)
+    update_host("test-host", name="Renamed Host", host="192.168.1.10", user=None, port=None)
     hosts = get_hosts()
     names = [h["name"] for h in hosts]
     assert "Renamed Host" in names
@@ -121,14 +134,14 @@ def test_update_host_changes_name(config_file):
 
 
 def test_update_host_changes_ip(config_file):
-    update_host("test-host", name="Test Host", host="10.10.10.10", user=None, port=None, key=None)
+    update_host("test-host", name="Test Host", host="10.10.10.10", user=None, port=None)
     hosts = get_hosts()
     host = next(h for h in hosts if h["name"] == "Test Host")
     assert host["host"] == "10.10.10.10"
 
 
 def test_update_host_adds_optional_fields(config_file):
-    update_host("test-host", name="Test Host", host="192.168.1.10", user="ubuntu", port=2222, key=None)
+    update_host("test-host", name="Test Host", host="192.168.1.10", user="ubuntu", port=2222)
     hosts = get_hosts()
     host = next(h for h in hosts if h["name"] == "Test Host")
     assert host["user"] == "ubuntu"
@@ -137,9 +150,14 @@ def test_update_host_adds_optional_fields(config_file):
 
 def test_update_host_unknown_slug_is_noop(config_file):
     before = get_hosts()
-    update_host("nonexistent", name="X", host="1.2.3.4", user=None, port=None, key=None)
+    update_host("nonexistent", name="X", host="1.2.3.4", user=None, port=None)
     after = get_hosts()
     assert len(before) == len(after)
+
+
+def test_update_host_returns_new_slug(config_file):
+    new_slug = update_host("test-host", name="Renamed Host", host="192.168.1.10", user=None, port=None)
+    assert new_slug == "renamed-host"
 
 
 # ---------------------------------------------------------------------------

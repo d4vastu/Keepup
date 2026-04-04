@@ -9,15 +9,16 @@ import pytest
 # ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
-async def test_job_run_host_update_success(config_file):
+async def test_job_run_host_update_success(config_file, data_dir):
     import app.main as m
 
     job_id = "testjob1"
     m._jobs[job_id] = {"done": False, "status": "running", "error": None, "lines": []}
     host = {"name": "Test", "host": "10.0.0.1", "slug": "test"}
+    creds = {}
 
     with patch("app.main.run_host_update_buffered", new=AsyncMock(return_value=["line1", "line2"])):
-        await m._job_run_host_update(job_id, host)
+        await m._job_run_host_update(job_id, host, creds)
 
     assert m._jobs[job_id]["done"] is True
     assert m._jobs[job_id]["status"] == "done"
@@ -25,15 +26,16 @@ async def test_job_run_host_update_success(config_file):
 
 
 @pytest.mark.asyncio
-async def test_job_run_host_update_failure(config_file):
+async def test_job_run_host_update_failure(config_file, data_dir):
     import app.main as m
 
     job_id = "testjob2"
     m._jobs[job_id] = {"done": False, "status": "running", "error": None, "lines": []}
     host = {"name": "Test", "host": "10.0.0.1", "slug": "test"}
+    creds = {}
 
     with patch("app.main.run_host_update_buffered", new=AsyncMock(side_effect=Exception("SSH failed"))):
-        await m._job_run_host_update(job_id, host)
+        await m._job_run_host_update(job_id, host, creds)
 
     assert m._jobs[job_id]["done"] is True
     assert m._jobs[job_id]["status"] == "error"
@@ -41,37 +43,39 @@ async def test_job_run_host_update_failure(config_file):
 
 
 @pytest.mark.asyncio
-async def test_job_run_host_restart_success(config_file):
+async def test_job_run_host_restart_success(config_file, data_dir):
     import app.main as m
 
     job_id = "testjob3"
     m._jobs[job_id] = {"done": False, "status": "running", "error": None, "lines": []}
     host = {"name": "Test", "host": "10.0.0.1", "slug": "test"}
+    creds = {}
 
     with patch("app.main.reboot_host", new=AsyncMock(return_value=["Reboot initiated"])):
-        await m._job_run_host_restart(job_id, host)
+        await m._job_run_host_restart(job_id, host, creds)
 
     assert m._jobs[job_id]["done"] is True
     assert m._jobs[job_id]["status"] == "done"
 
 
 @pytest.mark.asyncio
-async def test_job_run_host_restart_failure(config_file):
+async def test_job_run_host_restart_failure(config_file, data_dir):
     import app.main as m
 
     job_id = "testjob4"
     m._jobs[job_id] = {"done": False, "status": "running", "error": None, "lines": []}
     host = {"name": "Test", "host": "10.0.0.1", "slug": "test"}
+    creds = {}
 
     with patch("app.main.reboot_host", new=AsyncMock(side_effect=Exception("Connection refused"))):
-        await m._job_run_host_restart(job_id, host)
+        await m._job_run_host_restart(job_id, host, creds)
 
     assert m._jobs[job_id]["status"] == "error"
     assert "Connection refused" in m._jobs[job_id]["error"]
 
 
 @pytest.mark.asyncio
-async def test_job_run_stack_update_success(config_file, monkeypatch):
+async def test_job_run_stack_update_success(config_file, data_dir, monkeypatch):
     import app.main as m
 
     mock_portainer = AsyncMock()
@@ -89,7 +93,7 @@ async def test_job_run_stack_update_success(config_file, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_job_run_stack_update_failure(config_file, monkeypatch):
+async def test_job_run_stack_update_failure(config_file, data_dir, monkeypatch):
     import app.main as m
 
     mock_portainer = AsyncMock()
@@ -106,14 +110,65 @@ async def test_job_run_stack_update_failure(config_file, monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# POST /api/host/{slug}/update
+# POST /api/host/{slug}/update — sudo modal logic
 # ---------------------------------------------------------------------------
 
-def test_host_update_triggers_job(client):
+def test_host_update_root_user_no_modal(client):
+    """Root user (SSH default) → no sudo modal, job starts immediately."""
     with patch("app.main.run_host_update_buffered", new=AsyncMock(return_value=[])):
         response = client.post("/api/host/test-host/update")
     assert response.status_code == 200
-    assert "Running" in response.text or "job" in response.text.lower()
+    # Should get job poll, not a sudo modal
+    assert "sudo" not in response.text.lower()
+
+
+def test_host_update_nonroot_no_sudo_shows_modal(client, data_dir):
+    """Non-root user with no saved sudo password → modal returned."""
+    with patch("app.main._needs_sudo", return_value=True):
+        response = client.post("/api/host/test-host/update")
+    assert response.status_code == 200
+    assert "sudo" in response.text.lower()
+    assert "Use once" in response.text or "Save" in response.text
+
+
+def test_host_update_nonroot_sudo_provided_once(client, data_dir):
+    """Non-root + sudo_password in form → starts job (does not save)."""
+    from app.credentials import get_credentials
+    with patch("app.main._needs_sudo", return_value=True), \
+         patch("app.main.run_host_update_buffered", new=AsyncMock(return_value=[])):
+        response = client.post("/api/host/test-host/update", data={
+            "sudo_password": "mysudo",
+            "save_sudo": "",
+        })
+    assert response.status_code == 200
+    # Job started, not a modal
+    assert "Use once" not in response.text
+    # Credential NOT saved
+    assert "sudo_password" not in get_credentials("test-host")
+
+
+def test_host_update_nonroot_sudo_saved(client, data_dir):
+    """Non-root + sudo_password + save_sudo=save → saves credential and starts job."""
+    from app.credentials import get_credentials
+    with patch("app.main._needs_sudo", return_value=True), \
+         patch("app.main.run_host_update_buffered", new=AsyncMock(return_value=[])):
+        response = client.post("/api/host/test-host/update", data={
+            "sudo_password": "mysudo",
+            "save_sudo": "save",
+        })
+    assert response.status_code == 200
+    assert get_credentials("test-host").get("sudo_password") == "mysudo"
+
+
+def test_host_update_nonroot_saved_sudo_used_automatically(client, data_dir):
+    """If sudo password already saved, no modal — job runs directly."""
+    from app.credentials import save_credentials
+    save_credentials("test-host", sudo_password="presaved")
+    with patch("app.main._needs_sudo", return_value=True), \
+         patch("app.main.run_host_update_buffered", new=AsyncMock(return_value=[])):
+        response = client.post("/api/host/test-host/update")
+    assert response.status_code == 200
+    assert "Use once" not in response.text
 
 
 def test_host_update_unknown_slug(client):
@@ -123,13 +178,21 @@ def test_host_update_unknown_slug(client):
 
 
 # ---------------------------------------------------------------------------
-# POST /api/host/{slug}/restart
+# POST /api/host/{slug}/restart — sudo modal logic
 # ---------------------------------------------------------------------------
 
-def test_host_restart_triggers_job(client):
+def test_host_restart_root_user_no_modal(client):
     with patch("app.main.reboot_host", new=AsyncMock(return_value=[])):
         response = client.post("/api/host/test-host/restart")
     assert response.status_code == 200
+    assert "sudo" not in response.text.lower()
+
+
+def test_host_restart_nonroot_no_sudo_shows_modal(client, data_dir):
+    with patch("app.main._needs_sudo", return_value=True):
+        response = client.post("/api/host/test-host/restart")
+    assert response.status_code == 200
+    assert "sudo" in response.text.lower()
 
 
 def test_host_restart_unknown_slug(client):
