@@ -1,6 +1,5 @@
 """Tests for SSL certificate management."""
 import ipaddress
-from pathlib import Path
 import pytest
 from cryptography import x509
 from cryptography.x509.oid import NameOID
@@ -62,7 +61,6 @@ def test_generated_cert_includes_localhost():
 
 def test_generated_cert_validity_two_years():
     from app.ssl_manager import generate_self_signed_cert
-    import datetime
     cert_pem, _ = generate_self_signed_cert("192.168.1.1")
     cert = x509.load_pem_x509_certificate(cert_pem.encode())
     try:
@@ -126,3 +124,34 @@ def test_get_cert_info_returns_cn_and_expiry(data_dir):
     assert info is not None
     assert info["cn"] == "192.168.1.50"
     assert "2028" in info["expires"] or "2027" in info["expires"]  # ~2 years from now
+
+
+def test_get_cert_info_fallback_for_old_python(data_dir, monkeypatch):
+    """When not_valid_after_utc raises AttributeError, fall back to not_valid_after."""
+    import datetime
+    from unittest.mock import MagicMock, patch
+    from app.ssl_manager import generate_self_signed_cert, save_ssl_files
+
+    cert_pem, key_pem = generate_self_signed_cert("192.168.1.99")
+    save_ssl_files(cert_pem, key_pem)
+
+    # Patch the cert object to raise AttributeError on not_valid_after_utc
+    # but return a real date for not_valid_after (legacy attribute name)
+    import app.ssl_manager as sm
+    real_load = sm.x509.load_pem_x509_certificate
+
+    def patched_load(data):
+        cert = real_load(data)
+        mock = MagicMock(wraps=cert)
+        # Make not_valid_after_utc raise AttributeError
+        type(mock).not_valid_after_utc = property(lambda self: (_ for _ in ()).throw(AttributeError("not_valid_after_utc")))
+        # Provide a not_valid_after that returns a datetime-like object
+        expiry = datetime.datetime(2028, 1, 1, tzinfo=datetime.timezone.utc)
+        type(mock).not_valid_after = property(lambda self: expiry)
+        return mock
+
+    with patch.object(sm.x509, "load_pem_x509_certificate", side_effect=patched_load):
+        info = sm.get_cert_info()
+
+    assert info is not None
+    assert "2028" in info["expires"]
