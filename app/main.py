@@ -46,13 +46,13 @@ class AuthMiddleware(BaseHTTPMiddleware):
 # ---------------------------------------------------------------------------
 
 app = FastAPI(title="Update Dashboard")
+app.add_middleware(AuthMiddleware)
 app.add_middleware(SessionMiddleware,
                    secret_key=get_session_secret(),
                    session_cookie="ud_session",
                    max_age=30 * 24 * 3600,   # 30 days max; login sets shorter if no remember_me
                    https_only=False,
                    same_site="lax")
-app.add_middleware(AuthMiddleware)
 app.include_router(auth_router)
 app.include_router(admin_router)
 app.include_router(auto_updates_router)
