@@ -34,9 +34,18 @@
 
       <form method="post" action="/login" class="space-y-4">
 
+        {% if needs_username %}
+        <div>
+          <label class="block text-xs font-medium text-slate-400 mb-1">Username</label>
+          <input type="text" name="username" autofocus required autocomplete="username"
+            class="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2.5 text-sm text-slate-200 focus:outline-none focus:border-blue-500 placeholder:text-slate-500">
+        </div>
+        {% endif %}
+
         <div>
           <label class="block text-xs font-medium text-slate-400 mb-1">Password</label>
-          <input type="password" name="password" autofocus required
+          <input type="password" name="password" {% if not needs_username %}autofocus{% endif %} required
+            autocomplete="current-password"
             class="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2.5 text-sm text-slate-200 focus:outline-none focus:border-blue-500 placeholder:text-slate-500">
         </div>
 

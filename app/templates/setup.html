@@ -32,13 +32,22 @@
 
     <form method="post" action="/setup" class="space-y-6">
 
-      <!-- Password -->
+      <!-- Account -->
       <div class="bg-slate-800/60 border border-slate-700 rounded-2xl p-5 space-y-4">
-        <h2 class="text-sm font-semibold text-slate-200">Set your password</h2>
+        <h2 class="text-sm font-semibold text-slate-200">Create your account</h2>
+
+        <div>
+          <label class="block text-xs font-medium text-slate-400 mb-1">Username</label>
+          <input type="text" name="username" value="{{ username_value or '' }}" required autofocus
+            autocomplete="username" placeholder="admin"
+            class="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2.5 text-sm text-slate-200 focus:outline-none focus:border-blue-500 placeholder:text-slate-500">
+          <p class="text-xs text-slate-500 mt-1">Letters, numbers, hyphens, and underscores only.</p>
+        </div>
 
         <div>
           <label class="block text-xs font-medium text-slate-400 mb-1">Password</label>
-          <input type="password" name="password" required minlength="8" autofocus
+          <input type="password" name="password" required minlength="8"
+            autocomplete="new-password"
             class="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2.5 text-sm text-slate-200 focus:outline-none focus:border-blue-500">
           <p class="text-xs text-slate-500 mt-1">At least 8 characters.</p>
         </div>
@@ -46,6 +55,7 @@
         <div>
           <label class="block text-xs font-medium text-slate-400 mb-1">Confirm password</label>
           <input type="password" name="password_confirm" required
+            autocomplete="new-password"
             class="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2.5 text-sm text-slate-200 focus:outline-none focus:border-blue-500">
         </div>
       </div>

@@ -3,9 +3,10 @@ Authentication helpers.
 
 Admin account stored in the encrypted credential store under __admin__:
   {
-    "password_hash": str,         # bcrypt
-    "totp_secret":   str | None,  # base32, None = MFA not enrolled
-    "backup_key_hash": str,       # sha256 hex of the backup key
+    "username":        str,              # display/login username
+    "password_hash":   str,             # bcrypt
+    "totp_secret":     str | None,      # base32, None = MFA not enrolled
+    "backup_key_hash": str,             # sha256 hex of the backup key
   }
 """
 import hashlib
@@ -16,7 +17,7 @@ from pathlib import Path
 import pyotp
 from passlib.context import CryptContext
 
-from .credentials import get_integration_credentials, save_integration_credentials
+from .credentials import delete_integration_credentials, get_integration_credentials, save_integration_credentials
 
 _pwd = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
@@ -71,13 +72,14 @@ def _hash_backup_key(key: str) -> str:
     return hashlib.sha256(key.strip().upper().encode()).hexdigest()
 
 
-def create_admin(password: str, totp_secret: str | None) -> str:
+def create_admin(username: str, password: str, totp_secret: str | None) -> str:
     """
     Persist the admin account. Returns the plaintext backup key (show once).
     totp_secret is None if user skipped MFA enrollment.
     """
     backup_key = _generate_backup_key()
     data: dict = {
+        "username": username,
         "password_hash": _pwd.hash(password),
         "backup_key_hash": _hash_backup_key(backup_key),
     }
@@ -85,6 +87,26 @@ def create_admin(password: str, totp_secret: str | None) -> str:
         data["totp_secret"] = totp_secret
     save_integration_credentials("admin", **data)
     return backup_key
+
+
+def get_admin_username() -> str:
+    """Return the stored admin username, or empty string if not set."""
+    return get_integration_credentials("admin").get("username", "")
+
+
+def verify_login(username: str, password: str) -> bool:
+    """Check username (case-insensitive, skipped for legacy accounts) then password."""
+    creds = get_integration_credentials("admin")
+    stored_username = creds.get("username", "")
+    if stored_username and username.strip().lower() != stored_username.strip().lower():
+        return False
+    h = creds.get("password_hash", "")
+    return bool(h) and _pwd.verify(password, h)
+
+
+def delete_admin() -> None:
+    """Remove the admin account entirely."""
+    delete_integration_credentials("admin")
 
 
 # ---------------------------------------------------------------------------
