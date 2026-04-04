@@ -145,9 +145,9 @@ def test_login_page_with_username_shows_username_field(auth_client, data_dir):
 def test_login_page_without_username_no_username_field(auth_client, data_dir):
     """Legacy accounts without username don't show the username field."""
     from app.credentials import save_integration_credentials
-    from passlib.context import CryptContext
-    pwd = CryptContext(schemes=["bcrypt"], deprecated="auto")
-    save_integration_credentials("admin", password_hash=pwd.hash("password123"))
+    from app.auth import _hash_password
+    save_integration_credentials("admin", password_hash=_hash_password("password123"))
+
     response = auth_client.get("/login", follow_redirects=False)
     assert response.status_code == 200
     assert 'name="username"' not in response.text

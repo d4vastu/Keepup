@@ -4,34 +4,6 @@ import yaml
 from fastapi.testclient import TestClient
 from pathlib import Path
 
-# ---------------------------------------------------------------------------
-# Compatibility patch: passlib 1.7.4 + bcrypt 5.0.0 detection
-# bcrypt 5.0.0 raises ValueError for passwords > 72 bytes; patch detect_wrap_bug
-# so it returns False (no bug) instead of crashing.
-# ---------------------------------------------------------------------------
-
-def _patch_passlib_bcrypt():
-    try:
-        import passlib.handlers.bcrypt as _ph_bcrypt
-        import passlib.handlers.bcrypt as _pbcrypt_mod
-        # Force-load the backend module to find the function
-        import sys, types
-        # Monkey-patch: once bcrypt loads its backend, the detect_wrap_bug
-        # function is a local closure inside _load_backend_mixin. We can't
-        # patch it directly, but we can ensure the backend is loaded with
-        # bcrypt's hashpw accepting >72-byte passwords by patching bcrypt.hashpw.
-        import bcrypt as _bcrypt_lib
-        _orig_hashpw = _bcrypt_lib.hashpw
-        def _safe_hashpw(password, salt):
-            if len(password) > 72:
-                password = password[:72]
-            return _orig_hashpw(password, salt)
-        _bcrypt_lib.hashpw = _safe_hashpw
-    except Exception:
-        pass
-
-_patch_passlib_bcrypt()
-
 SAMPLE_CONFIG = {
     "ssh": {
         "default_key": "/app/keys/id_ed25519",

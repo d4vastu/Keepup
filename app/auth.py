@@ -14,12 +14,21 @@ import os
 import secrets
 from pathlib import Path
 
+import bcrypt as _bcrypt
 import pyotp
-from passlib.context import CryptContext
 
 from .credentials import delete_integration_credentials, get_integration_credentials, save_integration_credentials
 
-_pwd = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+def _hash_password(password: str) -> str:
+    return _bcrypt.hashpw(password.encode(), _bcrypt.gensalt(12)).decode()
+
+
+def _verify_password(password: str, hashed: str) -> bool:
+    try:
+        return _bcrypt.checkpw(password.encode(), hashed.encode())
+    except Exception:
+        return False
 
 _DATA_DIR = Path(os.getenv("DATA_PATH", "/app/data"))
 _SESSION_SECRET_FILE = _DATA_DIR / ".session_secret"
@@ -80,7 +89,7 @@ def create_admin(username: str, password: str, totp_secret: str | None) -> str:
     backup_key = _generate_backup_key()
     data: dict = {
         "username": username,
-        "password_hash": _pwd.hash(password),
+        "password_hash": _hash_password(password),
         "backup_key_hash": _hash_backup_key(backup_key),
     }
     if totp_secret:
@@ -101,7 +110,7 @@ def verify_login(username: str, password: str) -> bool:
     if stored_username and username.strip().lower() != stored_username.strip().lower():
         return False
     h = creds.get("password_hash", "")
-    return bool(h) and _pwd.verify(password, h)
+    return bool(h) and _verify_password(password, h)
 
 
 def delete_admin() -> None:
@@ -115,7 +124,7 @@ def delete_admin() -> None:
 
 def verify_password(password: str) -> bool:
     h = get_integration_credentials("admin").get("password_hash", "")
-    return bool(h) and _pwd.verify(password, h)
+    return bool(h) and _verify_password(password, h)
 
 
 def verify_totp(code: str) -> bool:
@@ -139,7 +148,7 @@ def verify_backup_key(key: str) -> bool:
 # ---------------------------------------------------------------------------
 
 def change_password(new_password: str) -> None:
-    save_integration_credentials("admin", password_hash=_pwd.hash(new_password))
+    save_integration_credentials("admin", password_hash=_hash_password(new_password))
 
 
 def enroll_mfa(totp_secret: str) -> None:

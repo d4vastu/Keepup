@@ -106,10 +106,8 @@ def test_verify_login_case_insensitive_username(data_dir):
 def test_verify_login_legacy_no_username_skips_check(data_dir):
     """If no username is stored (legacy account), username check is skipped."""
     from app.credentials import save_integration_credentials
-    from app.auth import verify_login
-    from passlib.context import CryptContext
-    pwd = CryptContext(schemes=["bcrypt"], deprecated="auto")
-    save_integration_credentials("admin", password_hash=pwd.hash("password123"))
+    from app.auth import verify_login, _hash_password
+    save_integration_credentials("admin", password_hash=_hash_password("password123"))
     # No username stored — any username (including empty) should pass
     assert verify_login("", "password123") is True
     assert verify_login("anything", "password123") is True
