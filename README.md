@@ -6,6 +6,7 @@ Built with FastAPI + HTMX. No JavaScript frameworks, no database — just a sing
 
 ## Features
 
+- **Setup wizard** — first-run flow creates your admin account (username + password + optional 2FA), generates a backup key, and guides you through adding hosts and configuring connections
 - **OS package updates** — checks `apt`, `dnf`, `yum`, `zypper`, `pacman`, and `apk` on each host via SSH, shows pending updates with version diffs
 - **One-click upgrade** — runs the appropriate upgrade command remotely with live output
 - **Reboot detection** — shows a "Reboot required" badge and restart button after kernel/system updates
@@ -17,7 +18,8 @@ Built with FastAPI + HTMX. No JavaScript frameworks, no database — just a sing
 - **Notification bell** — persists auto-update run history; badge turns red on failures so you know when something needs attention
 - **Encrypted credential store** — SSH keys, SSH passwords, sudo passwords, API keys, and tokens are stored encrypted on disk; nothing sensitive ever touches `config.yml`
 - **Sudo modal** — non-root users are prompted for their sudo password inline on Update/Restart, with an option to save it for future runs
-- **Fully UI-managed** — hosts, credentials, SSH settings, Portainer, DockerHub, and auto-update schedules are all configured through the admin panel; no file editing or env vars required after initial setup
+- **HTTPS/TLS** — enable HTTPS from **Admin → HTTPS**: generate a self-signed cert for internal use or upload your own certificate and private key for public-facing deployments; the app restarts automatically
+- **Fully UI-managed** — hosts, credentials, SSH settings, Portainer, DockerHub, auto-update schedules, and TLS are all configured through the admin panel; no file editing or env vars required after initial setup
 
 ---
 
@@ -54,9 +56,21 @@ services:
 docker compose up -d
 ```
 
-Open **http://localhost:8765** — then go to **/admin** to add your hosts and configure connections.
+Open **http://localhost:8765** — a setup wizard will guide you through creating your admin account and connecting your first hosts.
 
-> **Portainer and DockerHub** are configured through **Admin → Connections**, not via environment variables. See [Connections](#connections) below.
+> **Portainer and DockerHub** are configured through the setup wizard or **Admin → Connections**, not via environment variables. See [Connections](#connections) below.
+
+---
+
+## First-Run Setup Wizard
+
+When you open the dashboard for the first time (no admin account exists), you are automatically directed to the setup wizard:
+
+1. **Create account (step 1/3)** — set a username and password; optionally enroll TOTP two-factor authentication
+2. **Save your backup key (step 2/3)** — a one-time backup key is shown; store it somewhere safe — it's the only way to reset your password if you lose access
+3. **Connect infrastructure (step 3/3)** — add SSH hosts, configure Portainer, and set DockerHub credentials
+
+After finishing the wizard you are redirected to the login page. You can re-run steps 2 and 3 at any time from the admin panel without going through the wizard again.
 
 ---
 
@@ -154,6 +168,48 @@ Schedule unattended updates in **Admin → Auto-Updates**.
 - Appears in every page header
 - Badge turns red when an auto-update fails
 - Click to see recent run history and dismiss notifications
+
+---
+
+## HTTPS / TLS
+
+Enable HTTPS from **Admin → HTTPS** — no manual cert management or container restarts required.
+
+**Self-signed certificate (internal use):**
+1. Go to **Admin → HTTPS → Self-signed certificate**
+2. Enter the hostname or IP address the dashboard will be reached at
+3. Click **Generate & Enable** — a 2-year certificate is created and the app restarts automatically
+4. Your browser will show a certificate warning on first visit — add a permanent exception
+
+**Custom certificate (external / public-facing):**
+1. Go to **Admin → HTTPS → Custom certificate**
+2. Paste your PEM-encoded certificate and private key
+3. Click **Save & Enable** — the app restarts and serves your certificate immediately
+
+**Disable HTTPS:**
+- Go to **Admin → HTTPS → Disable** to remove the certificate and revert to HTTP
+
+The app uses a Docker restart policy (`unless-stopped`) to come back up after the automatic restart triggered by certificate changes.
+
+---
+
+## Account Management
+
+### Two-Factor Authentication (TOTP)
+
+Enable or disable TOTP from **Admin → Account → Two-Factor Authentication**. Use any authenticator app (Google Authenticator, Authy, etc.).
+
+### Backup Key
+
+A backup key is generated when your account is created. Use it to reset your password if you are locked out — go to the login page and click **Forgot password**.
+
+You can regenerate your backup key from **Admin → Account → Backup Key**. The old key is immediately invalidated.
+
+### Factory Reset
+
+**Admin → Account → Danger Zone → Factory Reset** wipes all settings and credentials and redirects to the setup wizard. You must enter your current password and type `RESET` to confirm.
+
+This is irreversible — all hosts, credentials, Portainer config, and auto-update schedules will be deleted.
 
 ---
 
