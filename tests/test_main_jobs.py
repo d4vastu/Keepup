@@ -77,12 +77,13 @@ async def test_job_run_host_restart_failure(config_file, data_dir):
 @pytest.mark.asyncio
 async def test_job_run_stack_update_success(config_file, data_dir, monkeypatch):
     import app.main as m
+    import app.backend_loader as bl
     from unittest.mock import MagicMock
 
     mock_backend = MagicMock()
     mock_backend.BACKEND_KEY = "portainer"
     mock_backend.update_stack = AsyncMock(return_value=None)
-    monkeypatch.setattr(m, "_backends", [mock_backend])
+    monkeypatch.setattr(bl, "_backends", [mock_backend])
 
     job_id = "testjob5"
     m._jobs[job_id] = {"done": False, "status": "running", "error": None, "lines": []}
@@ -98,12 +99,13 @@ async def test_job_run_stack_update_success(config_file, data_dir, monkeypatch):
 @pytest.mark.asyncio
 async def test_job_run_stack_update_failure(config_file, data_dir, monkeypatch):
     import app.main as m
+    import app.backend_loader as bl
     from unittest.mock import MagicMock
 
     mock_backend = MagicMock()
     mock_backend.BACKEND_KEY = "portainer"
     mock_backend.update_stack = AsyncMock(side_effect=Exception("Portainer error"))
-    monkeypatch.setattr(m, "_backends", [mock_backend])
+    monkeypatch.setattr(bl, "_backends", [mock_backend])
 
     job_id = "testjob6"
     m._jobs[job_id] = {"done": False, "status": "running", "error": None, "lines": []}
@@ -117,7 +119,8 @@ async def test_job_run_stack_update_failure(config_file, data_dir, monkeypatch):
 @pytest.mark.asyncio
 async def test_job_run_stack_update_unknown_backend(config_file, data_dir, monkeypatch):
     import app.main as m
-    monkeypatch.setattr(m, "_backends", [])
+    import app.backend_loader as bl
+    monkeypatch.setattr(bl, "_backends", [])
 
     job_id = "testjob7"
     m._jobs[job_id] = {"done": False, "status": "running", "error": None, "lines": []}
@@ -220,6 +223,34 @@ def test_host_restart_unknown_slug(client):
     assert "does-not-exist" in response.text or "error" in response.text.lower()
 
 
+def test_host_restart_nonroot_sudo_saved_automatically(client, data_dir):
+    """Non-root + sudo_password + save_sudo=save → saves credential and starts job."""
+    from app.credentials import get_credentials
+    with patch("app.main._needs_sudo", return_value=True), \
+         patch("app.main.reboot_host", new=AsyncMock(return_value=[])):
+        response = client.post("/api/host/test-host/restart", data={
+            "sudo_password": "mysudo",
+            "save_sudo": "save",
+        })
+    assert response.status_code == 200
+    assert get_credentials("test-host").get("sudo_password") == "mysudo"
+
+
+def test_docker_check_raises_exception(client, monkeypatch):
+    """Exception in gather propagates to error template."""
+    import app.backend_loader as bl
+
+    def bad_backend():
+        b = MagicMock()
+        b.BACKEND_KEY = "portainer"
+        b.get_stacks_with_update_status = AsyncMock(side_effect=Exception("boom"))
+        return b
+
+    monkeypatch.setattr(bl, "_backends", [bad_backend()])
+    response = client.get("/api/docker/check")
+    assert response.status_code == 200
+
+
 # ---------------------------------------------------------------------------
 # GET /api/docker/check
 # ---------------------------------------------------------------------------
@@ -236,29 +267,29 @@ def _make_mock_backend(key: str, stacks=None, error=None):
 
 
 def test_docker_check_with_backend(client, monkeypatch):
-    import app.main as m
+    import app.backend_loader as bl
     stacks = [{"id": "p/1:1", "name": "sonarr", "endpoint_id": "1",
                "endpoint_name": "primary", "update_status": "up_to_date",
                "images": [], "update_path": "portainer/1:1"}]
-    monkeypatch.setattr(m, "_backends", [_make_mock_backend("portainer", stacks)])
+    monkeypatch.setattr(bl, "_backends", [_make_mock_backend("portainer", stacks)])
     response = client.get("/api/docker/check")
     assert response.status_code == 200
     assert "sonarr" in response.text or "up to date" in response.text.lower()
 
 
 def test_docker_check_no_backends_configured(client, monkeypatch):
-    import app.main as m
+    import app.backend_loader as bl
     # SSH backend with no docker_mode hosts → treated as inactive
     ssh_b = _make_mock_backend("ssh")
-    monkeypatch.setattr(m, "_backends", [ssh_b])
+    monkeypatch.setattr(bl, "_backends", [ssh_b])
     response = client.get("/api/docker/check")
     assert response.status_code == 200
     assert "not configured" in response.text.lower() or "No container" in response.text
 
 
 def test_docker_check_backend_error(client, monkeypatch):
-    import app.main as m
-    monkeypatch.setattr(m, "_backends", [_make_mock_backend("portainer", error=Exception("API error"))])
+    import app.backend_loader as bl
+    monkeypatch.setattr(bl, "_backends", [_make_mock_backend("portainer", error=Exception("API error"))])
     response = client.get("/api/docker/check")
     assert response.status_code == 200
 
@@ -268,23 +299,23 @@ def test_docker_check_backend_error(client, monkeypatch):
 # ---------------------------------------------------------------------------
 
 def test_stack_update_triggers_job(client, monkeypatch):
-    import app.main as m
-    monkeypatch.setattr(m, "_backends", [_make_mock_backend("portainer")])
+    import app.backend_loader as bl
+    monkeypatch.setattr(bl, "_backends", [_make_mock_backend("portainer")])
     response = client.post("/api/docker/stack/portainer/10:1/update")
     assert response.status_code == 200
 
 
 def test_stack_update_unknown_backend(client, monkeypatch):
-    import app.main as m
-    monkeypatch.setattr(m, "_backends", [])
+    import app.backend_loader as bl
+    monkeypatch.setattr(bl, "_backends", [])
     response = client.post("/api/docker/stack/ghost/10:1/update")
     assert response.status_code == 200
     assert "not configured" in response.text.lower() or "ghost" in response.text.lower()
 
 
 def test_stack_update_ssh_backend(client, monkeypatch):
-    import app.main as m
-    monkeypatch.setattr(m, "_backends", [_make_mock_backend("ssh")])
+    import app.backend_loader as bl
+    monkeypatch.setattr(bl, "_backends", [_make_mock_backend("ssh")])
     response = client.post("/api/docker/stack/ssh/my-server/myapp/update")
     assert response.status_code == 200
 

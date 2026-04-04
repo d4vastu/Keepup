@@ -235,3 +235,44 @@ def test_regenerate_backup_key_invalidates_old(data_dir):
     old_key = create_admin(username="alice", password="password123", totp_secret=None)
     regenerate_backup_key()
     assert verify_backup_key(old_key) is False
+
+
+# ---------------------------------------------------------------------------
+# _verify_password exception path
+# ---------------------------------------------------------------------------
+
+def test_verify_password_handles_exception(data_dir):
+    """_verify_password returns False when bcrypt raises."""
+    from app.auth import _verify_password
+    # Passing an invalid hash should return False, not raise
+    assert _verify_password("password", "not-a-valid-hash") is False
+
+
+# ---------------------------------------------------------------------------
+# verify_totp
+# ---------------------------------------------------------------------------
+
+def test_verify_totp_no_secret_returns_false(data_dir):
+    """verify_totp returns False when no TOTP secret is configured."""
+    from app.auth import create_admin, verify_totp
+    create_admin(username="alice", password="password123", totp_secret=None)
+    assert verify_totp("123456") is False
+
+
+# ---------------------------------------------------------------------------
+# reset_password_with_backup_key
+# ---------------------------------------------------------------------------
+
+def test_reset_password_with_valid_backup_key(data_dir):
+    from app.auth import create_admin, reset_password_with_backup_key, verify_login
+    backup_key = create_admin(username="alice", password="password123", totp_secret=None)
+    result = reset_password_with_backup_key(backup_key, "newpassword456")
+    assert result is True
+    assert verify_login("alice", "newpassword456") is True
+
+
+def test_reset_password_with_invalid_backup_key(data_dir):
+    from app.auth import create_admin, reset_password_with_backup_key
+    create_admin(username="alice", password="password123", totp_secret=None)
+    result = reset_password_with_backup_key("WRONG-WRONG-WRONG-WRONG", "newpassword456")
+    assert result is False

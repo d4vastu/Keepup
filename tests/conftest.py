@@ -2,7 +2,6 @@
 import pytest
 import yaml
 from fastapi.testclient import TestClient
-from pathlib import Path
 
 SAMPLE_CONFIG = {
     "ssh": {
@@ -52,11 +51,19 @@ def data_dir(tmp_path, monkeypatch):
 
 @pytest.fixture
 def client(config_file, data_dir, monkeypatch):
-    """TestClient with env vars set and config/data dirs pointed at temp paths."""
+    """Authenticated TestClient."""
     monkeypatch.setenv("PORTAINER_URL", "https://portainer.test:9443")
     monkeypatch.setenv("PORTAINER_API_KEY", "test-api-key")
     monkeypatch.setenv("PORTAINER_VERIFY_SSL", "false")
 
-    # Import after env vars are set so startup picks them up
     from app.main import app
-    return TestClient(app)
+    from app.auth import create_admin
+
+    # Create admin account in the temp credential store
+    create_admin(username="testadmin", password="testpassword123", totp_secret=None)
+
+    tc = TestClient(app, raise_server_exceptions=True)
+    # Log in — cookies persist in the TestClient
+    resp = tc.post("/login", data={"username": "testadmin", "password": "testpassword123"}, follow_redirects=False)
+    assert resp.status_code in (302, 303), f"Login failed with status {resp.status_code}: {resp.text[:200]}"
+    return tc

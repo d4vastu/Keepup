@@ -1,7 +1,6 @@
 """Tests for the admin danger zone / factory reset (PR3)."""
 import pytest
 import yaml
-from unittest.mock import AsyncMock, patch
 from fastapi.testclient import TestClient
 
 
@@ -47,7 +46,6 @@ def admin_client(config_file, data_dir, monkeypatch):
 # ---------------------------------------------------------------------------
 
 def test_reset_config_clears_hosts(config_file):
-    import yaml
     from app.config_manager import reset_config, load_config
     raw = yaml.safe_load(config_file.read_text())
     assert len(raw.get("hosts", [])) > 0  # sample config has hosts
@@ -114,14 +112,12 @@ def test_factory_reset_wrong_confirm_text_shows_error(admin_client):
 def test_factory_reset_correct_returns_hx_redirect(admin_client, monkeypatch):
     """When correct password and 'RESET' confirm text, returns HX-Redirect to /setup."""
     # Patch request.session to avoid cross-test session state issues
-    from unittest.mock import MagicMock
     import app.admin as admin_mod
     orig_factory_reset = admin_mod.admin_factory_reset
 
     async def patched_factory_reset(request, current_password="", confirm_text=""):
         # Inject a mock session that won't raise
         request._state = getattr(request, "_state", type("S", (), {})())
-        original_scope_session = request.scope.get("session")
         request.scope["session"] = {}
         result = await orig_factory_reset(request, current_password=current_password, confirm_text=confirm_text)
         return result
