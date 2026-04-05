@@ -30,8 +30,10 @@ from .config_manager import (
     get_pfsense_config,
     get_portainer_config,
     get_proxmox_config,
+    get_pushover_config,
     get_ssh_config,
     get_timezone,
+    get_update_check_schedule,
     save_dockerhub_config,
     save_homeassistant_config,
     save_opnsense_config,
@@ -39,7 +41,9 @@ from .config_manager import (
     save_pfsense_config,
     save_portainer_config,
     save_proxmox_config,
+    save_pushover_config,
     save_timezone,
+    save_update_check_schedule,
     set_host_auto_update,
 )
 from .credentials import (
@@ -925,3 +929,76 @@ async def setup_save_dockerhub(
 @router.post("/setup/finish")
 async def setup_finish(request: Request):
     return RedirectResponse("/login", status_code=303)
+
+
+# ---------------------------------------------------------------------------
+# Setup — Notifications + update check schedule (Screen 7)
+# ---------------------------------------------------------------------------
+
+@router.get("/setup/notifications", response_class=HTMLResponse)
+async def setup_notifications_page(request: Request) -> HTMLResponse:
+    if not admin_exists():
+        return RedirectResponse("/setup", status_code=302)
+    pushover_creds = get_integration_credentials("pushover")
+    pushover_cfg = get_pushover_config()
+    return templates.TemplateResponse("setup_notifications.html", {
+        "request": request,
+        "pushover_token_set": bool(pushover_creds.get("api_token")),
+        "pushover_user_set": bool(pushover_creds.get("user_key")),
+        "pushover_enabled": pushover_cfg.get("enabled", False),
+        "update_schedule": get_update_check_schedule(),
+    })
+
+
+@router.post("/setup/notifications/pushover/test", response_class=HTMLResponse)
+async def setup_test_pushover(
+    request: Request,
+    pushover_token: str = Form(""),
+    pushover_user_key: str = Form(""),
+) -> HTMLResponse:
+    token = pushover_token.strip()
+    user_key = pushover_user_key.strip()
+    if not token or not user_key:
+        return HTMLResponse('<span class="text-amber-400 text-sm">Enter an app token and user key first.</span>')
+    try:
+        async with httpx.AsyncClient(timeout=10) as c:
+            resp = await c.post("https://api.pushover.net/1/messages.json", data={
+                "token": token,
+                "user": user_key,
+                "title": "Keepup test",
+                "message": "Keepup setup — Pushover is connected.",
+            })
+            if resp.status_code == 200:
+                return HTMLResponse('<span class="text-green-400 text-sm">&#10003; Test notification sent.</span>')
+            body = resp.json()
+            errors = ", ".join(body.get("errors", [str(resp.status_code)]))
+            return HTMLResponse(f'<span class="text-red-400 text-sm">&#10007; {errors}</span>')
+    except Exception as exc:
+        return HTMLResponse(f'<span class="text-red-400 text-sm">&#10007; {str(exc)[:120]}</span>')
+
+
+@router.post("/setup/notifications/pushover/save", response_class=HTMLResponse)
+async def setup_save_pushover(
+    request: Request,
+    pushover_token: str = Form(""),
+    pushover_user_key: str = Form(""),
+    pushover_enabled: str = Form(""),
+) -> HTMLResponse:
+    token = pushover_token.strip()
+    user_key = pushover_user_key.strip()
+    enabled = pushover_enabled == "on"
+    if token:
+        save_integration_credentials("pushover", api_token=token, user_key=user_key)
+    save_pushover_config(enabled=enabled)
+    return HTMLResponse('<span class="text-green-400 text-sm">&#10003; Pushover settings saved.</span>')
+
+
+@router.post("/setup/notifications/schedule/save", response_class=HTMLResponse)
+async def setup_save_schedule(
+    request: Request,
+    update_schedule: str = Form("manual"),
+) -> HTMLResponse:
+    save_update_check_schedule(update_schedule)
+    labels = {"6h": "every 6 hours", "12h": "every 12 hours", "24h": "daily", "manual": "manual only"}
+    label = labels.get(update_schedule, "manual only")
+    return HTMLResponse(f'<span class="text-green-400 text-sm">&#10003; Update checks set to {label}.</span>')

@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+  <meta charset="UTF-8" />
+  <link rel="icon" type="image/svg+xml" href="/static/favicon.svg" />
+  <link rel="apple-touch-icon" href="/static/icon-192.svg" />
+  <link rel="manifest" href="/static/manifest.json" />
+  <meta name="theme-color" content="#0d1117" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Notifications — Keepup Setup</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/htmx.org@1.9.10"></script>
+  <style>body { background-color: #0d1117; }</style>
+</head>
+<body class="min-h-full text-slate-200 font-sans px-4 py-12">
+
+  <div class="w-full max-w-2xl mx-auto">
+
+    <!-- Header -->
+    <div class="text-center mb-6">
+      <img src="/static/logo.svg" alt="Keepup" class="w-16 h-16 mx-auto mb-4 rounded-2xl" />
+      <h1 class="text-2xl font-bold text-white">Notifications &amp; Schedule</h1>
+      <p class="text-sm text-slate-400 mt-1">Get alerted when updates are available and set how often Keepup checks.</p>
+    </div>
+
+    <!-- Progress bar -->
+    <div class="mb-8">
+      <div class="flex justify-between text-xs text-slate-500 mb-1">
+        <span>Step 7 of 8</span>
+        <span>Notifications</span>
+      </div>
+      <div class="w-full bg-slate-700 rounded-full h-1.5">
+        <div class="bg-blue-500 h-1.5 rounded-full" style="width: 87%"></div>
+      </div>
+    </div>
+
+    <div class="space-y-6">
+
+      <!-- Pushover -->
+      <div class="bg-slate-800/60 border border-slate-700 rounded-2xl overflow-hidden">
+        <div class="px-5 py-4 border-b border-slate-700">
+          <h2 class="text-sm font-semibold text-slate-200">Pushover <span class="text-xs font-normal text-slate-500 ml-1">optional</span></h2>
+          <p class="text-xs text-slate-500 mt-0.5">Push notifications to your phone when image updates are available.</p>
+        </div>
+        <div class="px-5 py-4 space-y-4">
+
+          {% if pushover_token_set and pushover_user_set %}
+          <div class="flex items-center gap-2 text-green-400 text-sm">
+            <span>&#10003;</span>
+            <span>Pushover credentials saved{% if pushover_enabled %} — notifications enabled{% else %} — notifications disabled{% endif %}</span>
+          </div>
+          {% endif %}
+
+          <div id="pushover-result"></div>
+
+          <form hx-post="/setup/notifications/pushover/save"
+                hx-target="#pushover-result"
+                class="space-y-3">
+            <div class="grid grid-cols-2 gap-3">
+              <div>
+                <label class="block text-xs font-medium text-slate-400 mb-1">App token</label>
+                <input type="password" name="pushover_token"
+                  placeholder="{% if pushover_token_set %}already set{% else %}a1b2c3...{% endif %}"
+                  class="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-blue-500 placeholder:text-slate-500">
+              </div>
+              <div>
+                <label class="block text-xs font-medium text-slate-400 mb-1">User key</label>
+                <input type="password" name="pushover_user_key"
+                  placeholder="{% if pushover_user_set %}already set{% else %}u1v2w3...{% endif %}"
+                  class="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-blue-500 placeholder:text-slate-500">
+              </div>
+            </div>
+            <p class="text-xs text-slate-500">Find these at <span class="text-slate-400">pushover.net</span> — App token under your application, User key on your profile.</p>
+
+            <label class="flex items-center gap-2 cursor-pointer">
+              <input type="checkbox" name="pushover_enabled" value="on"
+                {% if pushover_enabled %}checked{% endif %}
+                class="w-4 h-4 rounded accent-blue-500">
+              <span class="text-sm text-slate-300">Enable Pushover notifications</span>
+            </label>
+
+            <div class="flex gap-2">
+              <button type="button"
+                hx-post="/setup/notifications/pushover/test"
+                hx-target="#pushover-result"
+                hx-include="closest form"
+                class="px-4 py-2 rounded-lg bg-slate-700 hover:bg-slate-600 text-sm font-medium text-slate-300 transition-colors">
+                Send test notification
+              </button>
+              <button type="submit"
+                class="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-sm font-medium text-white transition-colors">
+                Save
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
+
+      <!-- Update check schedule -->
+      <div class="bg-slate-800/60 border border-slate-700 rounded-2xl overflow-hidden">
+        <div class="px-5 py-4 border-b border-slate-700">
+          <h2 class="text-sm font-semibold text-slate-200">Update check schedule</h2>
+          <p class="text-xs text-slate-500 mt-0.5">How often Keepup checks for available package and image updates in the background.</p>
+        </div>
+        <div class="px-5 py-4 space-y-4">
+
+          <div id="schedule-result"></div>
+
+          <form hx-post="/setup/notifications/schedule/save"
+                hx-target="#schedule-result"
+                class="space-y-3">
+            <div class="space-y-2">
+              {% for key, label in [("6h", "Every 6 hours"), ("12h", "Every 12 hours"), ("24h", "Daily (2 am)"), ("manual", "Manual only")] %}
+              <label class="flex items-center gap-2 cursor-pointer">
+                <input type="radio" name="update_schedule" value="{{ key }}"
+                  {% if update_schedule == key %}checked{% endif %}
+                  class="accent-blue-500">
+                <span class="text-sm text-slate-300">{{ label }}</span>
+              </label>
+              {% endfor %}
+            </div>
+            <button type="submit"
+              class="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-sm font-medium text-white transition-colors">
+              Save schedule
+            </button>
+          </form>
+        </div>
+      </div>
+
+      <!-- Bottom buttons -->
+      <div class="flex justify-between items-center mt-2">
+        <a href="/setup/hosts" class="text-sm text-slate-500 hover:text-slate-300">← Back</a>
+        <a href="/setup/summary"
+          class="px-6 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-sm font-semibold text-white transition-colors">
+          Continue to Summary →
+        </a>
+      </div>
+
+    </div>
+  </div>
+
+</body>
+</html>

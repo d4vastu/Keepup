@@ -171,6 +171,33 @@ def save_timezone(tz: str) -> None:
     save_config(config)
 
 
+_UPDATE_CHECK_SCHEDULES = {
+    "6h": "0 */6 * * *",
+    "12h": "0 */12 * * *",
+    "24h": "0 2 * * *",
+    "manual": "",
+}
+
+
+def get_update_check_schedule() -> str:
+    """Return the update check schedule key ('6h', '12h', '24h', or 'manual')."""
+    cron = load_config().get("update_check_schedule", "")
+    for key, val in _UPDATE_CHECK_SCHEDULES.items():
+        if val == cron:
+            return key
+    return "manual" if not cron else "manual"
+
+
+def save_update_check_schedule(schedule_key: str) -> None:
+    config = load_config()
+    cron = _UPDATE_CHECK_SCHEDULES.get(schedule_key, "")
+    if cron:
+        config["update_check_schedule"] = cron
+    else:
+        config.pop("update_check_schedule", None)
+    save_config(config)
+
+
 def get_dockerhub_config() -> dict:
     return load_config().get("dockerhub", {})
 
