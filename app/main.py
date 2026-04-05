@@ -144,9 +144,9 @@ def _check_version_notification() -> None:
 
                 notify(
                     f"Updated to v{APP_VERSION}",
-                    f"Keepup was upgraded from v{stored} to v{APP_VERSION}. "
-                    f"See what's new: https://github.com/d4vastu/keepup/releases/tag/v{APP_VERSION}",
+                    f"Keepup was upgraded from v{stored} to v{APP_VERSION}.",
                     level="info",
+                    url=f"https://github.com/d4vastu/Keepup/releases/tag/v{APP_VERSION}",
                 )
             _VERSION_FILE.parent.mkdir(parents=True, exist_ok=True)
             _VERSION_FILE.write_text(APP_VERSION)

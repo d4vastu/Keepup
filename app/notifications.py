@@ -27,21 +27,21 @@ def _save(entries: list[dict]) -> None:
     _NOTIF_PATH.write_text(json.dumps(entries, indent=2))
 
 
-def notify(title: str, message: str, level: str = "error") -> None:
+def notify(title: str, message: str, level: str = "error", url: str = "") -> None:
     """Add a notification. Also fires Pushover if configured."""
     with _lock:
         entries = _load()
-        entries.insert(
-            0,
-            {
-                "id": uuid.uuid4().hex[:8],
-                "title": title,
-                "message": message,
-                "level": level,
-                "created_at": datetime.now(timezone.utc).isoformat(),
-                "read": False,
-            },
-        )
+        entry: dict = {
+            "id": uuid.uuid4().hex[:8],
+            "title": title,
+            "message": message,
+            "level": level,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "read": False,
+        }
+        if url:
+            entry["url"] = url
+        entries.insert(0, entry)
         _save(entries[:_MAX])
     # Fire-and-forget Pushover push
     try:
