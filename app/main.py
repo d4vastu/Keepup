@@ -11,6 +11,7 @@ from starlette.middleware.sessions import SessionMiddleware
 from .admin import router as admin_router
 from .auth import admin_exists, get_session_secret
 from .auth_router import router as auth_router
+from .log_buffer import setup_log_buffer
 from .auto_update_log import get_recent, get_unread_error_count, mark_all_read
 from .auto_update_scheduler import apply_all_schedules, scheduler
 from .auto_updates_router import router as auto_updates_router
@@ -44,6 +45,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
 # App setup
 # ---------------------------------------------------------------------------
 
+setup_log_buffer()
 app = FastAPI(title="Update Dashboard")
 app.add_middleware(AuthMiddleware)
 app.add_middleware(SessionMiddleware,

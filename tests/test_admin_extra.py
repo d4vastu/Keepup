@@ -254,3 +254,18 @@ def test_mfa_remove_wrong_credentials(client):
         "totp_code": "000000",
     })
     assert response.status_code == 200
+
+
+# ---------------------------------------------------------------------------
+# Logs
+# ---------------------------------------------------------------------------
+
+def test_admin_logs_page_returns_200(client):
+    response = client.get("/admin/logs")
+    assert response.status_code == 200
+    assert "Logs" in response.text
+
+
+def test_admin_logs_lines_returns_200(client):
+    response = client.get("/admin/logs/lines")
+    assert response.status_code == 200

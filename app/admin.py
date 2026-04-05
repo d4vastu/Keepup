@@ -47,6 +47,7 @@ from .credentials import (
     wipe_credential_store,
 )
 from .ssh_client import verify_connection
+from .log_buffer import get_log_lines
 
 router = APIRouter(prefix="/admin")
 templates = Jinja2Templates(directory=Path(__file__).parent / "templates")
@@ -654,4 +655,24 @@ async def admin_https_disable(request: Request) -> HTMLResponse:
     return templates.TemplateResponse(
         "partials/admin_https_restarting.html",
         {"request": request, "new_url": f"http://{host}:8765", "action": "disabling"},
+    )
+
+
+# ---------------------------------------------------------------------------
+# Logs
+# ---------------------------------------------------------------------------
+
+@router.get("/logs", response_class=HTMLResponse)
+async def admin_logs(request: Request) -> HTMLResponse:
+    return templates.TemplateResponse(
+        "admin_logs.html",
+        {"request": request, "lines": get_log_lines()},
+    )
+
+
+@router.get("/logs/lines", response_class=HTMLResponse)
+async def admin_logs_lines(request: Request) -> HTMLResponse:
+    return templates.TemplateResponse(
+        "partials/admin_log_lines.html",
+        {"request": request, "lines": get_log_lines()},
     )

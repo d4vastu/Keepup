@@ -1,0 +1,27 @@
+<div id="log-lines"
+  hx-get="/admin/logs/lines"
+  hx-trigger="every 3s"
+  hx-swap="outerHTML"
+  class="font-mono text-xs space-y-0.5">
+  {% if lines %}
+    {% for line in lines %}
+    <div class="flex gap-3 px-4 py-0.5 hover:bg-slate-700/30 rounded">
+      <span class="text-slate-600 shrink-0 select-none">{{ line.ts }}</span>
+      <span class="text-slate-600 shrink-0 w-16 select-none">{{ line.level }}</span>
+      <span class="{{ line.css }} break-all">{{ line.msg }}</span>
+    </div>
+    {% endfor %}
+  {% else %}
+    <p class="text-slate-600 px-4 py-2">No log entries yet.</p>
+  {% endif %}
+</div>
+
+<script>
+  // Auto-scroll to bottom only if user is already at the bottom
+  (function() {
+    const container = document.getElementById('log-container');
+    if (!container) return;
+    const atBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 60;
+    if (atBottom) container.scrollTop = container.scrollHeight;
+  })();
+</script>
