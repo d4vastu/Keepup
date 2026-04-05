@@ -47,6 +47,7 @@ from .config_manager import (
     save_pushover_config,
     save_timezone,
     save_update_check_schedule,
+    save_wizard_container_selection,
     set_host_auto_update,
 )
 from .credentials import (
@@ -56,7 +57,7 @@ from .credentials import (
     save_integration_credentials,
 )
 from .proxmox_client import ProxmoxClient
-from .ssh_client import detect_docker_stacks, verify_connection
+from .ssh_client import detect_docker_stacks, discover_containers, verify_connection
 from .backend_loader import reload_backends
 from .templates_env import make_templates
 
@@ -1063,7 +1064,46 @@ async def setup_summary_page(request: Request) -> HTMLResponse:
 
 
 # ---------------------------------------------------------------------------
-# Setup — Notifications + update check schedule (Screen 7)
+# ---------------------------------------------------------------------------
+# Setup — Container monitoring (Screen 7)
+# ---------------------------------------------------------------------------
+
+@router.get("/setup/containers", response_class=HTMLResponse)
+async def setup_containers_page(request: Request) -> HTMLResponse:
+    if not admin_exists():
+        return RedirectResponse("/setup", status_code=302)
+    hosts = get_hosts()
+    ssh_cfg = get_ssh_config()
+
+    host_data = []
+    for h in hosts:
+        from .credentials import get_credentials
+        creds = get_credentials(h["slug"])
+        containers = await discover_containers(h, ssh_cfg, creds)
+        host_data.append({
+            "id": h["slug"],
+            "name": h["name"],
+            "ip": h.get("host", ""),
+            "containers": containers,
+        })
+
+    return templates.TemplateResponse("setup_containers.html", {
+        "request": request,
+        "hosts": host_data,
+    })
+
+
+@router.post("/setup/containers/save", response_class=HTMLResponse)
+async def setup_containers_save(
+    request: Request,
+    containers: list[str] = Form(default=[]),
+) -> HTMLResponse:
+    save_wizard_container_selection(containers)
+    return RedirectResponse("/setup/notifications", status_code=303)
+
+
+# ---------------------------------------------------------------------------
+# Setup — Notifications + update check schedule (Screen 8)
 # ---------------------------------------------------------------------------
 
 @router.get("/setup/notifications", response_class=HTMLResponse)

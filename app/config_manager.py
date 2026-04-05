@@ -126,6 +126,29 @@ def set_docker_monitoring(
     save_config(config)
 
 
+def save_wizard_container_selection(selections: list[str]) -> None:
+    """Save wizard container selections (list of 'slug:container_name' values).
+
+    For each host slug, set docker_mode='selected' with the chosen containers.
+    Hosts with no containers selected get docker_mode cleared.
+    """
+    # Group by slug
+    by_slug: dict[str, list[str]] = {}
+    for item in selections:
+        if ":" in item:
+            slug, container = item.split(":", 1)
+            by_slug.setdefault(slug, []).append(container)
+
+    config = load_config()
+    for h in config.get("hosts", []):
+        slug = slugify(h["name"])
+        if slug in by_slug:
+            h["docker_mode"] = "selected"
+            h["docker_stacks"] = by_slug[slug]
+        # Hosts not in selections are left unchanged (user may not have docker)
+    save_config(config)
+
+
 # ---------------------------------------------------------------------------
 # SSH settings
 # ---------------------------------------------------------------------------
