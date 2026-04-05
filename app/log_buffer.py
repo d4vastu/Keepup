@@ -19,7 +19,7 @@ _LEVEL_CLASS = {
 class _BufferHandler(logging.Handler):
     def emit(self, record: logging.LogRecord) -> None:
         try:
-            ts = datetime.fromtimestamp(record.created, tz=timezone.utc).strftime("%H:%M:%S")
+            ts = datetime.fromtimestamp(record.created, tz=timezone.utc).isoformat()
             level = record.levelname
             msg = self.format(record)
             _buffer.append({"ts": ts, "level": level, "msg": msg, "css": _LEVEL_CLASS.get(level, "text-slate-300")})

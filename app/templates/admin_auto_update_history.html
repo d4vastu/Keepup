@@ -47,7 +47,7 @@
             <th class="text-left px-4 py-3 text-xs font-semibold text-slate-400 uppercase tracking-wider">Target</th>
             <th class="text-left px-4 py-3 text-xs font-semibold text-slate-400 uppercase tracking-wider">Type</th>
             <th class="text-left px-4 py-3 text-xs font-semibold text-slate-400 uppercase tracking-wider">Status</th>
-            <th class="text-left px-4 py-3 text-xs font-semibold text-slate-400 uppercase tracking-wider">Ran At (UTC)</th>
+            <th class="text-left px-4 py-3 text-xs font-semibold text-slate-400 uppercase tracking-wider">Ran At</th>
             <th class="text-left px-4 py-3 text-xs font-semibold text-slate-400 uppercase tracking-wider">Last Output</th>
           </tr>
         </thead>
@@ -80,7 +80,7 @@
             </td>
             <!-- Timestamp -->
             <td class="px-4 py-3 text-slate-400 text-xs font-mono whitespace-nowrap">
-              {{ e.ran_at[:16] | replace("T", " ") }}
+              {{ e.ran_at | as_local }}
             </td>
             <!-- Last output line -->
             <td class="px-4 py-3 text-xs max-w-xs">

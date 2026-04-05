@@ -1,10 +1,10 @@
 import asyncio
+import os
 import uuid
 from pathlib import Path
 
 from fastapi import BackgroundTasks, FastAPI, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
-from fastapi.templating import Jinja2Templates
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.middleware.sessions import SessionMiddleware
 
@@ -16,9 +16,11 @@ from .notifications import get_unread_count, get_notifications, mark_all_read
 from .auto_update_scheduler import apply_all_schedules, scheduler
 from .auto_updates_router import router as auto_updates_router
 from .backend_loader import get_backends, get_dockerhub_creds, reload_backends
-from .config_manager import get_hosts, get_ssh_config
+from .config_manager import get_hosts, get_ssh_config, get_timezone
 from .credentials import get_credentials, save_sudo_password
 from .ssh_client import _needs_sudo, check_host_updates, reboot_host, run_host_update_buffered
+from .__version__ import APP_VERSION
+from .templates_env import make_templates
 
 # ---------------------------------------------------------------------------
 # Auth middleware
@@ -57,10 +59,34 @@ app.add_middleware(SessionMiddleware,
 app.include_router(auth_router)
 app.include_router(admin_router)
 app.include_router(auto_updates_router)
-templates = Jinja2Templates(directory=Path(__file__).parent / "templates")
+templates = make_templates()
+
+_DATA_DIR = Path(os.getenv("DATA_PATH", "/app/data"))
+_VERSION_FILE = _DATA_DIR / ".app_version"
+
+
+def _check_version_notification() -> None:
+    """On first startup after a new version, create a notification with a release notes link."""
+    try:
+        stored = _VERSION_FILE.read_text().strip() if _VERSION_FILE.exists() else ""
+        if stored != APP_VERSION:
+            if stored:  # only notify on upgrade, not on fresh install
+                from .notifications import notify
+                notify(
+                    f"Updated to v{APP_VERSION}",
+                    f"Update Dashboard was upgraded from v{stored} to v{APP_VERSION}. "
+                    f"See what's new: https://github.com/d4vastu/update-dashboard/releases/tag/v{APP_VERSION}",
+                    level="info",
+                )
+            _VERSION_FILE.parent.mkdir(parents=True, exist_ok=True)
+            _VERSION_FILE.write_text(APP_VERSION)
+    except Exception:
+        pass
+
 
 @app.on_event("startup")
 async def _startup() -> None:
+    _check_version_notification()
     await reload_backends()
     apply_all_schedules()
     scheduler.start()
@@ -269,6 +295,12 @@ async def docker_check(request: Request) -> HTMLResponse:
         for r in results:
             if isinstance(r, list):
                 stacks.extend(r)
+        # Check for new image updates and fire notifications (deduplicated)
+        try:
+            from .update_notifier import check_and_notify
+            check_and_notify(stacks)
+        except Exception:
+            pass
         return templates.TemplateResponse(
             "partials/docker_status.html",
             {"request": request, "stacks": stacks},

@@ -6,7 +6,7 @@
   {% if lines %}
     {% for line in lines %}
     <div class="flex gap-3 px-4 py-0.5 hover:bg-slate-700/30 rounded">
-      <span class="text-slate-600 shrink-0 select-none">{{ line.ts }}</span>
+      <span class="text-slate-600 shrink-0 select-none">{{ line.ts | as_local }}</span>
       <span class="text-slate-600 shrink-0 w-16 select-none">{{ line.level }}</span>
       <span class="{{ line.css }} break-all">{{ line.msg }}</span>
     </div>

@@ -1,10 +1,8 @@
 import asyncio
-from pathlib import Path
 
 from apscheduler.triggers.cron import CronTrigger
 from fastapi import APIRouter, Form, Request
 from fastapi.responses import HTMLResponse
-from fastapi.templating import Jinja2Templates
 
 from .auto_update_scheduler import apply_host_schedule, apply_stack_schedule
 from .config_manager import (
@@ -14,8 +12,10 @@ from .config_manager import (
     set_stack_auto_update,
 )
 
+from .templates_env import make_templates
+
 router = APIRouter(prefix="/admin/auto-updates")
-templates = Jinja2Templates(directory=Path(__file__).parent / "templates")
+templates = make_templates()
 
 # Injected by main.py so stack discovery can reach the backends
 _backends: list = []

@@ -161,6 +161,16 @@ def save_pushover_config(enabled: bool) -> None:
     save_config(cfg)
 
 
+def get_timezone() -> str:
+    return load_config().get("timezone", "UTC")
+
+
+def save_timezone(tz: str) -> None:
+    config = load_config()
+    config["timezone"] = tz
+    save_config(config)
+
+
 def get_dockerhub_config() -> dict:
     return load_config().get("dockerhub", {})
 

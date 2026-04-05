@@ -1,11 +1,9 @@
 import asyncio
 import os
-from pathlib import Path
 
 import pyotp
 from fastapi import APIRouter, Form, Request
 from fastapi.responses import HTMLResponse
-from fastapi.templating import Jinja2Templates
 
 from .auth import (
     change_password,
@@ -30,11 +28,13 @@ from .config_manager import (
     get_pushover_config,
     get_ssl_config,
     get_ssh_config,
+    get_timezone,
     reset_config,
     save_dockerhub_config,
     save_portainer_config,
     save_pushover_config,
     save_ssl_config,
+    save_timezone,
     set_docker_monitoring,
     update_host,
     update_ssh_config,
@@ -51,9 +51,10 @@ from .credentials import (
 from .ssh_client import verify_connection
 from .auto_update_log import get_recent
 from .log_buffer import get_log_lines
+from .templates_env import make_templates
 
 router = APIRouter(prefix="/admin")
-templates = Jinja2Templates(directory=Path(__file__).parent / "templates")
+templates = make_templates()
 
 
 def _connection_status() -> dict:
@@ -514,8 +515,51 @@ async def admin_update_ssh(
 # Account management
 # ---------------------------------------------------------------------------
 
+_COMMON_TIMEZONES = [
+    "UTC",
+    "America/New_York",
+    "America/Chicago",
+    "America/Denver",
+    "America/Los_Angeles",
+    "America/Anchorage",
+    "America/Honolulu",
+    "America/Toronto",
+    "America/Vancouver",
+    "America/Sao_Paulo",
+    "America/Argentina/Buenos_Aires",
+    "Europe/London",
+    "Europe/Paris",
+    "Europe/Berlin",
+    "Europe/Rome",
+    "Europe/Madrid",
+    "Europe/Amsterdam",
+    "Europe/Stockholm",
+    "Europe/Warsaw",
+    "Europe/Helsinki",
+    "Europe/Athens",
+    "Europe/Istanbul",
+    "Europe/Moscow",
+    "Asia/Dubai",
+    "Asia/Kolkata",
+    "Asia/Dhaka",
+    "Asia/Bangkok",
+    "Asia/Singapore",
+    "Asia/Shanghai",
+    "Asia/Tokyo",
+    "Asia/Seoul",
+    "Australia/Sydney",
+    "Australia/Melbourne",
+    "Pacific/Auckland",
+]
+
+
 def _account_context() -> dict:
-    return {"mfa_enrolled": mfa_enrolled(), "admin_username": get_admin_username()}
+    return {
+        "mfa_enrolled": mfa_enrolled(),
+        "admin_username": get_admin_username(),
+        "timezone": get_timezone(),
+        "common_timezones": _COMMON_TIMEZONES,
+    }
 
 
 @router.get("/account", response_class=HTMLResponse)
@@ -524,6 +568,27 @@ async def admin_account(request: Request) -> HTMLResponse:
         "partials/admin_account.html",
         {"request": request, **_account_context()},
     )
+
+
+@router.post("/account/timezone", response_class=HTMLResponse)
+async def admin_save_timezone(
+    request: Request,
+    timezone: str = Form("UTC"),
+) -> HTMLResponse:
+    tz = timezone.strip() or "UTC"
+    try:
+        from zoneinfo import ZoneInfo
+        ZoneInfo(tz)  # validate
+        save_timezone(tz)
+        return templates.TemplateResponse(
+            "partials/admin_account.html",
+            {"request": request, **_account_context(), "tz_saved": True},
+        )
+    except Exception:
+        return templates.TemplateResponse(
+            "partials/admin_account.html",
+            {"request": request, **_account_context(), "tz_error": f"Unknown timezone: {tz!r}"},
+        )
 
 
 @router.post("/account/password", response_class=HTMLResponse)

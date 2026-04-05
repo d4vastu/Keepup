@@ -1,10 +1,8 @@
 import time
 from collections import defaultdict
-from pathlib import Path
 
 from fastapi import APIRouter, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
-from fastapi.templating import Jinja2Templates
 
 from .auth import (
     admin_exists,
@@ -34,9 +32,10 @@ from .credentials import (
 )
 from .ssh_client import detect_docker_stacks, verify_connection
 from .backend_loader import reload_backends
+from .templates_env import make_templates
 
 router = APIRouter()
-templates = Jinja2Templates(directory=Path(__file__).parent / "templates")
+templates = make_templates()
 
 # ---------------------------------------------------------------------------
 # Rate limiting (in-memory, resets on container restart)

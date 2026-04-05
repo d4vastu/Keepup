@@ -34,7 +34,7 @@
         {% endif %}
       </div>
       <p class="text-xs text-slate-400 mt-0.5 line-clamp-2">{{ e.message }}</p>
-      <p class="text-xs text-slate-600 mt-0.5">{{ e.created_at[:16] | replace("T", " ") }} UTC</p>
+      <p class="text-xs text-slate-600 mt-0.5">{{ e.created_at | as_local }}</p>
     </div>
   </li>
   {% endfor %}
