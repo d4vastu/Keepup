@@ -1,6 +1,6 @@
 services:
   keepup:
-    image: ghcr.io/d4vastu/update-dashboard:latest
+    image: ghcr.io/d4vastu/keepup:latest
     container_name: keepup
     ports:
       - "8765:8765"

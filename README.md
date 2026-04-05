@@ -49,7 +49,7 @@ mkdir config data
 ```yaml
 services:
   keepup:
-    image: ghcr.io/d4vastu/update-dashboard:latest
+    image: ghcr.io/d4vastu/keepup:latest
     container_name: keepup
     ports:
       - "8765:8765"
@@ -321,7 +321,7 @@ docker compose up -d
 
 The `./config` and `./data` volumes persist across upgrades. No migration steps are required between versions.
 
-Available tags are listed on the [packages page](https://github.com/d4vastu/Keepup/pkgs/container/update-dashboard).
+Available tags are listed on the [packages page](https://github.com/d4vastu/Keepup/pkgs/container/keepup).
 
 ---
 
