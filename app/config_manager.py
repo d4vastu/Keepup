@@ -161,6 +161,30 @@ def save_pushover_config(enabled: bool) -> None:
     save_config(cfg)
 
 
+def get_email_config() -> dict:
+    return load_config().get("email", {})
+
+
+def save_email_config(
+    sender_name: str,
+    sender_address: str,
+    recipient_address: str,
+    smtp_host: str,
+    smtp_port: int,
+    tls: bool,
+) -> None:
+    cfg = load_config()
+    cfg["email"] = {
+        "sender_name": sender_name,
+        "sender_address": sender_address,
+        "recipient_address": recipient_address,
+        "smtp_host": smtp_host,
+        "smtp_port": smtp_port,
+        "tls": tls,
+    }
+    save_config(cfg)
+
+
 def get_timezone() -> str:
     return load_config().get("timezone", "UTC")
 

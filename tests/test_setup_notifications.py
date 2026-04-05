@@ -166,3 +166,120 @@ def test_schedule_save_manual_removes_key(setup_client, data_dir, config_file):
     assert response.status_code == 200
     raw = yaml.safe_load(config_file.read_text())
     assert "update_check_schedule" not in raw
+
+
+# ---------------------------------------------------------------------------
+# POST /setup/notifications/email/save
+# ---------------------------------------------------------------------------
+
+def test_email_save_stores_config(setup_client, data_dir, config_file):
+    import yaml
+    _create_admin()
+    response = setup_client.post("/setup/notifications/email/save", data={
+        "sender_name": "Keepup",
+        "sender_address": "keepup@example.com",
+        "recipient_address": "me@example.com",
+        "smtp_host": "smtp.example.com",
+        "smtp_port": "587",
+        "smtp_password": "secret",
+        "tls": "on",
+    })
+    assert response.status_code == 200
+    assert "saved" in response.text.lower() or "&#10003;" in response.text
+    raw = yaml.safe_load(config_file.read_text())
+    email = raw.get("email", {})
+    assert email.get("smtp_host") == "smtp.example.com"
+    assert email.get("sender_address") == "keepup@example.com"
+    assert email.get("tls") is True
+
+
+def test_email_save_no_host_returns_warning(setup_client, data_dir):
+    _create_admin()
+    response = setup_client.post("/setup/notifications/email/save", data={
+        "sender_name": "",
+        "sender_address": "a@b.com",
+        "recipient_address": "c@d.com",
+        "smtp_host": "",
+        "smtp_port": "587",
+    })
+    assert response.status_code == 200
+    assert "amber" in response.text or "required" in response.text.lower()
+
+
+# ---------------------------------------------------------------------------
+# POST /setup/notifications/email/test
+# ---------------------------------------------------------------------------
+
+def test_email_test_missing_fields(setup_client, data_dir):
+    _create_admin()
+    response = setup_client.post("/setup/notifications/email/test", data={
+        "sender_address": "",
+        "recipient_address": "",
+        "smtp_host": "",
+        "smtp_port": "587",
+    })
+    assert response.status_code == 200
+    assert "amber" in response.text or "Fill in" in response.text
+
+
+def test_email_test_smtp_failure(setup_client, data_dir):
+    _create_admin()
+    with patch("smtplib.SMTP", side_effect=Exception("Connection refused")):
+        with patch("smtplib.SMTP_SSL", side_effect=Exception("Connection refused")):
+            response = setup_client.post("/setup/notifications/email/test", data={
+                "sender_address": "a@b.com",
+                "recipient_address": "c@d.com",
+                "smtp_host": "smtp.example.com",
+                "smtp_port": "587",
+                "tls": "",
+            })
+    assert response.status_code == 200
+    assert "&#10007;" in response.text
+
+
+# ---------------------------------------------------------------------------
+# POST /setup/notifications/email/delete
+# ---------------------------------------------------------------------------
+
+def test_email_delete_removes_config(setup_client, data_dir, config_file):
+    import yaml
+    _create_admin()
+    # First save some config
+    setup_client.post("/setup/notifications/email/save", data={
+        "sender_address": "a@b.com",
+        "recipient_address": "c@d.com",
+        "smtp_host": "smtp.example.com",
+        "smtp_port": "587",
+    })
+    # Now delete it
+    response = setup_client.post("/setup/notifications/email/delete")
+    assert response.status_code == 200
+    raw = yaml.safe_load(config_file.read_text()) or {}
+    assert "email" not in raw
+
+
+# ---------------------------------------------------------------------------
+# GET /setup/notifications — email context variables
+# ---------------------------------------------------------------------------
+
+def test_setup_notifications_shows_email_tile(setup_client, data_dir):
+    _create_admin()
+    response = setup_client.get("/setup/notifications")
+    assert response.status_code == 200
+    assert "Email" in response.text
+    assert "Pushover" in response.text
+
+
+def test_setup_notifications_shows_connected_when_email_configured(setup_client, data_dir, config_file):
+    import yaml
+    _create_admin()
+    # Pre-configure email
+    setup_client.post("/setup/notifications/email/save", data={
+        "sender_address": "a@b.com",
+        "recipient_address": "c@d.com",
+        "smtp_host": "smtp.example.com",
+        "smtp_port": "587",
+    })
+    response = setup_client.get("/setup/notifications")
+    assert response.status_code == 200
+    assert "connected" in response.text.lower()
