@@ -1,5 +1,9 @@
 # Keepup
 
+> **⚠️ Beta software — homelab use only**
+>
+> Keepup is a **beta project built entirely by AI** (Claude, via Claude Code). It is designed for personal homelabs and self-hosted environments only. **Do not use this in any production, business, or security-sensitive setting.** The codebase has not been audited, has not been reviewed by a professional security engineer, and carries no guarantees of correctness, stability, or safety. Use it at your own risk.
+
 A self-hosted dashboard for monitoring and applying OS package updates and Docker Compose stack updates across multiple Linux hosts — from a single browser tab.
 
 Built with FastAPI + HTMX. No JavaScript frameworks, no database, no agents to install on remote hosts — just SSH.
@@ -10,19 +14,23 @@ Built with FastAPI + HTMX. No JavaScript frameworks, no database, no agents to i
 
 ## Features
 
-- **Setup wizard** — first-run flow creates your admin account (username + password + optional 2FA), generates a backup key, and walks through adding hosts and configuring connections
+- **Setup wizard** — first-run flow creates your admin account, generates a backup key, and walks through connecting your infrastructure
 - **OS package updates** — checks `apt`, `dnf`, `yum`, `zypper`, `pacman`, and `apk` via SSH; shows pending updates with version diffs
 - **One-click upgrade** — runs the appropriate upgrade command remotely with live streaming output
 - **Reboot detection** — shows a "Reboot required" badge and restart button after kernel/system updates
-- **Docker Compose monitoring** — discovers running stacks over SSH, compares image digests against the registry to detect available updates — no Portainer or agent required
+- **Docker Compose monitoring** — discovers running stacks over SSH, compares image digests against the registry to detect available updates — no agent required
 - **Portainer support** — optionally use a Portainer API as an alternative or additional Docker backend
 - **One-click stack redeploy** — pulls latest images and restarts the stack
-- **Auto-discovery** — after a successful connection test, the dashboard checks for running Compose stacks and asks if you want to monitor them
 - **Auto-updates** — schedule unattended OS upgrades and Docker stack redeployments per host/stack with cron schedules; optional auto-reboot per host
+- **Push notifications** — Pushover and Email (SMTP) support; fires on auto-update completion and failure
 - **Notification bell** — tracks auto-update run history; badge turns red on failure
+- **Infrastructure integrations** — connect Proxmox VE, Proxmox Backup Server, OPNsense, pfSense, and Home Assistant via their APIs
 - **Encrypted credential store** — SSH keys, passwords, sudo passwords, API keys, and tokens stored encrypted on disk; nothing sensitive ever touches `config.yml`
+- **Two-factor authentication** — optional TOTP 2FA with any standard authenticator app
 - **Sudo support** — non-root users are prompted for their sudo password inline, with an option to save it for future runs
 - **HTTPS/TLS** — generate a self-signed cert or upload your own from **Admin → HTTPS**; the app restarts automatically
+- **Timezone support** — set your local timezone in **Admin → Account**; all timestamps are displayed in local time
+- **Auto-update history** — full log at **Admin → Auto-Updates → History**; live log viewer at **Admin → Logs**
 - **Single admin account** — single-user by design; all configuration is managed through the UI
 
 ---
@@ -63,15 +71,18 @@ Open **http://localhost:8765** — the setup wizard will guide you through the r
 
 ## First-Run Setup Wizard
 
-The setup wizard runs automatically the first time (when no admin account exists):
+The setup wizard runs automatically the first time (when no admin account exists). It has 8 steps:
 
-1. **Create account (1/3)** — set a username and password; optionally enroll TOTP 2FA with any authenticator app
-2. **Save your backup key (2/3)** — a one-time recovery key is displayed; **copy it and store it somewhere safe before continuing** — this is the only way to reset your password if you lose access, there is no other recovery path
-3. **Connect infrastructure (3/3)** — add SSH hosts, configure Portainer, set DockerHub credentials
+1. **Create account** — set a username and password; optionally enroll TOTP 2FA
+2. **Save your backup key** — a one-time recovery key is displayed; **copy it and store it somewhere safe** — this is the only way to reset your password if you lose access
+3. **Connect infrastructure** — configure Proxmox VE, Proxmox Backup Server, OPNsense, pfSense, Home Assistant, Portainer, and Docker Hub
+4. **Discover Proxmox hosts** — if Proxmox is connected, select VMs and LXC containers to set up SSH monitoring for
+5. **SSH hosts** — add the Linux hosts you want to monitor; each gets a connection test
+6. **SSH hosts (pre-populated)** — if Proxmox discovery was used, queued hosts appear here pre-filled
+7. **Container monitoring** — choose which Docker containers to monitor for image updates on each host
+8. **Notifications** — configure Pushover and/or Email for auto-update alerts
 
-Have ready before starting step 3: IP addresses of your hosts, SSH credentials (password or key), and optionally your Portainer URL and API token.
-
-After finishing, you are redirected to the login page. Backup key and infrastructure settings can be updated anytime from the admin panel without re-running the full wizard.
+After finishing, you are redirected to the login page. All settings can be updated from the admin panel at any time.
 
 ---
 
@@ -82,7 +93,7 @@ After finishing, you are redirected to the login page. Backup key and infrastruc
 1. Go to **Admin → Hosts → Add host** — enter name, IP/hostname, SSH user (optional), and port (optional)
 2. Choose **Password** or **SSH key** authentication and enter credentials
 3. Click **Test connection & add host** — the dashboard verifies SSH access
-4. If Docker Compose stacks are found, a prompt appears: *"We found X stacks running — want to monitor them?"* — click **Yes** or **No**
+4. If Docker Compose stacks are found, a prompt appears: *"We found X stacks running — want to monitor them?"*
 
 ---
 
@@ -142,7 +153,7 @@ Docker monitoring works over the same SSH connection used for OS updates — no 
 3. Updates are applied with `docker compose pull && docker compose up -d`
 
 **Notes:**
-- Image digest comparison works for public images and private registries where the remote host already has pull access (the dashboard uses the remote host's Docker credentials, not its own)
+- Image digest comparison works for public images and private registries where the remote host already has pull access
 - If your stack uses `image: nginx:latest`, any breaking upstream change will be detected — pin versions if that is a concern
 
 **Monitoring modes** (set per-host):
@@ -165,6 +176,24 @@ To get your API token: Portainer → your username (top-right) → **Account Set
 
 ---
 
+## Infrastructure Integrations
+
+Configure integrations from the setup wizard (step 3) or **Admin → Connections** at any time.
+
+| Integration | What it enables |
+|---|---|
+| **Proxmox VE** | Discover VMs and LXC containers; queue them for SSH host setup |
+| **Proxmox Backup Server** | Connected for future monitoring features |
+| **OPNsense** | Connected for future monitoring features |
+| **pfSense** | Connected for future monitoring features |
+| **Home Assistant** | Connected for future monitoring features |
+| **Portainer** | Use as a Docker backend instead of or alongside SSH |
+| **Docker Hub** | Higher rate limits for image digest lookups (free account + access token) |
+
+For Proxmox VE and PBS, credentials are entered as two separate fields: **API user** (e.g. `root@pam`) and **API token** (e.g. `tokenname=uuid`). Find these in Proxmox under **Datacenter → Permissions → API Tokens**.
+
+---
+
 ## Auto-Updates
 
 ![Auto-Updates](docs/screenshots/admin_auto_updates.png)
@@ -173,8 +202,8 @@ Schedule unattended updates in **Admin → Auto-Updates**.
 
 **OS updates (per host):**
 - Enable the toggle and set a cron schedule (all times are UTC)
-- Runs the appropriate upgrade command for the detected package manager (`apt`, `dnf`, `yum`, `zypper`, `pacman`, or `apk`)
-- Optionally enable auto-reboot — the host reboots immediately after the update if the system indicates a reboot is required
+- Runs the appropriate upgrade command for the detected package manager
+- Optionally enable auto-reboot — the host reboots immediately after the update if a reboot is required
 - Non-root hosts require a saved sudo password (set in Admin → Hosts → Credentials)
 - Missed schedules (e.g. container was stopped during the window) are skipped, not queued
 
@@ -203,9 +232,17 @@ Common examples:
 | `0 3 1 * *` | First day of each month at 03:00 UTC |
 | `30 2 * * 1-5` | Weekdays at 02:30 UTC |
 
-**Notification bell:**
-- Badge turns red when an auto-update job fails
-- Click to view the last 20 run results and mark notifications as read
+---
+
+## Notifications
+
+Configure push notifications in the setup wizard (step 8) or **Admin → Connections**.
+
+**Pushover** — sends push notifications to your phone or desktop via the [Pushover](https://pushover.net) app. Requires a Pushover account, an application API token, and your user key.
+
+**Email (SMTP)** — sends email alerts. Configure sender address, recipient address, SMTP host, port, and optional password.
+
+Notifications fire when auto-update jobs complete or fail. You can configure which events trigger alerts in **Admin → Notifications** after setup.
 
 ---
 
@@ -213,25 +250,21 @@ Common examples:
 
 Enable HTTPS from **Admin → HTTPS** — no manual cert or container restart required.
 
-**Self-signed certificate (internal / home lab use):**
+**Self-signed certificate (home lab use):**
 1. Go to **Admin → HTTPS → Self-signed certificate**
 2. Enter the hostname or IP the dashboard will be reached at
-3. Click **Generate & Enable** — a 2-year certificate is created, the app restarts, and the page redirects to the HTTPS URL
-4. Your browser will show a security warning — add a permanent exception (the cert is only self-signed, not malicious)
+3. Click **Generate & Enable** — a 2-year certificate is created and the app restarts
 
-> After clicking Generate, the browser will show a connection error for a few seconds while the container restarts. Wait, then reload the page at the new `https://` URL.
+> After clicking Generate, the browser will show a connection error for a few seconds while the container restarts. Wait, then reload at the new `https://` URL.
 
-**Custom certificate (public-facing deployments):**
+**Custom certificate:**
 1. Go to **Admin → HTTPS → Custom certificate**
 2. Paste your PEM-encoded certificate chain and private key
-3. Click **Save & Enable** — the app restarts with your certificate
-
-**Disable HTTPS:**
-- **Admin → HTTPS → Disable** — removes the certificate files and reverts to HTTP on the next restart
+3. Click **Save & Enable**
 
 **Reverse proxy (nginx, Caddy, Traefik):**
 
-If you terminate TLS at a reverse proxy, leave HTTPS disabled in the app and point the proxy at `http://localhost:8765` (or whichever port you mapped). Example nginx config:
+If you terminate TLS at a reverse proxy, leave HTTPS disabled in the app and point the proxy at `http://localhost:8765`. Example nginx config:
 
 ```nginx
 server {
@@ -245,25 +278,13 @@ server {
         proxy_pass http://localhost:8765;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
-        # Required for WebSocket / HTMX streaming
         proxy_buffering off;
         proxy_read_timeout 300s;
     }
 }
 ```
 
-For Caddy, the equivalent is simply:
-```
-dashboard.example.com {
-    reverse_proxy localhost:8765
-}
-```
-
-If binding directly on `0.0.0.0` is undesirable, restrict to loopback in the compose file:
-```yaml
-ports:
-  - "127.0.0.1:8765:8765"
-```
+For Caddy: `reverse_proxy localhost:8765` is sufficient.
 
 ---
 
@@ -277,9 +298,7 @@ Enable or disable TOTP from **Admin → Account → Two-Factor Authentication**.
 
 A backup key is generated when your account is created. If you lose your password, go to the login page, click **Forgot password**, and enter the backup key to set a new password.
 
-> **Store your backup key somewhere safe.** If you lose both your password and backup key, there is no account recovery — only a factory reset (which wipes all data).
-
-Regenerate your backup key at any time from **Admin → Account → Backup Key**. The old key is invalidated immediately.
+> **Store your backup key somewhere safe.** If you lose both your password and backup key, there is no account recovery — only a factory reset.
 
 ### Factory Reset
 
@@ -287,23 +306,9 @@ Regenerate your backup key at any time from **Admin → Account → Backup Key**
 
 Requires your current password and typing `RESET` (case-insensitive) to confirm.
 
-**What is deleted:** all hosts, SSH credentials, Portainer config, DockerHub config, auto-update schedules, and the admin account.
+**What is deleted:** all hosts, SSH credentials, integration configs, auto-update schedules, and the admin account.
 
-**What is NOT deleted:** the `./config` and `./data` directories on disk. After a factory reset, the app writes a blank `config.yml` on next run. If you want a completely clean slate, stop the container and delete those directories manually before restarting.
-
----
-
-## Connections
-
-![Connections](docs/screenshots/admin_connections.png)
-
-Configure Portainer and Docker Hub in **Admin → Connections**.
-
-**Portainer** — connect a Portainer instance to use it as a Docker backend. Enter the URL and API token, click **Test Connection** to verify, then **Save**.
-
-**Docker Hub** (optional) — unauthenticated pulls from Docker Hub are rate-limited. Adding a free Docker Hub account and access token gives you a higher personal rate limit for image digest lookups. Use an access token (not your password): hub.docker.com → Account Settings → Personal access tokens.
-
-Changes take effect immediately on save — no restart needed.
+**What is NOT deleted:** the `./config` and `./data` directories on disk. Stop the container and delete those directories manually if you want a completely clean slate.
 
 ---
 
@@ -314,12 +319,7 @@ docker compose pull
 docker compose up -d
 ```
 
-The `./config` and `./data` volumes persist across upgrades. No migration steps are required between versions — the app reads whatever is in those directories on startup.
-
-If you pin to a specific version tag (recommended for production):
-```yaml
-image: ghcr.io/d4vastu/keepup:0.9.0
-```
+The `./config` and `./data` volumes persist across upgrades. No migration steps are required between versions.
 
 Available tags are listed on the [packages page](https://github.com/d4vastu/keepup/pkgs/container/keepup).
 
@@ -330,7 +330,6 @@ Available tags are listed on the [packages page](https://github.com/d4vastu/keep
 Back up the `./data` directory — it contains the encrypted credential store and the encryption key.
 
 ```bash
-# Stop the container first to avoid partial writes
 docker compose stop
 tar -czf keepup-backup-$(date +%Y%m%d).tar.gz data/ config/
 docker compose start
@@ -352,7 +351,7 @@ docker compose logs -f
 docker compose logs --tail=100
 ```
 
-The app logs to stdout via uvicorn. Each request is logged with method, path, and status code. Auto-update job output is stored in `./data/auto_update_log.json` and viewable from the notification bell in the UI.
+Auto-update job output is stored in `./data/auto_update_log.json` and viewable from **Admin → Auto-Updates → History** and the live log viewer at **Admin → Logs**.
 
 ---
 
@@ -436,6 +435,9 @@ FastAPI (Python)
 │   └── Per-stack Docker redeploy jobs
 ├── Encrypted credential store (Fernet / AES-128)
 │   └── SSH keys, passwords, sudo passwords, API tokens — never in config.yml
+├── Notification system
+│   ├── Pushover (push notifications)
+│   └── Email (SMTP)
 └── HTMX frontend — server-rendered partials, no page reloads, no JS framework
 ```
 
@@ -458,6 +460,16 @@ pytest --cov=app --cov-fail-under=95
 ```
 
 The test suite uses isolated temp directories for config and credentials — no real SSH connections are made.
+
+---
+
+## Status
+
+Keepup is in active development. It is built and maintained using Claude Code (Anthropic's AI coding assistant). Features are added incrementally; breaking changes between minor versions are possible until a stable 1.0 is reached.
+
+This project is intentionally scoped to **homelab and personal use**. It is not hardened for multi-user environments, enterprise networks, or exposure to the public internet without additional security controls.
+
+Issues and feedback welcome on the [GitHub Issues](https://github.com/d4vastu/Keepup/issues) page.
 
 ---
 
