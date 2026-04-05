@@ -10,7 +10,42 @@
   <title>Notifications — Keepup Setup</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://unpkg.com/htmx.org@1.9.10"></script>
-  <style>body { background-color: #0d1117; }</style>
+  <style>
+    body { background-color: #0d1117; }
+    .icon-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.75rem; }
+    .notif-icon {
+      display: flex; flex-direction: column; align-items: center;
+      gap: 0.5rem; padding: 1rem 0.5rem; border-radius: 1rem;
+      background: rgba(30,41,59,0.6); border: 1px solid #334155;
+      cursor: pointer; transition: border-color 0.15s, background 0.15s;
+      position: relative;
+    }
+    .notif-icon:hover { border-color: #3b82f6; background: rgba(30,41,59,0.9); }
+    .notif-icon.connected { border-color: #22c55e; }
+    .notif-icon.connected .badge { background: #166534; color: #4ade80; }
+    .notif-icon.active { border-color: #3b82f6; background: rgba(30,58,138,0.3); }
+    .badge {
+      font-size: 0.6rem; font-weight: 600; padding: 0.1rem 0.4rem;
+      border-radius: 9999px; background: #1e293b; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.05em;
+    }
+    .config-section { display: none; margin-top: 0.75rem; }
+    .config-card {
+      background: rgba(30,41,59,0.6); border: 1px solid #334155;
+      border-radius: 1rem; overflow: hidden; position: relative;
+    }
+    .delete-overlay {
+      position: absolute; inset: 0; background: rgba(15,23,42,0.85);
+      display: flex; align-items: center; justify-content: center;
+      opacity: 0; transition: opacity 0.15s; border-radius: 1rem; z-index: 10;
+    }
+    .config-card:hover .delete-overlay { opacity: 1; }
+    .delete-btn {
+      padding: 0.4rem 1rem; border-radius: 0.5rem;
+      background: #7f1d1d; color: #fca5a5; font-size: 0.75rem;
+      font-weight: 600; border: 1px solid #991b1b; cursor: pointer;
+    }
+    .delete-btn:hover { background: #991b1b; }
+  </style>
 </head>
 <body class="min-h-full text-slate-200 font-sans px-4 py-12">
 
@@ -36,63 +71,180 @@
 
     <div class="space-y-6">
 
-      <!-- Pushover -->
-      <div class="bg-slate-800/60 border border-slate-700 rounded-2xl overflow-hidden">
-        <div class="px-5 py-4 border-b border-slate-700">
-          <h2 class="text-sm font-semibold text-slate-200">Pushover <span class="text-xs font-normal text-slate-500 ml-1">optional</span></h2>
-          <p class="text-xs text-slate-500 mt-0.5">Push notifications to your phone when image updates are available.</p>
-        </div>
-        <div class="px-5 py-4 space-y-4">
+      <!-- Info notice -->
+      <div class="flex gap-3 px-4 py-3 rounded-xl bg-slate-800/60 border border-slate-700 text-sm text-slate-400">
+        <svg class="w-4 h-4 mt-0.5 shrink-0 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+            d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+        </svg>
+        Notifications fire when auto-update jobs complete or fail. You can configure which events trigger alerts after setup in Admin → Notifications.
+      </div>
 
-          {% if pushover_token_set and pushover_user_set %}
-          <div class="flex items-center gap-2 text-green-400 text-sm">
-            <span>&#10003;</span>
-            <span>Pushover credentials saved{% if pushover_enabled %} — notifications enabled{% else %} — notifications disabled{% endif %}</span>
+      <!-- Notification provider icon grid -->
+      <div>
+        <p class="text-xs font-medium text-slate-500 uppercase tracking-wider mb-3">Notification providers</p>
+        <div class="icon-grid">
+
+          <!-- Email tile -->
+          <div class="notif-icon {% if email_configured %}connected{% endif %}"
+               id="tile-email"
+               onclick="toggleConfig('email')">
+            <svg class="w-8 h-8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+              <rect x="2" y="4" width="20" height="16" rx="2" fill="#1e3a5f" stroke="#3b82f6"/>
+              <path d="M2 7l10 7 10-7" stroke="#3b82f6" stroke-width="1.5"/>
+            </svg>
+            <span class="text-xs font-medium text-slate-200">Email</span>
+            <span class="badge">{% if email_configured %}connected{% else %}optional{% endif %}</span>
           </div>
-          {% endif %}
 
-          <div id="pushover-result"></div>
+          <!-- Pushover tile -->
+          <div class="notif-icon {% if pushover_token_set and pushover_user_set %}connected{% endif %}"
+               id="tile-pushover"
+               onclick="toggleConfig('pushover')">
+            <svg class="w-8 h-8" viewBox="0 0 24 24" fill="none">
+              <rect width="24" height="24" rx="6" fill="#1a2b1a"/>
+              <path d="M7 17V7l5 3.5L17 7v10" stroke="#4ade80" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+            <span class="text-xs font-medium text-slate-200">Pushover</span>
+            <span class="badge">{% if pushover_token_set and pushover_user_set %}connected{% else %}optional{% endif %}</span>
+          </div>
 
-          <form hx-post="/setup/notifications/pushover/save"
-                hx-target="#pushover-result"
-                class="space-y-3">
-            <div class="grid grid-cols-2 gap-3">
-              <div>
-                <label class="block text-xs font-medium text-slate-400 mb-1">App token</label>
-                <input type="password" name="pushover_token"
-                  placeholder="{% if pushover_token_set %}already set{% else %}a1b2c3...{% endif %}"
-                  class="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-blue-500 placeholder:text-slate-500">
+        </div>
+      </div>
+
+      <!-- Email config section -->
+      <div class="config-section" id="config-email">
+        <div class="config-card">
+          <div class="delete-overlay">
+            <button class="delete-btn"
+              hx-post="/setup/notifications/email/delete"
+              hx-target="#config-email"
+              hx-swap="outerHTML"
+              onclick="event.stopPropagation(); document.getElementById('tile-email').classList.remove('connected','active');">
+              Remove email config
+            </button>
+          </div>
+          <div class="px-5 py-4 border-b border-slate-700">
+            <h2 class="text-sm font-semibold text-slate-200">Email (SMTP)</h2>
+            <p class="text-xs text-slate-500 mt-0.5">Send notifications via your own SMTP server.</p>
+          </div>
+          <div class="px-5 py-4 space-y-4">
+            <div id="email-result"></div>
+            <form hx-post="/setup/notifications/email/save"
+                  hx-target="#email-result"
+                  class="space-y-3">
+              <div class="grid grid-cols-2 gap-3">
+                <div>
+                  <label class="block text-xs font-medium text-slate-400 mb-1">Sender name</label>
+                  <input type="text" name="sender_name" value="{{ email_sender_name }}"
+                    placeholder="Keepup"
+                    class="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-blue-500 placeholder:text-slate-500">
+                </div>
+                <div>
+                  <label class="block text-xs font-medium text-slate-400 mb-1">Sender address</label>
+                  <input type="email" name="sender_address" value="{{ email_sender }}"
+                    placeholder="keepup@example.com"
+                    class="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-blue-500 placeholder:text-slate-500">
+                </div>
               </div>
               <div>
-                <label class="block text-xs font-medium text-slate-400 mb-1">User key</label>
-                <input type="password" name="pushover_user_key"
-                  placeholder="{% if pushover_user_set %}already set{% else %}u1v2w3...{% endif %}"
+                <label class="block text-xs font-medium text-slate-400 mb-1">Recipient address</label>
+                <input type="email" name="recipient_address" value="{{ email_recipient }}"
+                  placeholder="you@example.com"
                   class="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-blue-500 placeholder:text-slate-500">
               </div>
-            </div>
-            <p class="text-xs text-slate-500">Find these at <span class="text-slate-400">pushover.net</span> — App token under your application, User key on your profile.</p>
+              <div class="grid grid-cols-2 gap-3">
+                <div>
+                  <label class="block text-xs font-medium text-slate-400 mb-1">SMTP host</label>
+                  <input type="text" name="smtp_host" value="{{ email_smtp_host }}"
+                    placeholder="smtp.example.com"
+                    class="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-blue-500 placeholder:text-slate-500">
+                </div>
+                <div>
+                  <label class="block text-xs font-medium text-slate-400 mb-1">SMTP port</label>
+                  <input type="number" name="smtp_port" value="{{ email_smtp_port }}"
+                    placeholder="587"
+                    class="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-blue-500 placeholder:text-slate-500">
+                </div>
+              </div>
+              <div>
+                <label class="block text-xs font-medium text-slate-400 mb-1">SMTP password</label>
+                <input type="password" name="smtp_password"
+                  placeholder="{% if email_password_set %}already set{% else %}leave blank if not required{% endif %}"
+                  class="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-blue-500 placeholder:text-slate-500">
+              </div>
+              <label class="flex items-center gap-2 cursor-pointer">
+                <input type="checkbox" name="tls" value="on"
+                  {% if email_tls %}checked{% endif %}
+                  class="w-4 h-4 rounded accent-blue-500">
+                <span class="text-sm text-slate-300">Use TLS/SSL</span>
+              </label>
+              <div class="flex gap-2">
+                <button type="button"
+                  hx-post="/setup/notifications/email/test"
+                  hx-target="#email-result"
+                  hx-include="closest form"
+                  class="px-4 py-2 rounded-lg bg-slate-700 hover:bg-slate-600 text-sm font-medium text-slate-300 transition-colors">
+                  Send test email
+                </button>
+                <button type="submit"
+                  class="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-sm font-medium text-white transition-colors">
+                  Save
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      </div>
 
-            <label class="flex items-center gap-2 cursor-pointer">
-              <input type="checkbox" name="pushover_enabled" value="on"
-                {% if pushover_enabled %}checked{% endif %}
-                class="w-4 h-4 rounded accent-blue-500">
-              <span class="text-sm text-slate-300">Enable Pushover notifications</span>
-            </label>
-
-            <div class="flex gap-2">
-              <button type="button"
-                hx-post="/setup/notifications/pushover/test"
-                hx-target="#pushover-result"
-                hx-include="closest form"
-                class="px-4 py-2 rounded-lg bg-slate-700 hover:bg-slate-600 text-sm font-medium text-slate-300 transition-colors">
-                Send test notification
-              </button>
-              <button type="submit"
-                class="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-sm font-medium text-white transition-colors">
-                Save
-              </button>
-            </div>
-          </form>
+      <!-- Pushover config section -->
+      <div class="config-section" id="config-pushover">
+        <div class="config-card">
+          <div class="px-5 py-4 border-b border-slate-700">
+            <h2 class="text-sm font-semibold text-slate-200">Pushover</h2>
+            <p class="text-xs text-slate-500 mt-0.5">Push notifications to your phone when image updates are available.</p>
+          </div>
+          <div class="px-5 py-4 space-y-4">
+            <div id="pushover-result"></div>
+            <form hx-post="/setup/notifications/pushover/save"
+                  hx-target="#pushover-result"
+                  class="space-y-3">
+              <div class="grid grid-cols-2 gap-3">
+                <div>
+                  <label class="block text-xs font-medium text-slate-400 mb-1">App token</label>
+                  <input type="password" name="pushover_token"
+                    placeholder="{% if pushover_token_set %}already set{% else %}a1b2c3...{% endif %}"
+                    class="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-blue-500 placeholder:text-slate-500">
+                </div>
+                <div>
+                  <label class="block text-xs font-medium text-slate-400 mb-1">User key</label>
+                  <input type="password" name="pushover_user_key"
+                    placeholder="{% if pushover_user_set %}already set{% else %}u1v2w3...{% endif %}"
+                    class="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-blue-500 placeholder:text-slate-500">
+                </div>
+              </div>
+              <p class="text-xs text-slate-500">Find these at <span class="text-slate-400">pushover.net</span> — App token under your application, User key on your profile.</p>
+              <label class="flex items-center gap-2 cursor-pointer">
+                <input type="checkbox" name="pushover_enabled" value="on"
+                  {% if pushover_enabled %}checked{% endif %}
+                  class="w-4 h-4 rounded accent-blue-500">
+                <span class="text-sm text-slate-300">Enable Pushover notifications</span>
+              </label>
+              <div class="flex gap-2">
+                <button type="button"
+                  hx-post="/setup/notifications/pushover/test"
+                  hx-target="#pushover-result"
+                  hx-include="closest form"
+                  class="px-4 py-2 rounded-lg bg-slate-700 hover:bg-slate-600 text-sm font-medium text-slate-300 transition-colors">
+                  Send test notification
+                </button>
+                <button type="submit"
+                  class="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-sm font-medium text-white transition-colors">
+                  Save
+                </button>
+              </div>
+            </form>
+          </div>
         </div>
       </div>
 
@@ -103,9 +255,7 @@
           <p class="text-xs text-slate-500 mt-0.5">How often Keepup checks for available package and image updates in the background.</p>
         </div>
         <div class="px-5 py-4 space-y-4">
-
           <div id="schedule-result"></div>
-
           <form hx-post="/setup/notifications/schedule/save"
                 hx-target="#schedule-result"
                 class="space-y-3">
@@ -131,13 +281,38 @@
       <div class="flex justify-between items-center mt-2">
         <a href="/setup/hosts" class="text-sm text-slate-500 hover:text-slate-300">← Back</a>
         <a href="/setup/summary"
-          class="px-6 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-sm font-semibold text-white transition-colors">
-          Continue to Summary →
+          class="inline-flex items-center gap-2 px-6 py-2.5 rounded-xl bg-green-600 hover:bg-green-500 text-sm font-semibold text-white transition-colors">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
+          </svg>
+          Finish setup
         </a>
       </div>
 
     </div>
   </div>
+
+  <script>
+    function toggleConfig(id) {
+      const section = document.getElementById('config-' + id);
+      const tile = document.getElementById('tile-' + id);
+      const allSections = document.querySelectorAll('.config-section');
+      const allTiles = document.querySelectorAll('.notif-icon');
+      const isOpen = section.style.display === 'block';
+      allSections.forEach(s => s.style.display = 'none');
+      allTiles.forEach(t => t.classList.remove('active'));
+      if (!isOpen) {
+        section.style.display = 'block';
+        tile.classList.add('active');
+        section.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      }
+    }
+
+    document.addEventListener('DOMContentLoaded', function() {
+      {% if email_configured %}toggleConfig('email');{% endif %}
+      {% if pushover_token_set and pushover_user_set and not email_configured %}toggleConfig('pushover');{% endif %}
+    });
+  </script>
 
 </body>
 </html>

@@ -24,6 +24,7 @@ from .config_manager import (
     delete_host,
     get_available_ssh_keys,
     get_dockerhub_config,
+    get_email_config,
     get_homeassistant_config,
     get_hosts,
     get_opnsense_config,
@@ -36,6 +37,7 @@ from .config_manager import (
     get_timezone,
     get_update_check_schedule,
     save_dockerhub_config,
+    save_email_config,
     save_homeassistant_config,
     save_opnsense_config,
     save_pbs_config,
@@ -1070,11 +1072,21 @@ async def setup_notifications_page(request: Request) -> HTMLResponse:
         return RedirectResponse("/setup", status_code=302)
     pushover_creds = get_integration_credentials("pushover")
     pushover_cfg = get_pushover_config()
+    email_cfg = get_email_config()
+    email_creds = get_integration_credentials("email")
     return templates.TemplateResponse("setup_notifications.html", {
         "request": request,
         "pushover_token_set": bool(pushover_creds.get("api_token")),
         "pushover_user_set": bool(pushover_creds.get("user_key")),
         "pushover_enabled": pushover_cfg.get("enabled", False),
+        "email_configured": bool(email_cfg.get("smtp_host")),
+        "email_sender": email_cfg.get("sender_address", ""),
+        "email_recipient": email_cfg.get("recipient_address", ""),
+        "email_smtp_host": email_cfg.get("smtp_host", ""),
+        "email_smtp_port": email_cfg.get("smtp_port", 587),
+        "email_tls": email_cfg.get("tls", True),
+        "email_sender_name": email_cfg.get("sender_name", ""),
+        "email_password_set": bool(email_creds.get("smtp_password")),
         "update_schedule": get_update_check_schedule(),
     })
 
@@ -1131,3 +1143,93 @@ async def setup_save_schedule(
     labels = {"6h": "every 6 hours", "12h": "every 12 hours", "24h": "daily", "manual": "manual only"}
     label = labels.get(update_schedule, "manual only")
     return HTMLResponse(f'<span class="text-green-400 text-sm">&#10003; Update checks set to {label}.</span>')
+
+
+@router.post("/setup/notifications/email/save", response_class=HTMLResponse)
+async def setup_save_email(
+    request: Request,
+    sender_name: str = Form(""),
+    sender_address: str = Form(""),
+    recipient_address: str = Form(""),
+    smtp_host: str = Form(""),
+    smtp_port: int = Form(587),
+    smtp_password: str = Form(""),
+    tls: str = Form(""),
+) -> HTMLResponse:
+    if not smtp_host.strip():
+        return HTMLResponse('<span class="text-amber-400 text-sm">SMTP host is required.</span>')
+    save_email_config(
+        sender_name=sender_name.strip(),
+        sender_address=sender_address.strip(),
+        recipient_address=recipient_address.strip(),
+        smtp_host=smtp_host.strip(),
+        smtp_port=smtp_port,
+        tls=(tls == "on"),
+    )
+    if smtp_password.strip():
+        save_integration_credentials("email", smtp_password=smtp_password.strip())
+    return HTMLResponse('<span class="text-green-400 text-sm">&#10003; Email settings saved.</span>')
+
+
+@router.post("/setup/notifications/email/test", response_class=HTMLResponse)
+async def setup_test_email(
+    request: Request,
+    sender_name: str = Form(""),
+    sender_address: str = Form(""),
+    recipient_address: str = Form(""),
+    smtp_host: str = Form(""),
+    smtp_port: int = Form(587),
+    smtp_password: str = Form(""),
+    tls: str = Form(""),
+) -> HTMLResponse:
+    import smtplib
+    import ssl
+    from email.mime.text import MIMEText
+
+    host = smtp_host.strip()
+    if not host or not sender_address.strip() or not recipient_address.strip():
+        return HTMLResponse('<span class="text-amber-400 text-sm">Fill in SMTP host, sender and recipient first.</span>')
+
+    # Fall back to saved password if none entered
+    if not smtp_password.strip():
+        creds = get_integration_credentials("email")
+        smtp_password = creds.get("smtp_password", "")
+
+    try:
+        msg = MIMEText("This is a test email from Keepup to verify your SMTP configuration.")
+        msg["Subject"] = "Keepup test email"
+        msg["From"] = f"{sender_name.strip()} <{sender_address.strip()}>" if sender_name.strip() else sender_address.strip()
+        msg["To"] = recipient_address.strip()
+
+        use_tls = (tls == "on")
+        if use_tls:
+            context = ssl.create_default_context()
+            with smtplib.SMTP_SSL(host, smtp_port, context=context, timeout=10) as server:
+                if smtp_password:
+                    server.login(sender_address.strip(), smtp_password)
+                server.sendmail(sender_address.strip(), [recipient_address.strip()], msg.as_string())
+        else:
+            with smtplib.SMTP(host, smtp_port, timeout=10) as server:
+                server.ehlo()
+                server.starttls()
+                if smtp_password:
+                    server.login(sender_address.strip(), smtp_password)
+                server.sendmail(sender_address.strip(), [recipient_address.strip()], msg.as_string())
+
+        return HTMLResponse('<span class="text-green-400 text-sm">&#10003; Test email sent.</span>')
+    except Exception as exc:
+        return HTMLResponse(f'<span class="text-red-400 text-sm">&#10007; {str(exc)[:160]}</span>')
+
+
+@router.post("/setup/notifications/email/delete", response_class=HTMLResponse)
+async def setup_delete_email(request: Request) -> HTMLResponse:
+    from .config_manager import load_config, save_config
+    config = load_config()
+    config.pop("email", None)
+    save_config(config)
+    from .credentials import delete_credentials
+    try:
+        delete_credentials("email")
+    except Exception:
+        pass
+    return HTMLResponse('<div class="config-section" id="config-email"></div>')
