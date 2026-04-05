@@ -48,7 +48,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
 # ---------------------------------------------------------------------------
 
 setup_log_buffer()
-app = FastAPI(title="Update Dashboard")
+app = FastAPI(title="Keepup")
 app.add_middleware(AuthMiddleware)
 app.add_middleware(SessionMiddleware,
                    secret_key=get_session_secret(),
@@ -74,8 +74,8 @@ def _check_version_notification() -> None:
                 from .notifications import notify
                 notify(
                     f"Updated to v{APP_VERSION}",
-                    f"Update Dashboard was upgraded from v{stored} to v{APP_VERSION}. "
-                    f"See what's new: https://github.com/d4vastu/update-dashboard/releases/tag/v{APP_VERSION}",
+                    f"Keepup was upgraded from v{stored} to v{APP_VERSION}. "
+                    f"See what's new: https://github.com/d4vastu/keepup/releases/tag/v{APP_VERSION}",
                     level="info",
                 )
             _VERSION_FILE.parent.mkdir(parents=True, exist_ok=True)

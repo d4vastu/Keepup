@@ -52,7 +52,7 @@ def generate_self_signed_cert(hostname: str) -> tuple[str, str]:
 
     subject = issuer = x509.Name([
         x509.NameAttribute(NameOID.COMMON_NAME, hostname),
-        x509.NameAttribute(NameOID.ORGANIZATION_NAME, "Update Dashboard"),
+        x509.NameAttribute(NameOID.ORGANIZATION_NAME, "Keepup"),
     ])
 
     try:

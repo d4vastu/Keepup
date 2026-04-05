@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Save your backup key — Update Dashboard</title>
+  <title>Save your backup key — Keepup</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <style>body { background-color: #0f172a; }</style>
 </head>
@@ -107,7 +107,7 @@
 
     function downloadKey() {
       const blob = new Blob(
-        ['Update Dashboard — Backup Key\n\n' + key + '\n\nKeep this safe. You need it to reset your password.\n'],
+        ['Keepup — Backup Key\n\n' + key + '\n\nKeep this safe. You need it to reset your password.\n'],
         { type: 'text/plain' }
       );
       const a = document.createElement('a');

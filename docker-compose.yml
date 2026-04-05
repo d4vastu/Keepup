@@ -1,7 +1,7 @@
 services:
   update-dashboard:
-    image: ghcr.io/d4vastu/update-dashboard:latest
-    container_name: update-dashboard
+    image: ghcr.io/d4vastu/keepup:latest
+    container_name: keepup
     ports:
       - "8765:8765"
     volumes:

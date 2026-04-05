@@ -1,4 +1,4 @@
-# Update Dashboard
+# Keepup
 
 A self-hosted dashboard for monitoring and applying OS package updates and Docker Compose stack updates across multiple Linux hosts — from a single browser tab.
 
@@ -32,7 +32,7 @@ Built with FastAPI + HTMX. No JavaScript frameworks, no database, no agents to i
 ### 1. Create directories
 
 ```bash
-mkdir update-dashboard && cd update-dashboard
+mkdir keepup && cd keepup
 mkdir config data
 ```
 
@@ -40,9 +40,9 @@ mkdir config data
 
 ```yaml
 services:
-  update-dashboard:
-    image: ghcr.io/d4vastu/update-dashboard:latest
-    container_name: update-dashboard
+  keepup:
+    image: ghcr.io/d4vastu/keepup:latest
+    container_name: keepup
     ports:
       - "8765:8765"
     volumes:
@@ -318,10 +318,10 @@ The `./config` and `./data` volumes persist across upgrades. No migration steps 
 
 If you pin to a specific version tag (recommended for production):
 ```yaml
-image: ghcr.io/d4vastu/update-dashboard:0.9.0
+image: ghcr.io/d4vastu/keepup:0.9.0
 ```
 
-Available tags are listed on the [packages page](https://github.com/d4vastu/update-dashboard/pkgs/container/update-dashboard).
+Available tags are listed on the [packages page](https://github.com/d4vastu/keepup/pkgs/container/keepup).
 
 ---
 
@@ -332,7 +332,7 @@ Back up the `./data` directory — it contains the encrypted credential store an
 ```bash
 # Stop the container first to avoid partial writes
 docker compose stop
-tar -czf update-dashboard-backup-$(date +%Y%m%d).tar.gz data/ config/
+tar -czf keepup-backup-$(date +%Y%m%d).tar.gz data/ config/
 docker compose start
 ```
 
@@ -444,8 +444,8 @@ FastAPI (Python)
 ## Development
 
 ```bash
-git clone https://github.com/d4vastu/update-dashboard.git
-cd update-dashboard
+git clone https://github.com/d4vastu/keepup.git
+cd keepup
 pip install -r requirements.txt -r requirements-dev.txt
 
 DATA_PATH=./data uvicorn app.main:app --reload --port 8000

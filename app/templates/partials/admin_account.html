@@ -194,7 +194,7 @@
         <div class="flex gap-3">
           <button onclick="navigator.clipboard.writeText('{{ new_backup_key }}').then(()=>{this.textContent='Copied!';setTimeout(()=>{this.textContent='Copy'},2000)})"
             class="px-3 py-1.5 rounded bg-slate-700 hover:bg-slate-600 text-xs font-medium text-slate-300 transition-colors">Copy</button>
-          <button onclick="(function(){var b=new Blob(['Update Dashboard — Backup Key\n\n{{ new_backup_key }}\n'],{type:'text/plain'});var a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='update-dashboard-backup-key.txt';a.click();})()"
+          <button onclick="(function(){var b=new Blob(['Keepup — Backup Key\n\n{{ new_backup_key }}\n'],{type:'text/plain'});var a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='keepup-backup-key.txt';a.click();})()"
             class="px-3 py-1.5 rounded bg-slate-700 hover:bg-slate-600 text-xs font-medium text-slate-300 transition-colors">Download .txt</button>
         </div>
       </div>

@@ -436,7 +436,7 @@ async def admin_save_dockerhub(
 @router.post("/connections/pushover/test", response_class=HTMLResponse)
 async def admin_test_pushover(request: Request) -> HTMLResponse:
     from .pushover import send_pushover
-    success = await send_pushover("Test", "Update Dashboard test notification")
+    success = await send_pushover("Test", "Keepup test notification")
     if success:
         return HTMLResponse(
             '<span class="text-green-400 text-sm">&#10003; Test notification sent successfully.</span>'

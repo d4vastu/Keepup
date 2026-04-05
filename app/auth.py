@@ -67,7 +67,7 @@ def new_totp_secret() -> str:
 
 def get_totp_uri(secret: str) -> str:
     return pyotp.TOTP(secret).provisioning_uri(
-        name="admin", issuer_name="Update Dashboard"
+        name="admin", issuer_name="Keepup"
     )
 
 
