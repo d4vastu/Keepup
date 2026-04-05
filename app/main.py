@@ -179,12 +179,12 @@ async def _job_run_stack_update(job_id: str, backend_key: str, ref: str) -> None
 @app.get("/", response_class=HTMLResponse)
 async def home(request: Request) -> HTMLResponse:
     if request.session.get("authenticated"):
-        return RedirectResponse("/dashboard", status_code=302)
+        return RedirectResponse("/home", status_code=302)
     return templates.TemplateResponse("home.html", {"request": request})
 
 
-@app.get("/dashboard", response_class=HTMLResponse)
-async def dashboard(request: Request) -> HTMLResponse:
+@app.get("/home", response_class=HTMLResponse)
+async def main_home(request: Request) -> HTMLResponse:
     hosts = get_hosts()
     backends = get_backends()
     docker_configured = (
@@ -195,6 +195,11 @@ async def dashboard(request: Request) -> HTMLResponse:
         "index.html",
         {"request": request, "hosts": hosts, "docker_configured": docker_configured, "app_version": APP_VERSION},
     )
+
+
+@app.get("/dashboard", response_class=HTMLResponse)
+async def dashboard_redirect(request: Request) -> HTMLResponse:
+    return RedirectResponse("/home", status_code=301)
 
 
 # ---------------------------------------------------------------------------
