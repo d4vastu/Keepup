@@ -25,6 +25,7 @@ from .config_manager import (
     clear_ssl_config,
     delete_host,
     get_dockerhub_config,
+    get_email_config,
     get_homeassistant_config,
     get_hosts,
     get_opnsense_config,
@@ -66,23 +67,23 @@ templates = make_templates()
 
 def _connection_status() -> dict:
     """Read connection status from the UI-managed credential store."""
-    port_cfg = get_portainer_config()
-    port_creds = get_integration_credentials("portainer")
-    dh_cfg = get_dockerhub_config()
-    dh_creds = get_integration_credentials("dockerhub")
     pushover_cfg = get_pushover_config()
     pushover_creds = get_integration_credentials("pushover")
+    email_cfg = get_email_config()
+    email_creds = get_integration_credentials("email")
 
     return {
-        "portainer_url": port_cfg.get("url", ""),
-        "portainer_key_set": bool(port_creds.get("api_key")),
-        "portainer_verify_ssl": port_cfg.get("verify_ssl", False),
-        "portainer_env_only": False,
-        "dockerhub_user": dh_cfg.get("username", ""),
-        "dockerhub_token_set": bool(dh_creds.get("token")),
         "pushover_token_set": bool(pushover_creds.get("api_token")),
         "pushover_user_set": bool(pushover_creds.get("user_key")),
         "pushover_enabled": pushover_cfg.get("enabled", False),
+        "email_configured": bool(email_cfg.get("smtp_host")),
+        "email_sender": email_cfg.get("sender_address", ""),
+        "email_recipient": email_cfg.get("recipient_address", ""),
+        "email_smtp_host": email_cfg.get("smtp_host", ""),
+        "email_smtp_port": email_cfg.get("smtp_port", 587),
+        "email_tls": email_cfg.get("tls", True),
+        "email_sender_name": email_cfg.get("sender_name", ""),
+        "email_password_set": bool(email_creds.get("smtp_password")),
     }
 
 
