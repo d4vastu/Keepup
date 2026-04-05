@@ -1,0 +1,18 @@
+<div class="flex items-center gap-3 px-3 py-2.5 rounded-lg bg-slate-800/60 border border-slate-700/60">
+  <div class="flex-shrink-0">
+    {% if ok %}
+    <span class="block w-2 h-2 rounded-full bg-green-400"></span>
+    {% else %}
+    <span class="block w-2 h-2 rounded-full bg-red-500"></span>
+    {% endif %}
+  </div>
+  <div class="min-w-0 flex-1">
+    <span class="text-xs font-medium text-slate-300">{{ name }}</span>
+    {% if version %}
+    <span class="text-xs text-slate-500 ml-1.5">v{{ version }}</span>
+    {% endif %}
+  </div>
+  {% if not ok %}
+  <span class="text-xs text-red-400 flex-shrink-0">unreachable</span>
+  {% endif %}
+</div>

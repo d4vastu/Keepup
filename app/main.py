@@ -18,8 +18,8 @@ from .notifications import get_unread_count, get_notifications, mark_all_read
 from .auto_update_scheduler import apply_all_schedules, scheduler
 from .auto_updates_router import router as auto_updates_router
 from .backend_loader import get_backends, get_dockerhub_creds, reload_backends
-from .config_manager import get_hosts, get_ssh_config
-from .credentials import get_credentials, save_sudo_password
+from .config_manager import get_hosts, get_ssh_config, get_pbs_config
+from .credentials import get_credentials, get_integration_credentials, save_sudo_password
 from .ssh_client import (
     _needs_sudo,
     check_host_updates,
@@ -269,6 +269,11 @@ async def main_home(request: Request) -> HTMLResponse:
     docker_configured = any(b.BACKEND_KEY == "portainer" for b in backends) or any(
         h.get("docker_mode") for h in hosts
     )
+    pbs_creds = get_integration_credentials("proxmox_backup")
+    pbs_cfg = get_pbs_config()
+    pbs_configured = bool(
+        pbs_cfg.get("url") and (pbs_creds.get("secret") or pbs_creds.get("api_token"))
+    )
     latest_tag, latest_url = await _get_latest_version()
     show_update = _newer_version(latest_tag)
     return templates.TemplateResponse(
@@ -277,6 +282,7 @@ async def main_home(request: Request) -> HTMLResponse:
             "request": request,
             "hosts": hosts,
             "docker_configured": docker_configured,
+            "pbs_configured": pbs_configured,
             "app_version": APP_VERSION,
             "latest_version": latest_tag if show_update else None,
             "latest_release_url": latest_url if show_update else None,
@@ -287,6 +293,47 @@ async def main_home(request: Request) -> HTMLResponse:
 @app.get("/dashboard", response_class=HTMLResponse)
 async def dashboard_redirect(request: Request) -> HTMLResponse:
     return RedirectResponse("/home", status_code=301)
+
+
+@app.get("/api/integration/pbs/status", response_class=HTMLResponse)
+async def pbs_status(request: Request) -> HTMLResponse:
+    """Return a small status card for PBS — version and connectivity."""
+    import httpx
+    import logging
+
+    log = logging.getLogger(__name__)
+    cfg = get_pbs_config()
+    creds = get_integration_credentials("proxmox_backup")
+    url = cfg.get("url", "")
+    verify_ssl = cfg.get("verify_ssl", False)
+    token_id = creds.get("token_id", "")
+    secret = creds.get("secret", "")
+    # Legacy fallback
+    if not token_id:
+        api_user = creds.get("api_user", "")
+        api_token = creds.get("api_token", "")
+        auth = f"PBSAPIToken={api_user}!{api_token}" if api_user else f"PBSAPIToken={api_token}"
+    else:
+        auth = f"PBSAPIToken={token_id}:{secret}"
+
+    if not url or not (token_id or creds.get("api_token")):
+        return HTMLResponse("")
+
+    try:
+        async with httpx.AsyncClient(verify=verify_ssl, timeout=8) as c:
+            resp = await c.get(f"{url}/api2/json/version", headers={"Authorization": auth})
+            resp.raise_for_status()
+            ver = resp.json().get("data", {}).get("version", "unknown")
+        return templates.TemplateResponse(
+            "partials/integration_status_card.html",
+            {"request": request, "name": "Proxmox Backup Server", "version": ver, "ok": True},
+        )
+    except Exception as exc:
+        log.warning("PBS status check failed: %s", exc)
+        return templates.TemplateResponse(
+            "partials/integration_status_card.html",
+            {"request": request, "name": "Proxmox Backup Server", "version": None, "ok": False},
+        )
 
 
 # ---------------------------------------------------------------------------

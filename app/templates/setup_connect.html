@@ -270,16 +270,21 @@
             <input type="url" id="pbs-url" name="pbs_url" value="{{ pbs_url or '' }}"
               placeholder="https://192.168.1.11:8007" class="field-input">
           </div>
+          <div class="field">
+            <div class="field-label">API user</div>
+            <input type="text" id="pbs-user" name="pbs_api_user" placeholder="root@pbs" class="field-input">
+            <div class="field-hint">Configuration → Access Control → Users</div>
+          </div>
           <div class="field-row">
             <div class="field">
-              <div class="field-label">API user</div>
-              <input type="text" id="pbs-user" name="pbs_api_user" placeholder="root@pbs" class="field-input">
-              <div class="field-hint">Configuration → Access Control → Users</div>
+              <div class="field-label">Token ID</div>
+              <input type="text" id="pbs-token-id" name="pbs_token_id" placeholder="root@pbs!tokenname" class="field-input">
+              <div class="field-hint">Configuration → Access Control → API Tokens → Token ID</div>
             </div>
             <div class="field">
-              <div class="field-label">API token</div>
-              <input type="password" id="pbs-token" name="pbs_api_token" placeholder="tokenname=uuid" class="field-input">
-              <div class="field-hint">Configuration → Access Control → API Tokens</div>
+              <div class="field-label">Secret</div>
+              <input type="password" id="pbs-secret" name="pbs_secret" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" class="field-input">
+              <div class="field-hint">Configuration → Access Control → API Tokens → Secret</div>
             </div>
           </div>
           <div class="ssl-row">
@@ -290,11 +295,11 @@
           <div class="btn-row">
             <button class="btn-test"
               hx-post="/setup/connect/pbs/test"
-              hx-include="#pbs-url,#pbs-user,#pbs-token,#pbs-ssl"
+              hx-include="#pbs-url,#pbs-user,#pbs-token-id,#pbs-secret,#pbs-ssl"
               hx-target="#pbs-test-result">Test connection</button>
             <button class="btn-save"
               hx-post="/setup/connect/pbs/save"
-              hx-include="#pbs-url,#pbs-user,#pbs-token,#pbs-ssl"
+              hx-include="#pbs-url,#pbs-user,#pbs-token-id,#pbs-secret,#pbs-ssl"
               hx-target="#pbs-result">Save</button>
           </div>
         </div>

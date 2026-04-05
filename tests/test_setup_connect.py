@@ -115,7 +115,8 @@ def test_proxmox_test_success(setup_client, data_dir):
             data={
                 "proxmox_url": "https://192.168.1.10:8006",
                 "proxmox_api_user": "user@pam",
-                "proxmox_api_token": "token=abc",
+                "proxmox_token_id": "user@pam!token",
+                "proxmox_secret": "abc",
             },
         )
     assert response.status_code == 200
@@ -133,7 +134,8 @@ def test_proxmox_test_auth_error(setup_client, data_dir):
             data={
                 "proxmox_url": "https://192.168.1.10:8006",
                 "proxmox_api_user": "user@pam",
-                "proxmox_api_token": "badtoken",
+                "proxmox_token_id": "user@pam!badtoken",
+                "proxmox_secret": "bad",
             },
         )
     assert response.status_code == 200
@@ -153,7 +155,8 @@ def test_proxmox_test_connect_error(setup_client, data_dir):
             data={
                 "proxmox_url": "https://192.0.2.1:8006",
                 "proxmox_api_user": "user@pam",
-                "proxmox_api_token": "token=abc",
+                "proxmox_token_id": "user@pam!token",
+                "proxmox_secret": "abc",
             },
         )
     assert response.status_code == 200
@@ -173,7 +176,8 @@ def test_proxmox_test_ssl_error(setup_client, data_dir):
             data={
                 "proxmox_url": "https://192.168.1.10:8006",
                 "proxmox_api_user": "user@pam",
-                "proxmox_api_token": "token=abc",
+                "proxmox_token_id": "user@pam!token",
+                "proxmox_secret": "abc",
             },
         )
     assert response.status_code == 200
@@ -198,7 +202,7 @@ def test_proxmox_discover_success(setup_client, data_dir):
     from app.credentials import save_integration_credentials
 
     save_proxmox_config(url="https://192.168.1.10:8006", verify_ssl=False)
-    save_integration_credentials("proxmox", api_user="user@pam", api_token="token=abc")
+    save_integration_credentials("proxmox", api_user="user@pam", token_id="user@pam!token", secret="abc")
 
     with patch("app.auth_router.ProxmoxClient") as MockClient:
         instance = AsyncMock()
@@ -226,7 +230,7 @@ def test_proxmox_discover_failure(setup_client, data_dir):
     from app.credentials import save_integration_credentials
 
     save_proxmox_config(url="https://192.168.1.10:8006", verify_ssl=False)
-    save_integration_credentials("proxmox", api_user="user@pam", api_token="token=abc")
+    save_integration_credentials("proxmox", api_user="user@pam", token_id="user@pam!token", secret="abc")
 
     with patch("app.auth_router.ProxmoxClient") as MockClient:
         instance = AsyncMock()
@@ -275,7 +279,8 @@ def test_pbs_test_success(setup_client, data_dir):
             data={
                 "pbs_url": "https://192.168.1.11:8007",
                 "pbs_api_user": "user@pbs",
-                "pbs_api_token": "token=abc",
+                "pbs_token_id": "user@pbs!mytoken",
+                "pbs_secret": "abc123",
             },
         )
     assert response.status_code == 200
@@ -290,7 +295,8 @@ def test_pbs_test_auth_failure(setup_client, data_dir):
             data={
                 "pbs_url": "https://192.168.1.11:8007",
                 "pbs_api_user": "user@pbs",
-                "pbs_api_token": "badtoken",
+                "pbs_token_id": "user@pbs!badtoken",
+                "pbs_secret": "bad",
             },
         )
     assert response.status_code == 200

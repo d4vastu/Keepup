@@ -329,9 +329,9 @@ async def setup_connect(request: Request) -> HTMLResponse:
         {
             "request": request,
             "proxmox_url": px_cfg.get("url", ""),
-            "proxmox_connected": bool(px_cfg.get("url") and px_creds.get("api_token")),
+            "proxmox_connected": bool(px_cfg.get("url") and (px_creds.get("secret") or px_creds.get("api_token"))),
             "pbs_url": pbs_cfg.get("url", ""),
-            "pbs_connected": bool(pbs_cfg.get("url") and pbs_creds.get("api_token")),
+            "pbs_connected": bool(pbs_cfg.get("url") and (pbs_creds.get("secret") or pbs_creds.get("api_token"))),
             "opnsense_url": opn_cfg.get("url", ""),
             "opnsense_connected": bool(opn_cfg.get("url") and opn_creds.get("api_key")),
             "pfsense_url": pf_cfg.get("url", ""),
@@ -357,18 +357,20 @@ async def setup_test_proxmox(
     request: Request,
     proxmox_url: str = Form(""),
     proxmox_api_user: str = Form(""),
-    proxmox_api_token: str = Form(""),
+    proxmox_token_id: str = Form(""),
+    proxmox_secret: str = Form(""),
     proxmox_verify_ssl: str = Form(""),
 ) -> HTMLResponse:
     url = proxmox_url.strip().rstrip("/")
     api_user = proxmox_api_user.strip()
-    api_token = proxmox_api_token.strip()
+    token_id = proxmox_token_id.strip()
+    secret = proxmox_secret.strip()
     verify_ssl = proxmox_verify_ssl == "on"
-    if not url or not api_user or not api_token:
+    if not url or not token_id or not secret:
         return HTMLResponse(
-            '<span class="text-amber-400 text-sm">Enter a URL, API user, and API token first.</span>'
+            '<span class="text-amber-400 text-sm">Enter a URL, Token ID, and Secret first.</span>'
         )
-    token = f"{api_user}!{api_token}"
+    token = f"{token_id}={secret}"
     try:
         client = ProxmoxClient(url=url, api_token=token, verify_ssl=verify_ssl)
         version = await client.get_version()
@@ -396,17 +398,22 @@ async def setup_save_proxmox(
     request: Request,
     proxmox_url: str = Form(""),
     proxmox_api_user: str = Form(""),
-    proxmox_api_token: str = Form(""),
+    proxmox_token_id: str = Form(""),
+    proxmox_secret: str = Form(""),
     proxmox_verify_ssl: str = Form(""),
 ) -> HTMLResponse:
     url = proxmox_url.strip().rstrip("/")
     api_user = proxmox_api_user.strip()
-    api_token = proxmox_api_token.strip()
+    token_id = proxmox_token_id.strip()
+    secret = proxmox_secret.strip()
     verify_ssl = proxmox_verify_ssl == "on"
     save_proxmox_config(url=url, verify_ssl=verify_ssl)
-    if api_user or api_token:
+    if api_user or token_id or secret:
         save_integration_credentials(
-            "proxmox", api_user=api_user or None, api_token=api_token or None
+            "proxmox",
+            api_user=api_user or None,
+            token_id=token_id or None,
+            secret=secret or None,
         )
     _queue_integration_host(request, "proxmox", "Proxmox VE", url)
     return templates.TemplateResponse(
@@ -425,10 +432,15 @@ async def setup_proxmox_discover(request: Request) -> HTMLResponse:
     cfg = get_proxmox_config()
     creds = get_integration_credentials("proxmox")
     url = cfg.get("url", "")
-    api_user = creds.get("api_user", "")
-    api_token = creds.get("api_token", "")
-    # Support both new format (api_user + api_token) and legacy (full token in api_token)
-    token = f"{api_user}!{api_token}" if api_user else api_token
+    token_id = creds.get("token_id", "")
+    secret = creds.get("secret", "")
+    # Legacy fallback: old format stored full token in api_token
+    if not token_id:
+        api_user = creds.get("api_user", "")
+        api_token = creds.get("api_token", "")
+        token = f"{api_user}!{api_token}" if api_user else api_token
+    else:
+        token = f"{token_id}={secret}"
     verify_ssl = cfg.get("verify_ssl", False)
     if not url or not token:
         return HTMLResponse(
@@ -479,32 +491,37 @@ async def setup_test_pbs(
     request: Request,
     pbs_url: str = Form(""),
     pbs_api_user: str = Form(""),
-    pbs_api_token: str = Form(""),
+    pbs_token_id: str = Form(""),
+    pbs_secret: str = Form(""),
     pbs_verify_ssl: str = Form(""),
 ) -> HTMLResponse:
     url = pbs_url.strip().rstrip("/")
-    api_user = pbs_api_user.strip()
-    api_token = pbs_api_token.strip()
+    token_id = pbs_token_id.strip()
+    secret = pbs_secret.strip()
     verify_ssl = pbs_verify_ssl == "on"
-    if not url or not api_user or not api_token:
+    if not url or not token_id or not secret:
         return HTMLResponse(
-            '<span class="text-amber-400 text-sm">Enter a URL, API user, and API token first.</span>'
+            '<span class="text-amber-400 text-sm">Enter a URL, Token ID, and Secret first.</span>'
         )
-    token = f"{api_user}!{api_token}"
+    # PBS auth: PBSAPIToken=<tokenid>:<secret>  (colon separator, not equals)
     try:
         async with httpx.AsyncClient(verify=verify_ssl, timeout=10) as c:
             resp = await c.get(
                 f"{url}/api2/json/version",
-                headers={"Authorization": f"PBSAPIToken={token}"},
+                headers={"Authorization": f"PBSAPIToken={token_id}:{secret}"},
             )
             resp.raise_for_status()
             ver = resp.json().get("data", {}).get("version", "")
+        import logging
+        logging.getLogger(__name__).info("PBS connected: version %s", ver)
         return HTMLResponse(
             f'<span class="text-green-400 text-sm">&#10003; Connected — Proxmox Backup Server {ver}. Click Save to continue.</span>'
         )
     except Exception as exc:
         msg = str(exc)
-        hint = "Invalid API token." if ("401" in msg or "403" in msg) else msg[:120]
+        import logging
+        logging.getLogger(__name__).warning("PBS connection failed: %s", msg)
+        hint = "Invalid Token ID or Secret." if ("401" in msg or "403" in msg) else msg[:120]
         return HTMLResponse(
             f'<span class="text-red-400 text-sm">&#10007; {hint}</span>'
         )
@@ -515,17 +532,22 @@ async def setup_save_pbs(
     request: Request,
     pbs_url: str = Form(""),
     pbs_api_user: str = Form(""),
-    pbs_api_token: str = Form(""),
+    pbs_token_id: str = Form(""),
+    pbs_secret: str = Form(""),
     pbs_verify_ssl: str = Form(""),
 ) -> HTMLResponse:
     url = pbs_url.strip().rstrip("/")
     api_user = pbs_api_user.strip()
-    api_token = pbs_api_token.strip()
+    token_id = pbs_token_id.strip()
+    secret = pbs_secret.strip()
     verify_ssl = pbs_verify_ssl == "on"
     save_pbs_config(url=url, verify_ssl=verify_ssl)
-    if api_user or api_token:
+    if api_user or token_id or secret:
         save_integration_credentials(
-            "proxmox_backup", api_user=api_user or None, api_token=api_token or None
+            "proxmox_backup",
+            api_user=api_user or None,
+            token_id=token_id or None,
+            secret=secret or None,
         )
     _queue_integration_host(request, "proxmox_backup", "Proxmox Backup Server", url)
     return HTMLResponse(
@@ -1253,9 +1275,9 @@ async def setup_summary_page(request: Request) -> HTMLResponse:
         (
             "Proxmox VE",
             get_proxmox_config().get("url"),
-            _cred_set("proxmox", "api_token"),
+            _cred_set("proxmox", "secret"),
         ),
-        ("Proxmox Backup", get_pbs_config().get("url"), _cred_set("pbs", "api_token")),
+        ("Proxmox Backup", get_pbs_config().get("url"), _cred_set("proxmox_backup", "secret")),
         (
             "OPNsense",
             get_opnsense_config().get("url"),

@@ -352,7 +352,8 @@ def test_setup_proxmox_test_missing_fields(auth_client, data_dir):
         "/setup/connect/proxmox/test",
         data={
             "proxmox_url": "",
-            "proxmox_api_token": "",
+            "proxmox_token_id": "",
+            "proxmox_secret": "",
         },
     )
     assert response.status_code == 200
@@ -366,7 +367,8 @@ def test_setup_proxmox_test_connection_failure(auth_client, data_dir):
         data={
             "proxmox_url": "https://192.0.2.1:8006",
             "proxmox_api_user": "user@pam",
-            "proxmox_api_token": "token=uuid",
+            "proxmox_token_id": "user@pam!token",
+            "proxmox_secret": "uuid",
         },
     )
     assert response.status_code == 200
@@ -427,7 +429,8 @@ def test_setup_save_proxmox(auth_client, data_dir):
         data={
             "proxmox_url": "https://192.168.1.10:8006",
             "proxmox_api_user": "user@pam",
-            "proxmox_api_token": "token=abc123",
+            "proxmox_token_id": "user@pam!token",
+            "proxmox_secret": "abc123",
             "proxmox_verify_ssl": "",
         },
     )
@@ -470,7 +473,8 @@ def test_setup_save_pbs(auth_client, data_dir):
         data={
             "pbs_url": "https://192.168.1.11:8007",
             "pbs_api_user": "user@pbs",
-            "pbs_api_token": "token=abc",
+            "pbs_token_id": "user@pbs!token",
+            "pbs_secret": "abc",
             "pbs_verify_ssl": "",
         },
     )
