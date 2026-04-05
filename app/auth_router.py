@@ -40,6 +40,7 @@ from .config_manager import (
     save_portainer_config,
     save_proxmox_config,
     save_timezone,
+    set_host_auto_update,
 )
 from .credentials import (
     delete_credentials,
@@ -693,23 +694,18 @@ async def forgot_password_reset(
 
 
 # ---------------------------------------------------------------------------
-# Setup — hosts & connections (step 3)
+# Setup — SSH hosts (Screen 6)
 # ---------------------------------------------------------------------------
 
 @router.get("/setup/hosts", response_class=HTMLResponse)
 async def setup_hosts_page(request: Request) -> HTMLResponse:
     if not admin_exists():
         return RedirectResponse("/setup", status_code=302)
-    port_cfg = get_portainer_config()
-    port_creds = get_integration_credentials("portainer")
-    portainer_connected = bool(port_cfg.get("url") and port_creds.get("api_key"))
     return templates.TemplateResponse("setup_hosts.html", {
         "request": request,
         "hosts": get_hosts(),
         "available_keys": get_available_ssh_keys(),
-        "portainer_url": port_cfg.get("url", ""),
-        "portainer_connected": portainer_connected,
-        "step": 3,
+        "proxmox_pending": request.session.get("setup_proxmox_pending", []),
     })
 
 
@@ -723,12 +719,14 @@ async def setup_add_host(
     auth_method: str = Form("password"),
     ssh_password: str = Form(""),
     key_file: str = Form(""),
+    enable_auto_update: str = Form(""),
 ) -> HTMLResponse:
     name = name.strip()
     host_addr = host.strip()
     user_val = user.strip() or None
     port_val = int(port) if port.strip().isdigit() else None
     key_path = f"/app/keys/{key_file}" if auth_method == "key" and key_file else None
+    auto_update = enable_auto_update == "on"
 
     if not name or not host_addr:
         return templates.TemplateResponse("partials/setup_ssh_section.html", {
@@ -739,7 +737,7 @@ async def setup_add_host(
             "form": {"name": name, "host": host_addr, "user": user_val or "", "port": port or "", "auth_method": auth_method, "key_file": key_file},
         })
 
-    host_entry = {"name": name, "host": host_addr}
+    host_entry: dict = {"name": name, "host": host_addr}
     if user_val:
         host_entry["user"] = user_val
     if port_val:
@@ -765,28 +763,31 @@ async def setup_add_host(
     stack_count = await detect_docker_stacks(host_entry, get_ssh_config(), creds)
 
     if stack_count > 0:
-        # Docker found — ask user before adding
+        # Store pending host in session (avoids putting credentials in HTML hidden fields)
         label = f"{stack_count} stack{'s' if stack_count != 1 else ''}"
+        request.session["pending_ssh_host"] = {
+            "name": name,
+            "host": host_addr,
+            "user": user_val or "",
+            "port": port,
+            "auth_method": auth_method,
+            "ssh_password": creds.get("ssh_password", ""),
+            "key_file": key_file,
+            "auto_update": auto_update,
+        }
         return templates.TemplateResponse("partials/setup_ssh_section.html", {
             "request": request,
             "hosts": get_hosts(),
             "available_keys": get_available_ssh_keys(),
-            "docker_prompt": {
-                "name": name,
-                "host": host_addr,
-                "user": user_val or "",
-                "port": port,
-                "auth_method": auth_method,
-                "ssh_password": ssh_password.strip(),
-                "key_file": key_file,
-                "stack_label": label,
-            },
+            "docker_prompt": {"name": name, "stack_label": label},
         })
 
-    # No Docker (or detection failed) — add host directly
+    # No Docker — add host directly
     slug = add_host(name=name, host=host_addr, user=user_val, port=port_val, key_path=key_path)
     if auth_method == "password" and ssh_password.strip():
         save_credentials(slug, ssh_password=ssh_password.strip())
+    if auto_update:
+        set_host_auto_update(slug, os_enabled=True, os_schedule="weekly", auto_reboot=False)
 
     return templates.TemplateResponse("partials/setup_ssh_section.html", {
         "request": request,
@@ -799,32 +800,41 @@ async def setup_add_host(
 @router.post("/setup/hosts/confirm-add", response_class=HTMLResponse)
 async def setup_confirm_add_host(
     request: Request,
-    name: str = Form(""),
-    host: str = Form(""),
-    user: str = Form(""),
-    port: str = Form(""),
-    auth_method: str = Form("password"),
-    ssh_password: str = Form(""),
-    key_file: str = Form(""),
     enable_docker: str = Form("no"),
 ) -> HTMLResponse:
-    name = name.strip()
-    host_addr = host.strip()
-    user_val = user.strip() or None
-    port_val = int(port) if port.strip().isdigit() else None
+    pending = request.session.pop("pending_ssh_host", None)
+    if not pending:
+        return templates.TemplateResponse("partials/setup_ssh_section.html", {
+            "request": request,
+            "hosts": get_hosts(),
+            "available_keys": get_available_ssh_keys(),
+            "add_error": "Session expired — please add the host again.",
+        })
+
+    name = pending["name"]
+    host_addr = pending["host"]
+    user_val = pending["user"] or None
+    port_str = pending.get("port", "")
+    port_val = int(port_str) if str(port_str).strip().isdigit() else None
+    auth_method = pending["auth_method"]
+    ssh_password = pending.get("ssh_password", "")
+    key_file = pending.get("key_file", "")
+    auto_update = pending.get("auto_update", False)
     key_path = f"/app/keys/{key_file}" if auth_method == "key" and key_file else None
     docker_mode = "all" if enable_docker == "yes" else None
 
     slug = add_host(name=name, host=host_addr, user=user_val, port=port_val,
                     key_path=key_path, docker_mode=docker_mode)
-    if auth_method == "password" and ssh_password.strip():
-        save_credentials(slug, ssh_password=ssh_password.strip())
+    if auth_method == "password" and ssh_password:
+        save_credentials(slug, ssh_password=ssh_password)
+    if auto_update:
+        set_host_auto_update(slug, os_enabled=True, os_schedule="weekly", auto_reboot=False)
 
     return templates.TemplateResponse("partials/setup_ssh_section.html", {
         "request": request,
         "hosts": get_hosts(),
         "available_keys": get_available_ssh_keys(),
-        "add_success": f"{name} added successfully.",
+        "add_success": f"{name} added{' with container monitoring' if docker_mode else ''} successfully.",
     })
 
 

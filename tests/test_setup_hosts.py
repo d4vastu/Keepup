@@ -34,11 +34,11 @@ def test_setup_hosts_with_admin_returns_200(setup_client, data_dir):
     assert response.status_code == 200
 
 
-def test_setup_hosts_shows_step_3_indicator(setup_client, data_dir):
+def test_setup_hosts_shows_step_6_indicator(setup_client, data_dir):
     _create_admin()
     response = setup_client.get("/setup/hosts")
     assert response.status_code == 200
-    assert "Connect" in response.text
+    assert "Step 6" in response.text or "SSH" in response.text
 
 
 # ---------------------------------------------------------------------------
@@ -114,18 +114,27 @@ def test_setup_add_host_docker_detected_shows_prompt(setup_client, data_dir, con
     assert "monitor" in response.text.lower()
 
 
+def _add_host_via_session(setup_client, name, host, ssh_password="pass", enable_auto_update=False):
+    """Drive the add flow to populate session, then confirm. Returns confirm response."""
+    mock_result = {"ok": True, "message": "Connected"}
+    with patch("app.auth_router.verify_connection", new=AsyncMock(return_value=mock_result)), \
+         patch("app.auth_router.detect_docker_stacks", new=AsyncMock(return_value=3)):
+        setup_client.post("/setup/hosts/add", data={
+            "name": name,
+            "host": host,
+            "auth_method": "password",
+            "ssh_password": ssh_password,
+            "enable_auto_update": "on" if enable_auto_update else "",
+        })
+
+
 def test_setup_confirm_add_with_docker(setup_client, data_dir, config_file):
     import yaml
     _create_admin()
-    response = setup_client.post("/setup/hosts/confirm-add", data={
-        "name": "Docker Host",
-        "host": "192.168.1.20",
-        "auth_method": "password",
-        "ssh_password": "pass",
-        "enable_docker": "yes",
-    })
+    _add_host_via_session(setup_client, "Docker Host", "192.168.1.20")
+    response = setup_client.post("/setup/hosts/confirm-add", data={"enable_docker": "yes"})
     assert response.status_code == 200
-    assert "added successfully" in response.text.lower()
+    assert "docker host" in response.text.lower() and "successfully" in response.text.lower()
     raw = yaml.safe_load(config_file.read_text())
     host = next(h for h in raw["hosts"] if h["name"] == "Docker Host")
     assert host.get("docker_mode") == "all"
@@ -134,17 +143,41 @@ def test_setup_confirm_add_with_docker(setup_client, data_dir, config_file):
 def test_setup_confirm_add_without_docker(setup_client, data_dir, config_file):
     import yaml
     _create_admin()
-    response = setup_client.post("/setup/hosts/confirm-add", data={
-        "name": "Plain Host",
-        "host": "192.168.1.30",
-        "auth_method": "password",
-        "enable_docker": "no",
-    })
+    _add_host_via_session(setup_client, "Plain Host", "192.168.1.30")
+    response = setup_client.post("/setup/hosts/confirm-add", data={"enable_docker": "no"})
     assert response.status_code == 200
     assert "added successfully" in response.text.lower()
     raw = yaml.safe_load(config_file.read_text())
     host = next(h for h in raw["hosts"] if h["name"] == "Plain Host")
     assert "docker_mode" not in host
+
+
+def test_setup_confirm_add_no_session_shows_error(setup_client, data_dir):
+    _create_admin()
+    # No prior add call — session has no pending_ssh_host
+    response = setup_client.post("/setup/hosts/confirm-add", data={"enable_docker": "yes"})
+    assert response.status_code == 200
+    assert "session expired" in response.text.lower() or "add the host again" in response.text.lower()
+
+
+def test_setup_add_host_auto_update_saved(setup_client, data_dir, config_file):
+    import yaml
+    _create_admin()
+    mock_result = {"ok": True, "message": "Connected"}
+    with patch("app.auth_router.verify_connection", new=AsyncMock(return_value=mock_result)), \
+         patch("app.auth_router.detect_docker_stacks", new=AsyncMock(return_value=0)):
+        response = setup_client.post("/setup/hosts/add", data={
+            "name": "Auto Server",
+            "host": "192.168.1.99",
+            "auth_method": "password",
+            "ssh_password": "pass",
+            "enable_auto_update": "on",
+        })
+    assert response.status_code == 200
+    assert "added successfully" in response.text.lower()
+    raw = yaml.safe_load(config_file.read_text())
+    host = next(h for h in raw["hosts"] if h["name"] == "Auto Server")
+    assert host.get("auto_update", {}).get("os_enabled") is True
 
 
 # ---------------------------------------------------------------------------
@@ -154,13 +187,9 @@ def test_setup_confirm_add_without_docker(setup_client, data_dir, config_file):
 def test_setup_remove_host(setup_client, data_dir, config_file):
     import yaml
     _create_admin()
-    # Add host via confirm-add (bypasses connection test)
-    setup_client.post("/setup/hosts/confirm-add", data={
-        "name": "Remove Me",
-        "host": "192.168.1.50",
-        "auth_method": "password",
-        "enable_docker": "no",
-    })
+    # Add host via the add flow (bypasses connection test)
+    _add_host_via_session(setup_client, "Remove Me", "192.168.1.50")
+    setup_client.post("/setup/hosts/confirm-add", data={"enable_docker": "no"})
     response = setup_client.post("/setup/hosts/remove-me/remove")
     assert response.status_code == 200
     raw = yaml.safe_load(config_file.read_text())
