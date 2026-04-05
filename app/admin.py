@@ -217,10 +217,7 @@ async def admin_integrations_save_portainer(
 
     await reload_backends()
 
-    return templates.TemplateResponse(
-        "partials/admin_integrations.html",
-        {"request": request, "integ": _integration_status(), "portainer_saved": True},
-    )
+    return HTMLResponse('<span style="font-size:12px;color:#3fb950">&#10003; Portainer saved.</span>')
 
 
 @router.post("/integrations/dockerhub", response_class=HTMLResponse)
@@ -240,10 +237,7 @@ async def admin_integrations_save_dockerhub(
 
     await reload_backends()
 
-    return templates.TemplateResponse(
-        "partials/admin_integrations.html",
-        {"request": request, "integ": _integration_status(), "dockerhub_saved": True},
-    )
+    return HTMLResponse('<span style="font-size:12px;color:#3fb950">&#10003; Docker Hub saved.</span>')
 
 
 @router.get("/connections", response_class=HTMLResponse)
