@@ -2,20 +2,46 @@
 from unittest.mock import AsyncMock, patch
 
 
+# ---------------------------------------------------------------------------
+# / (home) and /dashboard
+# ---------------------------------------------------------------------------
+
+def test_home_unauthenticated_returns_landing(anon_client):
+    """Unauthenticated / shows the public landing page."""
+    response = anon_client.get("/", follow_redirects=False)
+    # Either renders home.html (200) or let follow_redirects handle it
+    assert response.status_code == 200
+    assert "keepup" in response.text.lower()
+
+
+def test_home_authenticated_redirects_to_dashboard(client):
+    """Authenticated / redirects to /dashboard."""
+    response = client.get("/", follow_redirects=False)
+    assert response.status_code in (302, 303)
+    assert response.headers["location"] == "/dashboard"
+
+
 def test_dashboard_returns_200(client):
-    response = client.get("/")
+    response = client.get("/dashboard")
     assert response.status_code == 200
 
 
 def test_dashboard_lists_hosts(client):
-    response = client.get("/")
+    response = client.get("/dashboard")
     assert "Test Host" in response.text
     assert "Custom User Host" in response.text
 
 
 def test_dashboard_has_admin_link(client):
-    response = client.get("/")
+    response = client.get("/dashboard")
     assert "/admin" in response.text
+
+
+def test_unauthenticated_protected_route_redirects_to_login(anon_client):
+    """Unauthenticated access to a protected route redirects to /login."""
+    response = anon_client.get("/dashboard", follow_redirects=False)
+    assert response.status_code in (302, 303)
+    assert "/login" in response.headers["location"]
 
 
 # ---------------------------------------------------------------------------

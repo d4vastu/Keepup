@@ -76,3 +76,18 @@ def client(config_file, data_dir, monkeypatch):
     resp = tc.post("/login", data={"username": "testadmin", "password": "testpassword123"}, follow_redirects=False)
     assert resp.status_code in (302, 303), f"Login failed with status {resp.status_code}: {resp.text[:200]}"
     return tc
+
+
+@pytest.fixture
+def anon_client(config_file, data_dir, monkeypatch):
+    """Unauthenticated TestClient (admin account exists, but no session cookie)."""
+    monkeypatch.setenv("PORTAINER_URL", "https://portainer.test:9443")
+    monkeypatch.setenv("PORTAINER_API_KEY", "test-api-key")
+    monkeypatch.setenv("PORTAINER_VERIFY_SSL", "false")
+
+    from app.main import app
+    from app.auth import create_admin
+
+    create_admin(username="testadmin", password="testpassword123", totp_secret=None)
+
+    return TestClient(app, raise_server_exceptions=True)
