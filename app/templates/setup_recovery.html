@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+  <meta charset="UTF-8" />
+  <link rel="icon" type="image/svg+xml" href="/static/favicon.svg" />
+  <link rel="apple-touch-icon" href="/static/icon-192.svg" />
+  <link rel="manifest" href="/static/manifest.json" />
+  <meta name="theme-color" content="#0d1117" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Save your recovery code — Keepup</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>body { background-color: #0d1117; }</style>
+</head>
+<body class="min-h-full text-slate-200 font-sans flex items-center justify-center px-4 py-12">
+
+  <div class="w-full max-w-lg">
+
+    <!-- Header -->
+    <div class="text-center mb-6">
+      <img src="/static/logo.svg" alt="Keepup" class="w-16 h-16 mx-auto mb-4 rounded-2xl" />
+      <h1 class="text-2xl font-bold text-white">Save your recovery code</h1>
+      <p class="text-sm text-slate-400 mt-1">The only way back in if you forget your password or lose your authenticator.</p>
+    </div>
+
+    <!-- Progress -->
+    <div class="mb-8">
+      <div class="flex justify-between items-center mb-2">
+        <span class="text-xs font-medium text-slate-300">Recovery code</span>
+        <span class="text-xs text-slate-500">Step 4 of 8</span>
+      </div>
+      <div class="w-full bg-slate-700 rounded-full h-0.5">
+        <div class="bg-blue-600 h-0.5 rounded-full" style="width: 50%"></div>
+      </div>
+    </div>
+
+    <div class="bg-slate-800/60 border border-slate-700 rounded-2xl p-6 space-y-5">
+
+      <!-- Warning -->
+      <div class="flex items-start gap-3 bg-amber-900/20 border border-amber-700/40 rounded-xl px-4 py-3">
+        <span class="text-amber-400 flex-shrink-0 mt-0.5">&#9888;</span>
+        <p class="text-xs text-amber-300">
+          <strong>This code is shown once and cannot be recovered.</strong> Store it somewhere safe —
+          a password manager, printed sheet, or encrypted notes app. Use it to reset your password
+          or regain access if your authenticator is lost.
+        </p>
+      </div>
+
+      <!-- Key display -->
+      <div>
+        <p class="text-xs font-medium text-slate-400 mb-2">Your recovery code</p>
+        <div class="bg-slate-900 border border-slate-600 rounded-xl px-5 py-4 text-center">
+          <span id="recovery-code" class="text-lg font-mono font-bold text-slate-100 tracking-widest select-all">
+            {{ backup_key }}
+          </span>
+        </div>
+      </div>
+
+      <!-- Actions -->
+      <div class="flex gap-3">
+        <button type="button" onclick="copyCode()" id="copy-btn"
+          class="flex-1 py-2.5 rounded-lg bg-slate-700 hover:bg-slate-600 text-sm font-medium text-slate-200 transition-colors">
+          Copy
+        </button>
+        <button type="button" onclick="downloadCode()"
+          class="flex-1 py-2.5 rounded-lg bg-slate-700 hover:bg-slate-600 text-sm font-medium text-slate-200 transition-colors">
+          Download .txt
+        </button>
+      </div>
+
+      <!-- Confirmation -->
+      <form method="post" action="/setup/recovery-code/confirm">
+        <label class="flex items-start gap-3 cursor-pointer select-none mb-4">
+          <input type="checkbox" id="saved-checkbox" required
+            onchange="document.getElementById('confirm-btn').disabled = !this.checked"
+            class="mt-0.5 w-4 h-4 rounded accent-blue-500 flex-shrink-0">
+          <span class="text-sm text-slate-300">
+            I've saved my recovery code in a safe place and understand I'll need it to reset my
+            password or regain access if I lose my authenticator.
+          </span>
+        </label>
+        <button type="submit" id="confirm-btn" disabled
+          class="w-full py-3 rounded-xl bg-blue-600 hover:bg-blue-500 disabled:opacity-40 disabled:cursor-not-allowed text-sm font-semibold text-white transition-colors">
+          I've saved it — continue →
+        </button>
+      </form>
+
+    </div>
+  </div>
+
+  <script>
+    const code = {{ backup_key | tojson }};
+
+    function copyCode() {
+      navigator.clipboard.writeText(code).then(() => {
+        const btn = document.getElementById('copy-btn');
+        btn.textContent = 'Copied!';
+        setTimeout(() => { btn.textContent = 'Copy'; }, 2000);
+      });
+    }
+
+    function downloadCode() {
+      const blob = new Blob(
+        ['Keepup — Recovery Code\n\n' + code + '\n\nStore this somewhere safe. You need it to reset your password or regain access if your authenticator is lost.\n'],
+        { type: 'text/plain' }
+      );
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'keepup-recovery-code.txt';
+      a.click();
+    }
+  </script>
+
+</body>
+</html>

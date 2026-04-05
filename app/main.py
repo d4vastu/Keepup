@@ -27,8 +27,7 @@ from .templates_env import make_templates
 # Auth middleware
 # ---------------------------------------------------------------------------
 
-_PUBLIC_PATHS = {"/", "/login", "/logout", "/setup", "/setup/backup-key",
-                 "/setup/backup-key/confirm", "/forgot-password",
+_PUBLIC_PATHS = {"/", "/login", "/logout", "/setup", "/forgot-password",
                  "/forgot-password/reset"}
 
 

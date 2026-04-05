@@ -31,40 +31,38 @@ def test_logout_redirects_to_login(auth_client, data_dir):
 
 
 # ---------------------------------------------------------------------------
-# GET /setup/backup-key
+# GET /setup/recovery-code
 # ---------------------------------------------------------------------------
 
-def test_setup_backup_key_no_session_redirects(auth_client):
-    response = auth_client.get("/setup/backup-key", follow_redirects=False)
+def test_setup_recovery_code_no_session_redirects(auth_client):
+    response = auth_client.get("/setup/recovery-code", follow_redirects=False)
     assert response.status_code == 302
     assert "/login" in response.headers["location"]
 
 
-def test_setup_backup_key_with_session_shows_key(auth_client):
-    """After setup, user is redirected to backup-key page."""
-    response = auth_client.post("/setup", data={
-        "username": "testuser",
-        "password": "password123",
-        "password_confirm": "password123",
-    }, follow_redirects=True)
-    # Should end up on backup-key page
-    assert response.status_code == 200
-    assert "backup" in response.text.lower() or "key" in response.text.lower()
-
-
-# ---------------------------------------------------------------------------
-# POST /setup/backup-key/confirm
-# ---------------------------------------------------------------------------
-
-def test_setup_backup_key_confirm_redirects(auth_client):
-    # Set up session
-    auth_client.post("/setup", data={
+def test_setup_recovery_code_after_account_shows_key(auth_client):
+    """After account creation, recovery code page shows the key."""
+    auth_client.post("/setup/account", data={
         "username": "testuser",
         "password": "password123",
         "password_confirm": "password123",
     }, follow_redirects=False)
-    # Confirm backup key
-    response = auth_client.post("/setup/backup-key/confirm", follow_redirects=False)
+    response = auth_client.get("/setup/recovery-code")
+    assert response.status_code == 200
+    assert "recovery" in response.text.lower() or "key" in response.text.lower()
+
+
+# ---------------------------------------------------------------------------
+# POST /setup/recovery-code/confirm
+# ---------------------------------------------------------------------------
+
+def test_setup_recovery_code_confirm_redirects(auth_client):
+    auth_client.post("/setup/account", data={
+        "username": "testuser",
+        "password": "password123",
+        "password_confirm": "password123",
+    }, follow_redirects=False)
+    response = auth_client.post("/setup/recovery-code/confirm", follow_redirects=False)
     assert response.status_code == 303
 
 
