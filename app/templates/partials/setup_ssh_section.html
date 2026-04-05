@@ -6,7 +6,105 @@
   </div>
   <div class="px-5 py-4 space-y-4">
 
-    <!-- host list -->
+    <!-- success/error messages -->
+    {% if add_error %}
+    <p class="text-sm text-red-400">{{ add_error }}</p>
+    {% endif %}
+    {% if add_success %}
+    <p class="text-sm text-green-400">&#10003; {{ add_success }}</p>
+    {% endif %}
+
+    <!-- Queued (Proxmox-detected) host cards -->
+    {% if proxmox_pending %}
+    <div class="rounded-xl border border-blue-500/30 bg-blue-900/10 px-4 py-3">
+      <div class="flex items-center gap-2 mb-1">
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+          <circle cx="8" cy="8" r="6" stroke="#388bfd" stroke-width="1.2"/>
+          <path d="M8 7v4M8 5.5v.5" stroke="#388bfd" stroke-width="1.4" stroke-linecap="round"/>
+        </svg>
+        <span class="text-sm font-medium text-blue-300">{{ proxmox_pending|length }} Proxmox host{{ 's' if proxmox_pending|length != 1 }} detected</span>
+      </div>
+      <p class="text-xs text-slate-500">These VMs were found on your Proxmox node. Name is pre-filled — add the IP and SSH credentials to enable OS package monitoring.</p>
+    </div>
+
+    <div class="space-y-3">
+      {% for host in proxmox_pending %}
+      <div class="queued-host-card rounded-xl border border-slate-700 bg-slate-900/40 overflow-hidden" id="host-card-{{ loop.index }}">
+        <!-- card header -->
+        <div class="flex items-center justify-between px-4 py-2.5 border-b border-slate-700">
+          <div class="flex items-center gap-2 text-sm font-medium text-slate-200">
+            <span class="w-1.5 h-1.5 rounded-full bg-slate-500 flex-shrink-0" id="dot-{{ loop.index }}"></span>
+            {{ host.name }}
+            <span class="text-[10px] px-1.5 py-0.5 rounded border border-slate-700 bg-slate-800 text-slate-500 font-mono">{{ host.node }} · {{ host.type }}</span>
+          </div>
+        </div>
+        <!-- card body -->
+        <div class="px-4 py-3 space-y-3">
+          <input type="hidden" name="card_index" value="{{ loop.index }}">
+          <input type="hidden" name="node" value="{{ host.node }}">
+          <input type="hidden" name="host_type" value="{{ host.type }}">
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="block text-xs text-slate-500 mb-1">Display name</label>
+              <input type="text" name="name" value="{{ host.name }}"
+                class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-slate-400 font-mono focus:outline-none focus:border-blue-500">
+            </div>
+            <div>
+              <label class="block text-xs text-slate-500 mb-1">IP address</label>
+              <input type="text" name="host" placeholder="192.168.x.x"
+                class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-slate-200 font-mono focus:outline-none focus:border-blue-500 placeholder:text-slate-600">
+            </div>
+          </div>
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="block text-xs text-slate-500 mb-1">SSH user</label>
+              <input type="text" name="user" value="root"
+                class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-slate-200 font-mono focus:outline-none focus:border-blue-500">
+            </div>
+            <div>
+              <label class="block text-xs text-slate-500 mb-1">SSH port</label>
+              <input type="text" name="port" value="22"
+                class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-slate-400 font-mono focus:outline-none focus:border-blue-500">
+            </div>
+          </div>
+          <div>
+            <label class="block text-xs text-slate-500 mb-1">Credentials</label>
+            <div class="flex gap-2">
+              <select name="auth_method"
+                class="bg-slate-800 border border-slate-700 rounded-lg px-2 py-1.5 text-xs text-slate-400 focus:outline-none focus:border-blue-500 shrink-0">
+                <option value="key">SSH key</option>
+                <option value="password">Password</option>
+              </select>
+              <input type="password" name="ssh_password" placeholder="Password (or blank for key auth)"
+                class="flex-1 bg-slate-800 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-slate-400 font-mono focus:outline-none focus:border-blue-500 placeholder:text-slate-600">
+            </div>
+          </div>
+        </div>
+        <!-- card footer -->
+        <div class="flex items-center justify-between px-4 py-2.5 border-t border-slate-700 bg-slate-950/30">
+          <button type="button"
+                  hx-post="/setup/hosts/card-test"
+                  hx-include="closest .queued-host-card"
+                  hx-target="#dot-{{ loop.index }}"
+                  hx-swap="outerHTML"
+                  class="text-xs text-slate-400 hover:text-slate-200 px-3 py-1.5 rounded border border-slate-700 transition-colors">
+            Test connection
+          </button>
+          <button type="button"
+                  hx-post="/setup/hosts/card-add"
+                  hx-include="closest .queued-host-card"
+                  hx-target="#host-card-{{ loop.index }}"
+                  hx-swap="outerHTML"
+                  class="text-xs text-blue-400 hover:text-blue-300 px-3 py-1.5 rounded border border-blue-900 bg-blue-950/40 transition-colors">
+            Add host →
+          </button>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+    {% endif %}
+
+    <!-- Already-added hosts list -->
     {% if hosts %}
     <div class="space-y-2">
       {% for h in hosts %}
@@ -28,19 +126,11 @@
       </div>
       {% endfor %}
     </div>
-    {% else %}
+    {% elif not proxmox_pending %}
     <p class="text-xs text-slate-500 italic">No hosts added yet. Skip this step if you only need container monitoring via Portainer.</p>
     {% endif %}
 
-    <!-- success/error messages -->
-    {% if add_error %}
-    <p class="text-sm text-red-400">{{ add_error }}</p>
-    {% endif %}
-    {% if add_success %}
-    <p class="text-sm text-green-400">&#10003; {{ add_success }}</p>
-    {% endif %}
-
-    <!-- Docker discovery prompt — credentials are in session, not hidden fields -->
+    <!-- Docker discovery prompt -->
     {% if docker_prompt %}
     <div class="rounded-xl border border-blue-500/40 bg-blue-900/20 px-4 py-4 space-y-3">
       <div class="flex items-start gap-3">
@@ -80,7 +170,7 @@
         <svg class="w-4 h-4 group-open:rotate-90 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
         </svg>
-        {% if hosts %}Add another host{% else %}Add a host{% endif %}
+        {% if hosts or proxmox_pending %}Add another host manually{% else %}Add a host{% endif %}
       </summary>
 
       <form hx-post="/setup/hosts/add"

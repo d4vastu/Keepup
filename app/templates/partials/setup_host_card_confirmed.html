@@ -1,0 +1,21 @@
+{% if error %}
+<div id="host-card-{{ card_index }}" class="queued-host-card rounded-xl border border-red-800/30 bg-red-900/10 overflow-hidden px-4 py-3">
+  <p class="text-xs text-red-400">{{ error }}</p>
+</div>
+{% else %}
+<div id="host-card-{{ card_index }}" class="rounded-xl border border-green-800/30 bg-green-900/10 overflow-hidden">
+  <div class="flex items-center justify-between px-4 py-3">
+    <div class="flex items-center gap-2 text-sm font-medium text-slate-200">
+      <span class="w-1.5 h-1.5 rounded-full bg-green-400 flex-shrink-0"></span>
+      {{ name }}
+      {% if node and host_type %}
+      <span class="text-[10px] px-1.5 py-0.5 rounded border border-slate-700 bg-slate-800 text-slate-500 font-mono">{{ node }} · {{ host_type }}</span>
+      {% endif %}
+    </div>
+    <div class="flex items-center gap-3">
+      <span class="text-xs text-green-400">Added</span>
+      <span class="text-xs text-slate-500 font-mono">{{ host_addr }}</span>
+    </div>
+  </div>
+</div>
+{% endif %}

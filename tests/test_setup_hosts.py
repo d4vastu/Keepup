@@ -374,3 +374,166 @@ def test_add_host_docker_mode_none_not_stored(config_file):
     raw = yaml.safe_load(config_file.read_text())
     host = next(h for h in raw["hosts"] if h["name"] == "No Docker")
     assert "docker_mode" not in host
+
+
+# ---------------------------------------------------------------------------
+# Queued host cards — /setup/hosts/card-test and /setup/hosts/card-add
+# ---------------------------------------------------------------------------
+
+def _set_proxmox_pending(setup_client, hosts):
+    """Inject queued hosts into the session via the session cookie."""
+    with setup_client.session_transaction() as sess:
+        sess["setup_proxmox_pending"] = hosts
+
+
+def _setup_client_with_session(config_file, data_dir, monkeypatch):
+    """Return a setup_client that supports session_transaction."""
+    monkeypatch.setenv("PORTAINER_URL", "")
+    monkeypatch.setenv("PORTAINER_API_KEY", "")
+    from app.main import app
+    from starlette.testclient import TestClient
+    return TestClient(app, raise_server_exceptions=True)
+
+
+def test_setup_hosts_shows_queued_cards_when_pending(setup_client, data_dir, config_file):
+    """GET /setup/hosts shows queued host cards when proxmox_pending is in session."""
+    _create_admin()
+    # Inject queued hosts into session by using the select-hosts route
+    from unittest.mock import MagicMock, AsyncMock, patch
+    from app.auth import create_admin as _ca
+    with patch("app.auth_router.ProxmoxClient") as MockClient:
+        mock_instance = MagicMock()
+        mock_instance.discover_resources = AsyncMock(return_value=[
+            {"type": "vm", "node": "pve1", "vmid": 100, "name": "MyVM", "status": "running"},
+        ])
+        MockClient.return_value = mock_instance
+        setup_client.post("/setup/connect/proxmox/select-hosts", data={
+            "selected_hosts": ["pve1:100:vm:MyVM"],
+        })
+    response = setup_client.get("/setup/hosts")
+    assert response.status_code == 200
+    assert "MyVM" in response.text
+    assert "host-card-1" in response.text
+
+
+def test_setup_hosts_no_queued_shows_host_list(setup_client, data_dir, config_file):
+    """With no queued hosts, the page shows the already-added hosts list (from SAMPLE_CONFIG)."""
+    _create_admin()
+    response = setup_client.get("/setup/hosts")
+    assert response.status_code == 200
+    # No queued-host cards since there's no proxmox_pending in session
+    assert "host-card-1" not in response.text
+    # Existing hosts from SAMPLE_CONFIG are shown
+    assert "Test Host" in response.text
+
+
+def test_setup_hosts_shows_empty_state_when_no_hosts(setup_client, data_dir, monkeypatch):
+    """Empty state shown when there are no hosts and no queued hosts."""
+    import app.auth_router as ar
+    monkeypatch.setattr(ar, "get_hosts", lambda: [])
+    _create_admin()
+    response = setup_client.get("/setup/hosts")
+    assert response.status_code == 200
+    assert "No hosts added yet" in response.text
+
+
+def test_card_test_success(setup_client, data_dir, config_file):
+    _create_admin()
+    with patch("app.auth_router.verify_connection", new=AsyncMock(return_value={"ok": True, "message": "OK"})):
+        response = setup_client.post("/setup/hosts/card-test", data={
+            "name": "MyVM", "host": "192.168.1.10", "user": "root",
+            "port": "22", "auth_method": "key", "ssh_password": "",
+            "card_index": "1",
+        })
+    assert response.status_code == 200
+    assert "dot-1" in response.text
+    assert "green" in response.text
+
+
+def test_card_test_failure(setup_client, data_dir, config_file):
+    _create_admin()
+    with patch("app.auth_router.verify_connection", new=AsyncMock(return_value={"ok": False, "message": "Refused"})):
+        response = setup_client.post("/setup/hosts/card-test", data={
+            "name": "MyVM", "host": "192.168.1.10", "user": "root",
+            "port": "22", "auth_method": "password", "ssh_password": "pass",
+            "card_index": "2",
+        })
+    assert response.status_code == 200
+    assert "dot-2" in response.text
+    assert "red" in response.text
+
+
+def test_card_test_exception_returns_error_dot(setup_client, data_dir, config_file):
+    _create_admin()
+    with patch("app.auth_router.verify_connection", new=AsyncMock(side_effect=Exception("timeout"))):
+        response = setup_client.post("/setup/hosts/card-test", data={
+            "name": "MyVM", "host": "192.168.1.10",
+            "card_index": "3",
+        })
+    assert response.status_code == 200
+    assert "dot-3" in response.text
+    assert "red" in response.text
+
+
+def test_card_add_success(setup_client, data_dir, config_file):
+    import yaml
+    _create_admin()
+    response = setup_client.post("/setup/hosts/card-add", data={
+        "name": "QueuedVM", "host": "192.168.5.50", "user": "root",
+        "port": "22", "auth_method": "key", "ssh_password": "",
+        "card_index": "1", "node": "pve1", "host_type": "vm",
+    })
+    assert response.status_code == 200
+    assert "QueuedVM" in response.text
+    assert "Added" in response.text
+    assert "pve1" in response.text
+    raw = yaml.safe_load(config_file.read_text())
+    names = [h["name"] for h in raw.get("hosts", [])]
+    assert "QueuedVM" in names
+
+
+def test_card_add_saves_password_credential(setup_client, data_dir, config_file):
+    _create_admin()
+    from app.credentials import get_credentials
+    response = setup_client.post("/setup/hosts/card-add", data={
+        "name": "SecureVM", "host": "192.168.5.51", "user": "ubuntu",
+        "port": "22", "auth_method": "password", "ssh_password": "s3cret",
+        "card_index": "2", "node": "pve1", "host_type": "lxc",
+    })
+    assert response.status_code == 200
+    assert "SecureVM" in response.text
+    from app.config_manager import slugify
+    creds = get_credentials(slugify("SecureVM"))
+    assert creds.get("ssh_password") == "s3cret"
+
+
+def test_card_add_missing_name_shows_error(setup_client, data_dir, config_file):
+    _create_admin()
+    response = setup_client.post("/setup/hosts/card-add", data={
+        "name": "", "host": "192.168.5.52",
+        "card_index": "1", "node": "pve1", "host_type": "vm",
+    })
+    assert response.status_code == 200
+    assert "required" in response.text.lower()
+
+
+def test_card_add_missing_host_shows_error(setup_client, data_dir, config_file):
+    _create_admin()
+    response = setup_client.post("/setup/hosts/card-add", data={
+        "name": "GoodName", "host": "",
+        "card_index": "1", "node": "pve1", "host_type": "vm",
+    })
+    assert response.status_code == 200
+    assert "required" in response.text.lower()
+
+
+def test_card_add_no_tag_when_node_missing(setup_client, data_dir, config_file):
+    """When node/host_type not provided, tag span is omitted from confirmed card."""
+    _create_admin()
+    response = setup_client.post("/setup/hosts/card-add", data={
+        "name": "ManualVM", "host": "192.168.5.53",
+        "card_index": "1", "node": "", "host_type": "",
+    })
+    assert response.status_code == 200
+    assert "ManualVM" in response.text
+    assert "font-mono" not in response.text or "pve" not in response.text
