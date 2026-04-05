@@ -92,24 +92,34 @@ def _hosts_with_status() -> list[dict]:
 
 @router.get("", response_class=HTMLResponse)
 async def admin_page(request: Request) -> HTMLResponse:
-    return templates.TemplateResponse(
-        "admin.html",
-        {
-            "request": request,
-            "hosts": _hosts_with_status(),
-            "ssh": get_ssh_config(),
-            "conn": _connection_status(),
-            **_account_context(),
-            **_ssl_context(),
-        },
-    )
+    from fastapi.responses import RedirectResponse as _Redirect
+    return _Redirect("/admin/connections", status_code=302)
 
 
 @router.get("/connections", response_class=HTMLResponse)
 async def admin_connections(request: Request) -> HTMLResponse:
+    from .__version__ import APP_VERSION
     return templates.TemplateResponse(
-        "partials/admin_connections.html",
-        {"request": request, "conn": _connection_status()},
+        "admin.html",
+        {"request": request, "conn": _connection_status(), "app_version": APP_VERSION},
+    )
+
+
+@router.get("/hosts", response_class=HTMLResponse)
+async def admin_hosts_page(request: Request) -> HTMLResponse:
+    from .__version__ import APP_VERSION
+    return templates.TemplateResponse(
+        "admin_hosts.html",
+        {"request": request, "hosts": _hosts_with_status(), "app_version": APP_VERSION},
+    )
+
+
+@router.get("/ssh", response_class=HTMLResponse)
+async def admin_ssh_page(request: Request) -> HTMLResponse:
+    from .__version__ import APP_VERSION
+    return templates.TemplateResponse(
+        "admin_ssh.html",
+        {"request": request, "ssh": get_ssh_config(), "app_version": APP_VERSION},
     )
 
 
@@ -470,6 +480,63 @@ async def admin_save_pushover(
 
 
 # ---------------------------------------------------------------------------
+# About page
+# ---------------------------------------------------------------------------
+
+@router.get("/about", response_class=HTMLResponse)
+async def admin_about(request: Request) -> HTMLResponse:
+    import httpx
+    from datetime import datetime, timezone
+    from .__version__ import APP_VERSION
+
+    releases = []
+    latest_version = None
+    try:
+        async with httpx.AsyncClient(timeout=5) as client:
+            resp = await client.get(
+                "https://api.github.com/repos/d4vastu/Keepup/releases",
+                headers={"Accept": "application/vnd.github.v3+json", "User-Agent": "keepup"},
+            )
+            if resp.status_code == 200:
+                raw = resp.json()[:10]
+                now = datetime.now(timezone.utc)
+                for r in raw:
+                    pub = datetime.fromisoformat(r["published_at"].replace("Z", "+00:00"))
+                    delta = now - pub
+                    days = delta.days
+                    if days == 0:
+                        age = "today"
+                    elif days == 1:
+                        age = "yesterday"
+                    elif days < 30:
+                        age = f"{days} days ago"
+                    elif days < 365:
+                        age = f"{days // 30} months ago"
+                    else:
+                        age = f"{days // 365} years ago"
+                    releases.append({**r, "age": age})
+                if releases:
+                    latest_version = releases[0]["tag_name"]
+    except Exception:
+        pass
+
+    data_dir = str(os.getenv("DATA_PATH", "/app/data"))
+    return templates.TemplateResponse(
+        "admin_about.html",
+        {
+            "request": request,
+            "app_version": APP_VERSION,
+            "host_count": len(get_hosts()),
+            "data_dir": data_dir,
+            "timezone": get_timezone(),
+            "releases": releases,
+            "latest_version": latest_version,
+            "is_latest": latest_version == f"v{APP_VERSION}" if latest_version else False,
+        },
+    )
+
+
+# ---------------------------------------------------------------------------
 # Auto-update history
 # ---------------------------------------------------------------------------
 
@@ -564,9 +631,10 @@ def _account_context() -> dict:
 
 @router.get("/account", response_class=HTMLResponse)
 async def admin_account(request: Request) -> HTMLResponse:
+    from .__version__ import APP_VERSION
     return templates.TemplateResponse(
-        "partials/admin_account.html",
-        {"request": request, **_account_context()},
+        "admin_account.html",
+        {"request": request, **_account_context(), "app_version": APP_VERSION},
     )
 
 
@@ -743,9 +811,10 @@ def _ssl_context() -> dict:
 
 @router.get("/https", response_class=HTMLResponse)
 async def admin_https(request: Request) -> HTMLResponse:
+    from .__version__ import APP_VERSION
     return templates.TemplateResponse(
-        "partials/admin_https.html",
-        {"request": request, **_ssl_context()},
+        "admin_https.html",
+        {"request": request, **_ssl_context(), "app_version": APP_VERSION},
     )
 
 

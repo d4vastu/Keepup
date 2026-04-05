@@ -8,23 +8,29 @@ import yaml
 # GET /admin
 # ---------------------------------------------------------------------------
 
-def test_admin_page_returns_200(client):
-    response = client.get("/admin")
+def test_admin_page_redirects_to_connections(client):
+    response = client.get("/admin", follow_redirects=False)
+    assert response.status_code in (302, 303)
+    assert "/admin/connections" in response.headers["location"]
+
+
+def test_admin_connections_returns_200(client):
+    response = client.get("/admin/connections")
     assert response.status_code == 200
 
 
-def test_admin_page_contains_hosts(client):
-    response = client.get("/admin")
+def test_admin_hosts_page_contains_hosts(client):
+    response = client.get("/admin/hosts")
     assert "Test Host" in response.text
     assert "Custom User Host" in response.text
 
 
-def test_admin_page_shows_portainer_configured(client, data_dir, config_file):
+def test_admin_connections_shows_portainer_configured(client, data_dir, config_file):
     from app.config_manager import save_portainer_config
     from app.credentials import save_integration_credentials
     save_portainer_config(url="https://portainer.test:9443", verify_ssl=False)
     save_integration_credentials("portainer", api_key="test-api-key")
-    response = client.get("/admin")
+    response = client.get("/admin/connections")
     assert "portainer.test" in response.text
 
 

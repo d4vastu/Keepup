@@ -173,7 +173,7 @@ async def dashboard(request: Request) -> HTMLResponse:
     )
     return templates.TemplateResponse(
         "index.html",
-        {"request": request, "hosts": hosts, "docker_configured": docker_configured},
+        {"request": request, "hosts": hosts, "docker_configured": docker_configured, "app_version": APP_VERSION},
     )
 
 

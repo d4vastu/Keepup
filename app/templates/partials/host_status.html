@@ -4,9 +4,7 @@
     <span class="w-1.5 h-1.5 rounded-full bg-current flex-shrink-0"></span>
     {{ packages | length }} update{{ 's' if packages | length != 1 }}
   </span>
-  {% if package_manager and package_manager != "unknown" %}
-  <span class="text-[11px] text-slate-600 font-mono">{{ package_manager }}</span>
-  {% endif %}
+
 </div>
 <div class="mt-1.5 text-[11px] text-slate-500 max-h-20 overflow-y-auto space-y-0.5">
   {% for pkg in packages %}
@@ -39,9 +37,7 @@
     <span class="w-1.5 h-1.5 rounded-full bg-current flex-shrink-0"></span>
     Up to date
   </span>
-  {% if package_manager and package_manager != "unknown" %}
-  <span class="text-[11px] text-slate-600 font-mono">{{ package_manager }}</span>
-  {% endif %}
+
 </div>
 {% if reboot_required %}
 <div class="mt-2 flex flex-wrap items-center gap-2">
