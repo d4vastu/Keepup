@@ -17,7 +17,7 @@ from .notifications import get_unread_count, get_notifications, mark_all_read
 from .auto_update_scheduler import apply_all_schedules, scheduler
 from .auto_updates_router import router as auto_updates_router
 from .backend_loader import get_backends, get_dockerhub_creds, reload_backends
-from .config_manager import get_hosts, get_ssh_config, get_timezone
+from .config_manager import get_hosts, get_ssh_config
 from .credentials import get_credentials, save_sudo_password
 from .ssh_client import _needs_sudo, check_host_updates, reboot_host, run_host_update_buffered
 from .__version__ import APP_VERSION

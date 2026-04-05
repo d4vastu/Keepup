@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from app.registry_client import (
+    _get_bearer_token_from_challenge,
     check_image_update,
     extract_local_digest,
     get_remote_digest,
@@ -73,7 +74,6 @@ def test_extract_local_digest_found():
 
 
 def test_extract_local_digest_multiple_entries():
-    # Returns the first digest that contains @sha256:
     digests = [
         "other/image@sha256:zzz",
         "myrepo/app@sha256:deadbeef",
@@ -91,8 +91,71 @@ def test_extract_local_digest_no_sha():
 
 
 # ---------------------------------------------------------------------------
+# _get_bearer_token_from_challenge
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_bearer_token_from_challenge_success():
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = {"token": "mytoken"}
+
+    mock_client = AsyncMock()
+    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_client.__aexit__ = AsyncMock(return_value=False)
+    mock_client.get = AsyncMock(return_value=mock_resp)
+
+    www_auth = 'Bearer realm="https://ghcr.io/token",service="ghcr.io",scope="repository:owner/app:pull"'
+    with patch("app.registry_client.httpx.AsyncClient", return_value=mock_client):
+        token = await _get_bearer_token_from_challenge(www_auth)
+    assert token == "mytoken"
+
+
+@pytest.mark.asyncio
+async def test_bearer_token_from_challenge_access_token_key():
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = {"access_token": "accesstok"}
+
+    mock_client = AsyncMock()
+    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_client.__aexit__ = AsyncMock(return_value=False)
+    mock_client.get = AsyncMock(return_value=mock_resp)
+
+    www_auth = 'Bearer realm="https://auth.example.com/token",service="example.com"'
+    with patch("app.registry_client.httpx.AsyncClient", return_value=mock_client):
+        token = await _get_bearer_token_from_challenge(www_auth)
+    assert token == "accesstok"
+
+
+@pytest.mark.asyncio
+async def test_bearer_token_from_challenge_no_realm():
+    token = await _get_bearer_token_from_challenge('Bearer service="ghcr.io"')
+    assert token is None
+
+
+@pytest.mark.asyncio
+async def test_bearer_token_from_challenge_exception():
+    www_auth = 'Bearer realm="https://ghcr.io/token",service="ghcr.io"'
+    with patch("app.registry_client.httpx.AsyncClient", side_effect=Exception("network")):
+        token = await _get_bearer_token_from_challenge(www_auth)
+    assert token is None
+
+
+# ---------------------------------------------------------------------------
 # get_remote_digest
 # ---------------------------------------------------------------------------
+
+def _make_mock_client(head_responses, get_response=None):
+    """Build an AsyncClient mock with a sequence of head() responses."""
+    mock_client = AsyncMock()
+    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_client.__aexit__ = AsyncMock(return_value=False)
+    mock_client.head = AsyncMock(side_effect=head_responses)
+    if get_response is not None:
+        mock_client.get = AsyncMock(return_value=get_response)
+    return mock_client
+
 
 @pytest.mark.asyncio
 async def test_get_remote_digest_dockerhub():
@@ -117,16 +180,13 @@ async def test_get_remote_digest_dockerhub():
 
 
 @pytest.mark.asyncio
-async def test_get_remote_digest_ghcr():
+async def test_get_remote_digest_ghcr_200():
+    """ghcr.io returns 200 directly (no auth challenge needed)."""
     mock_resp = MagicMock()
     mock_resp.status_code = 200
     mock_resp.headers = {"Docker-Content-Digest": "sha256:ghcrdigest"}
 
-    mock_client = AsyncMock()
-    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-    mock_client.__aexit__ = AsyncMock(return_value=False)
-    mock_client.head = AsyncMock(return_value=mock_resp)
-
+    mock_client = _make_mock_client([mock_resp])
     with patch("app.registry_client.httpx.AsyncClient", return_value=mock_client):
         digest = await get_remote_digest("ghcr.io/owner/app:latest")
 
@@ -134,15 +194,68 @@ async def test_get_remote_digest_ghcr():
 
 
 @pytest.mark.asyncio
-async def test_get_remote_digest_unsupported_registry():
-    digest = await get_remote_digest("myregistry.internal/app:latest")
+async def test_get_remote_digest_ghcr_401_then_200():
+    """ghcr.io returns 401 first; we fetch a token then retry successfully."""
+    challenge_resp = MagicMock()
+    challenge_resp.status_code = 401
+    challenge_resp.headers = {
+        "www-authenticate": 'Bearer realm="https://ghcr.io/token",service="ghcr.io",scope="repository:owner/app:pull"'
+    }
+
+    ok_resp = MagicMock()
+    ok_resp.status_code = 200
+    ok_resp.headers = {"Docker-Content-Digest": "sha256:authed"}
+
+    token_resp = MagicMock()
+    token_resp.status_code = 200
+    token_resp.json.return_value = {"token": "ghcrtoken"}
+
+    mock_client = _make_mock_client([challenge_resp, ok_resp], get_response=token_resp)
+    with patch("app.registry_client.httpx.AsyncClient", return_value=mock_client):
+        digest = await get_remote_digest("ghcr.io/owner/app:latest")
+
+    assert digest == "sha256:authed"
+
+
+@pytest.mark.asyncio
+async def test_get_remote_digest_401_no_token():
+    """401 with no valid WWW-Authenticate challenge returns None."""
+    challenge_resp = MagicMock()
+    challenge_resp.status_code = 401
+    challenge_resp.headers = {}
+
+    mock_client = _make_mock_client([challenge_resp])
+    with patch("app.registry_client.httpx.AsyncClient", return_value=mock_client):
+        digest = await get_remote_digest("ghcr.io/owner/app:latest")
+
     assert digest is None
 
 
 @pytest.mark.asyncio
-async def test_get_remote_digest_non_200_returns_none():
+async def test_get_remote_digest_other_registry_with_dot():
+    """Any registry hostname containing a dot is attempted."""
     mock_resp = MagicMock()
-    mock_resp.status_code = 401
+    mock_resp.status_code = 200
+    mock_resp.headers = {"Docker-Content-Digest": "sha256:quaydigest"}
+
+    mock_client = _make_mock_client([mock_resp])
+    with patch("app.registry_client.httpx.AsyncClient", return_value=mock_client):
+        digest = await get_remote_digest("quay.io/prometheus/node-exporter:latest")
+
+    assert digest == "sha256:quaydigest"
+
+
+@pytest.mark.asyncio
+async def test_get_remote_digest_no_dot_returns_none():
+    """Registry without a dot (and not DockerHub) returns None without a network call."""
+    digest = await get_remote_digest("localhost/myapp:latest")
+    assert digest is None
+
+
+@pytest.mark.asyncio
+async def test_get_remote_digest_non_200_non_401_returns_none():
+    mock_resp = MagicMock()
+    mock_resp.status_code = 403
     mock_resp.headers = {}
 
     mock_token_resp = MagicMock()
