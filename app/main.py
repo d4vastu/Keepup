@@ -5,6 +5,7 @@ from pathlib import Path
 
 from fastapi import BackgroundTasks, FastAPI, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.middleware.sessions import SessionMiddleware
 
@@ -59,6 +60,7 @@ app.add_middleware(SessionMiddleware,
 app.include_router(auth_router)
 app.include_router(admin_router)
 app.include_router(auto_updates_router)
+app.mount("/static", StaticFiles(directory=Path(__file__).parent / "static"), name="static")
 templates = make_templates()
 
 _DATA_DIR = Path(os.getenv("DATA_PATH", "/app/data"))
