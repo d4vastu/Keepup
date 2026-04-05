@@ -8,156 +8,145 @@
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://unpkg.com/htmx.org@1.9.12"></script>
   <style>
-    body { background-color: #0f172a; }
+    body { background-color: #0d1117; }
     .htmx-request .spinner { display: inline-block; }
     .spinner { display: none; }
   </style>
 </head>
 <body class="min-h-full text-slate-200 font-sans">
 
-  <div class="max-w-6xl mx-auto px-4 py-8">
+  <!-- Top bar -->
+  <div class="flex flex-wrap items-center justify-between gap-3 px-4 md:px-6 py-3 border-b border-[#21262d] bg-[#0d1117]">
 
-    <!-- Header -->
-    <div class="flex flex-wrap items-start justify-between gap-4 mb-8">
+    <!-- Brand -->
+    <div class="flex items-center gap-2.5">
+      <img src="/static/logo.svg" alt="Keepup" class="w-7 h-7 rounded-lg flex-shrink-0" />
       <div>
-        <h1 class="text-2xl font-bold text-white">Keepup</h1>
-        <p class="text-sm text-slate-500 mt-0.5">OS packages + Docker stacks across all hosts</p>
-      </div>
-      <div class="flex items-center gap-2 flex-wrap justify-end">
-        <button
-          onclick="document.querySelectorAll('[data-check]').forEach(el => htmx.trigger(el, 'check'))"
-          class="px-4 py-2 rounded-lg bg-slate-700 hover:bg-slate-600 text-sm font-medium text-white transition-colors">
-          Refresh All
-        </button>
-        <a href="/admin"
-          class="px-4 py-2 rounded-lg bg-slate-700 hover:bg-slate-600 text-sm font-medium text-slate-300 transition-colors">
-          Admin
-        </a>
-        <!-- Notification bell -->
-        <div class="relative">
-          <button id="notif-btn" onclick="toggleNotifPanel()"
-            class="relative p-2 rounded-lg bg-slate-700 hover:bg-slate-600 transition-colors"
-            aria-label="Notifications">
-            <svg class="w-5 h-5 text-slate-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6 6 0 00-9.33-5.003 6 6 0 00-2.67 5.003v3.159c0 .538-.214 1.055-.595 1.437L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"/>
-            </svg>
-            <span id="notif-badge"
-              hx-get="/api/notifications/badge"
-              hx-trigger="load, every 60s"
-              hx-swap="outerHTML"></span>
-          </button>
-          <div id="notif-panel"
-            class="hidden absolute right-0 top-full mt-2 w-80 sm:w-96 max-w-[calc(100vw-1rem)] bg-slate-800 border border-slate-700 rounded-xl shadow-2xl z-50 overflow-hidden">
-          </div>
-        </div>
+        <div class="text-[15px] font-medium text-slate-100 leading-none tracking-tight">keepup</div>
+        <div class="text-[11px] text-slate-500 mt-0.5">{{ hosts | length }} host{{ 's' if hosts | length != 1 }}</div>
       </div>
     </div>
 
-    <!-- OS Updates -->
-    <section class="mb-10">
-      <h2 class="text-lg font-semibold text-slate-200 mb-4 flex items-center gap-2">
-        <svg class="w-5 h-5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-            d="M5 12h14M12 5l7 7-7 7"/>
-        </svg>
-        OS Package Updates
-      </h2>
-
-      <div class="bg-slate-800/50 rounded-xl border border-slate-700 overflow-x-auto">
-        <table class="w-full min-w-[480px]">
-          <thead>
-            <tr class="border-b border-slate-700">
-              <th class="text-left px-5 py-3 text-xs font-medium text-slate-500 uppercase tracking-wider w-48">Host</th>
-              <th class="text-left px-5 py-3 text-xs font-medium text-slate-500 uppercase tracking-wider">Status / Packages</th>
-              <th class="text-left px-5 py-3 text-xs font-medium text-slate-500 uppercase tracking-wider w-32">Action</th>
-            </tr>
-          </thead>
-          <tbody class="divide-y divide-slate-700/50">
-            {% for host in hosts %}
-            <tr class="hover:bg-slate-700/20 transition-colors">
-              <td class="px-5 py-3">
-                <span class="font-medium text-slate-200 text-sm">{{ host.name }}</span>
-                <div class="text-xs text-slate-500 font-mono">{{ host.host }}</div>
-              </td>
-              <td class="px-5 py-3">
-                <div
-                  id="host-{{ host.slug }}-status"
-                  data-check
-                  hx-get="/api/host/{{ host.slug }}/check"
-                  hx-trigger="load, check"
-                  hx-swap="innerHTML"
-                  hx-indicator="#host-{{ host.slug }}-spinner">
-                  <span class="text-xs text-slate-500 animate-pulse">Checking...</span>
-                </div>
-                <span id="host-{{ host.slug }}-spinner" class="spinner text-xs text-slate-500">Refreshing...</span>
-              </td>
-              <td class="px-5 py-3">
-                <div id="host-{{ host.slug }}-action"></div>
-              </td>
-            </tr>
-            {% endfor %}
-          </tbody>
-        </table>
-      </div>
-    </section>
-
-    <!-- Docker Stacks -->
-    <section>
-      <h2 class="text-lg font-semibold text-slate-200 mb-4 flex items-center gap-2">
-        <svg class="w-5 h-5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-            d="M20 7l-8-4-8 4m16 0v10l-8 4M4 7v10l8 4"/>
-        </svg>
-        Docker Stacks
-        {% if not docker_configured %}
-        <span class="text-xs font-normal text-amber-400 ml-2">(No container backends configured — add a host with Docker monitoring, or configure Portainer in Admin → Connections)</span>
-        {% endif %}
-      </h2>
-
-      <div class="bg-slate-800/50 rounded-xl border border-slate-700 p-5">
-        {% if docker_configured %}
-        <div
-          id="docker-status"
-          data-check
-          hx-get="/api/docker/check"
-          hx-trigger="load, check"
-          hx-swap="innerHTML"
-          hx-indicator="#docker-spinner">
-          <p class="text-sm text-slate-500 animate-pulse">Checking stacks and image digests...</p>
+    <!-- Actions -->
+    <div class="flex items-center gap-2">
+      <button
+        onclick="document.querySelectorAll('[data-check]').forEach(el => htmx.trigger(el, 'check'))"
+        class="text-[12px] font-medium px-3 py-1.5 rounded-md border border-[#30363d] bg-transparent text-slate-400 hover:bg-[#161b22] hover:text-slate-100 transition-colors">
+        Refresh all
+      </button>
+      <a href="/admin"
+        class="text-[12px] font-medium px-3 py-1.5 rounded-md border border-[#30363d] bg-transparent text-slate-400 hover:bg-[#161b22] hover:text-slate-100 transition-colors">
+        Admin
+      </a>
+      <!-- Notification bell -->
+      <div class="relative">
+        <button id="notif-btn" onclick="toggleNotifPanel()"
+          class="relative w-8 h-8 rounded-md border border-[#30363d] bg-transparent flex items-center justify-center text-slate-400 hover:bg-[#161b22] hover:text-slate-100 transition-colors"
+          aria-label="Notifications">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+            <path d="M8 1.5C5.5 1.5 3.5 3.5 3.5 6v2.5L2 10v.5h12V10l-1.5-1.5V6C12.5 3.5 10.5 1.5 8 1.5zM6.5 11a1.5 1.5 0 003 0"
+              stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+          <span id="notif-badge"
+            hx-get="/api/notifications/badge"
+            hx-trigger="load, every 60s"
+            hx-swap="outerHTML"></span>
+        </button>
+        <div id="notif-panel"
+          class="hidden absolute right-0 top-full mt-2 w-80 sm:w-96 max-w-[calc(100vw-1rem)] bg-[#161b22] border border-[#30363d] rounded-xl shadow-2xl z-50 overflow-hidden">
         </div>
-        <span id="docker-spinner" class="spinner text-xs text-slate-500">Refreshing...</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Content -->
+  <div class="max-w-5xl mx-auto px-4 md:px-6 py-6 space-y-6">
+
+    <!-- OS Package Updates -->
+    <section>
+      <div class="flex items-center justify-between mb-3">
+        <div class="flex items-center gap-2 text-[11px] font-medium text-slate-500 uppercase tracking-widest">
+          <span class="w-2 h-2 rounded-full bg-amber-400 flex-shrink-0"></span>
+          OS Package Updates
+        </div>
+      </div>
+
+      <div class="bg-[#161b22] border border-[#21262d] rounded-lg overflow-hidden">
+        <!-- Column headers -->
+        <div class="hidden sm:grid sm:grid-cols-[1fr_1fr_160px] gap-3 px-4 py-2 bg-[#0d1117] border-b border-[#21262d]">
+          <span class="text-[11px] font-medium text-slate-600 uppercase tracking-widest">Host</span>
+          <span class="text-[11px] font-medium text-slate-600 uppercase tracking-widest">Status</span>
+          <span class="text-[11px] font-medium text-slate-600 uppercase tracking-widest text-right">Action</span>
+        </div>
+
+        {% for host in hosts %}
+        <div class="border-b border-[#21262d] last:border-0 px-4 py-3 grid grid-cols-1 sm:grid-cols-[1fr_1fr_160px] gap-2 sm:gap-3 items-start sm:items-center hover:bg-white/[0.02] transition-colors">
+          <!-- Host info -->
+          <div>
+            <div class="text-[13px] font-medium text-slate-100">{{ host.name }}</div>
+            <div class="text-[11px] text-slate-500 font-mono mt-0.5">{{ host.host }}</div>
+          </div>
+          <!-- Status (HTMX) -->
+          <div id="host-{{ host.slug }}-status"
+            data-check
+            hx-get="/api/host/{{ host.slug }}/check"
+            hx-trigger="load, check"
+            hx-swap="innerHTML"
+            hx-indicator="#host-{{ host.slug }}-spinner">
+            <span class="text-[12px] text-slate-500 animate-pulse">Checking…</span>
+          </div>
+          <!-- Action output -->
+          <div id="host-{{ host.slug }}-action" class="sm:text-right"></div>
+          <span id="host-{{ host.slug }}-spinner" class="spinner text-[11px] text-slate-600">Refreshing…</span>
+        </div>
         {% else %}
-        <p class="text-sm text-slate-500">
-          Enable Docker monitoring by adding a host in Admin and setting credentials — the dashboard will detect running stacks automatically.
-          To use Portainer instead, configure it in <strong class="text-slate-400">Admin → Connections</strong>.
-        </p>
-        {% endif %}
+        <div class="px-4 py-8 text-sm text-slate-500 text-center">No hosts configured. <a href="/admin" class="text-blue-400 hover:underline">Add one in Admin →</a></div>
+        {% endfor %}
       </div>
     </section>
+
+    <!-- Containers -->
+    {% if docker_configured %}
+    <section>
+      <div class="flex items-center justify-between mb-3">
+        <div class="flex items-center gap-2 text-[11px] font-medium text-slate-500 uppercase tracking-widest">
+          <span class="w-2 h-2 rounded-full bg-blue-400 flex-shrink-0" id="containers-dot"></span>
+          Containers
+        </div>
+        <span id="docker-spinner" class="spinner text-[11px] text-slate-500">Checking…</span>
+      </div>
+
+      <div id="docker-status"
+        data-check
+        hx-get="/api/docker/check"
+        hx-trigger="load, check"
+        hx-swap="innerHTML"
+        hx-indicator="#docker-spinner">
+        <div class="bg-[#161b22] border border-[#21262d] rounded-lg px-4 py-6 text-center">
+          <span class="text-[12px] text-slate-500 animate-pulse">Checking containers…</span>
+        </div>
+      </div>
+    </section>
+    {% endif %}
 
   </div>
 
   <script>
-    // The host_status partial puts the Update button into the status cell.
-    // After clicking Update the result goes into #host-{slug}-action in the action cell.
-    // This is wired by hx-target in the partial template itself.
-
-    function toggleNotifPanel() {
-      const panel = document.getElementById('notif-panel');
-      const isHidden = panel.classList.contains('hidden');
-      panel.classList.toggle('hidden');
-      if (isHidden) {
-        htmx.ajax('GET', '/api/notifications/panel', {target: '#notif-panel', swap: 'innerHTML'});
-      }
+  function toggleNotifPanel() {
+    const panel = document.getElementById('notif-panel');
+    const isHidden = panel.classList.contains('hidden');
+    panel.classList.toggle('hidden');
+    if (isHidden) {
+      htmx.ajax('GET', '/api/notifications/panel', {target: '#notif-panel', swap: 'innerHTML'});
     }
-    document.addEventListener('click', function(e) {
-      const btn = document.getElementById('notif-btn');
-      const panel = document.getElementById('notif-panel');
-      if (panel && btn && !panel.contains(e.target) && !btn.contains(e.target)) {
-        panel.classList.add('hidden');
-      }
-    });
+  }
+  document.addEventListener('click', function(e) {
+    const btn = document.getElementById('notif-btn');
+    const panel = document.getElementById('notif-panel');
+    if (panel && btn && !panel.contains(e.target) && !btn.contains(e.target)) {
+      panel.classList.add('hidden');
+    }
+  });
   </script>
 
 </body>

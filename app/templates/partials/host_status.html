@@ -1,34 +1,51 @@
 {% if packages %}
-<span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium bg-amber-900/50 text-amber-300 border border-amber-700">
-  {{ packages | length }} update{{ 's' if packages | length != 1 }}
-</span>
-{% if package_manager and package_manager != "unknown" %}
-<span class="ml-1 text-xs text-slate-600">via {{ package_manager }}</span>
-{% endif %}
-<div class="mt-2 text-xs text-slate-400 max-h-24 overflow-y-auto space-y-0.5">
+<div class="flex flex-wrap items-center gap-2">
+  <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[12px] font-medium bg-amber-900/40 text-amber-400 border border-amber-800/50">
+    <span class="w-1.5 h-1.5 rounded-full bg-current flex-shrink-0"></span>
+    {{ packages | length }} update{{ 's' if packages | length != 1 }}
+  </span>
+  {% if package_manager and package_manager != "unknown" %}
+  <span class="text-[11px] text-slate-600 font-mono">{{ package_manager }}</span>
+  {% endif %}
+</div>
+<div class="mt-1.5 text-[11px] text-slate-500 max-h-20 overflow-y-auto space-y-0.5">
   {% for pkg in packages %}
-  <div>{{ pkg.name }} <span class="text-slate-500">{{ pkg.current }} → {{ pkg.available }}</span></div>
+  <div>{{ pkg.name }} <span class="text-slate-600">{{ pkg.current }} → {{ pkg.available }}</span></div>
   {% endfor %}
 </div>
-<button
-  hx-post="/api/host/{{ slug }}/update"
-  hx-target="#host-{{ slug }}-action"
-  hx-swap="innerHTML"
-  hx-confirm="Run upgrade on {{ slug }}?"
-  class="mt-2 px-3 py-1 text-xs rounded bg-blue-600 hover:bg-blue-500 text-white font-medium transition-colors">
-  Update
-</button>
+<div class="mt-2 flex flex-wrap gap-2">
+  <button
+    hx-post="/api/host/{{ slug }}/update"
+    hx-target="#host-{{ slug }}-action"
+    hx-swap="innerHTML"
+    hx-confirm="Run upgrade on {{ slug }}?"
+    class="text-[12px] font-medium px-3 py-1 rounded-md border border-[#2ea043] text-green-400 hover:bg-green-900/20 transition-colors">
+    Upgrade
+  </button>
+  {% if reboot_required %}
+  <button
+    hx-post="/api/host/{{ slug }}/restart"
+    hx-target="#host-{{ slug }}-action"
+    hx-swap="innerHTML"
+    hx-confirm="Reboot {{ slug }} now?"
+    class="text-[12px] font-medium px-3 py-1 rounded-md border border-red-800 text-red-400 hover:bg-red-900/20 transition-colors">
+    Reboot
+  </button>
+  {% endif %}
+</div>
 {% else %}
-<span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-900/50 text-green-300 border border-green-700">
-  Up to date
-</span>
-{% if package_manager and package_manager != "unknown" %}
-<span class="ml-1 text-xs text-slate-600">via {{ package_manager }}</span>
-{% endif %}
-{% endif %}
+<div class="flex flex-wrap items-center gap-2">
+  <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[12px] font-medium bg-green-900/30 text-green-400 border border-green-800/40">
+    <span class="w-1.5 h-1.5 rounded-full bg-current flex-shrink-0"></span>
+    Up to date
+  </span>
+  {% if package_manager and package_manager != "unknown" %}
+  <span class="text-[11px] text-slate-600 font-mono">{{ package_manager }}</span>
+  {% endif %}
+</div>
 {% if reboot_required %}
-<div class="mt-2 flex items-center gap-2">
-  <span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-900/50 text-red-300 border border-red-700">
+<div class="mt-2 flex flex-wrap items-center gap-2">
+  <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[12px] font-medium bg-amber-900/40 text-amber-400 border border-amber-800/50">
     Reboot required
   </span>
   <button
@@ -36,8 +53,9 @@
     hx-target="#host-{{ slug }}-action"
     hx-swap="innerHTML"
     hx-confirm="Reboot {{ slug }} now?"
-    class="px-3 py-1 text-xs rounded bg-red-700 hover:bg-red-600 text-white font-medium transition-colors">
-    Restart
+    class="text-[12px] font-medium px-3 py-1 rounded-md border border-red-800 text-red-400 hover:bg-red-900/20 transition-colors">
+    Reboot
   </button>
 </div>
+{% endif %}
 {% endif %}
