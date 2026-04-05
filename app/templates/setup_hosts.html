@@ -7,7 +7,7 @@
   <link rel="manifest" href="/static/manifest.json" />
   <meta name="theme-color" content="#0d1117" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Connect your servers — Keepup</title>
+  <title>SSH Hosts — Keepup Setup</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://unpkg.com/htmx.org@1.9.10"></script>
   <style>body { background-color: #0d1117; }</style>
@@ -19,76 +19,61 @@
     <!-- Header -->
     <div class="text-center mb-6">
       <img src="/static/logo.svg" alt="Keepup" class="w-16 h-16 mx-auto mb-4 rounded-2xl" />
-      <h1 class="text-2xl font-bold text-white">Connect your servers</h1>
-      <p class="text-sm text-slate-400 mt-1">Add hosts and integrations to monitor. You can change these later in Admin.</p>
+      <h1 class="text-2xl font-bold text-white">SSH Hosts</h1>
+      <p class="text-sm text-slate-400 mt-1">Add Linux servers to monitor OS package updates via SSH.</p>
     </div>
 
-    <!-- Step indicator -->
-    <div class="flex items-center justify-center gap-3 mb-8 text-xs">
-      <div class="flex items-center gap-2">
-        <div class="w-6 h-6 rounded-full bg-blue-600 flex items-center justify-center text-white font-bold text-xs">1</div>
-        <span class="text-slate-300 font-medium">Account</span>
+    <!-- Progress bar -->
+    <div class="mb-8">
+      <div class="flex justify-between text-xs text-slate-500 mb-1">
+        <span>Step 6 of 8</span>
+        <span>SSH Hosts</span>
       </div>
-      <div class="w-8 h-px bg-slate-700"></div>
-      <div class="flex items-center gap-2">
-        <div class="w-6 h-6 rounded-full bg-blue-600 flex items-center justify-center text-white font-bold text-xs">2</div>
-        <span class="text-slate-300 font-medium">Backup Key</span>
-      </div>
-      <div class="w-8 h-px bg-slate-700"></div>
-      <div class="flex items-center gap-2">
-        <div class="w-6 h-6 rounded-full bg-blue-600 flex items-center justify-center text-white font-bold text-xs">3</div>
-        <span class="text-slate-300 font-medium">Connect</span>
+      <div class="w-full bg-slate-700 rounded-full h-1.5">
+        <div class="bg-blue-500 h-1.5 rounded-full" style="width: 75%"></div>
       </div>
     </div>
 
     <div class="space-y-6">
 
-      <!-- SSH Hosts -->
+      <!-- Proxmox pending callout -->
+      {% if proxmox_pending %}
+      <div class="rounded-2xl border border-blue-500/30 bg-blue-900/15 px-5 py-4">
+        <div class="flex items-start gap-3">
+          <svg class="w-5 h-5 text-blue-400 mt-0.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+              d="M13 16h-1v-4h-1m1-4h.01M12 2a10 10 0 110 20A10 10 0 0112 2z"/>
+          </svg>
+          <div>
+            <p class="text-sm font-medium text-blue-300">{{ proxmox_pending|length }} Proxmox host{{ 's' if proxmox_pending|length != 1 else '' }} queued</p>
+            <p class="text-xs text-slate-400 mt-1">
+              Add SSH credentials below for each VM or LXC to enable OS package update monitoring.
+            </p>
+            <ul class="mt-2 space-y-1">
+              {% for h in proxmox_pending %}
+              <li class="text-xs text-slate-300">
+                <span class="font-medium">{{ h.name }}</span>
+                <span class="text-slate-500 ml-1">{{ h.node }} · {{ h.type }}</span>
+              </li>
+              {% endfor %}
+            </ul>
+          </div>
+        </div>
+      </div>
+      {% endif %}
+
+      <!-- SSH section -->
       <div id="ssh-hosts-section">
         {% include 'partials/setup_ssh_section.html' %}
       </div>
 
-      <!-- Portainer -->
-      <div id="portainer-section">
-        {% include 'partials/setup_portainer_section.html' %}
-      </div>
-
-      <!-- DockerHub -->
-      <div class="bg-slate-800/60 border border-slate-700 rounded-2xl overflow-hidden">
-        <div class="px-5 py-4 border-b border-slate-700">
-          <h2 class="text-sm font-semibold text-slate-200">DockerHub <span class="text-xs font-normal text-slate-500 ml-1">optional</span></h2>
-          <p class="text-xs text-slate-500 mt-0.5">Check for newer image versions on Docker Hub.</p>
-        </div>
-        <div class="px-5 py-4 space-y-3">
-          <div id="dockerhub-result"></div>
-          <form hx-post="/setup/dockerhub/save" hx-target="#dockerhub-result" class="space-y-3">
-            <div>
-              <label class="block text-xs font-medium text-slate-400 mb-1">DockerHub username</label>
-              <input type="text" name="dockerhub_username" placeholder="myusername"
-                class="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-blue-500 placeholder:text-slate-500">
-            </div>
-            <div>
-              <label class="block text-xs font-medium text-slate-400 mb-1">Access token</label>
-              <input type="password" name="dockerhub_token" placeholder="dckr_pat_…"
-                class="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-blue-500 placeholder:text-slate-500">
-              <p class="text-xs text-slate-500 mt-1">In DockerHub: Account Settings → Security → New access token.</p>
-            </div>
-            <button type="submit"
-              class="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-sm font-medium text-white transition-colors">
-              Save
-            </button>
-          </form>
-        </div>
-      </div>
-
       <!-- Bottom buttons -->
       <div class="flex justify-between items-center mt-2">
-        <a href="/login" class="text-sm text-slate-500 hover:text-slate-300">Skip — I'll configure this later</a>
-        <form method="post" action="/setup/finish">
-          <button type="submit" class="px-6 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-sm font-semibold text-white transition-colors">
-            Finish setup →
-          </button>
-        </form>
+        <a href="/setup/connect" class="text-sm text-slate-500 hover:text-slate-300">← Back</a>
+        <a href="/setup/notifications"
+          class="px-6 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-sm font-semibold text-white transition-colors">
+          Continue to Notifications →
+        </a>
       </div>
 
     </div>

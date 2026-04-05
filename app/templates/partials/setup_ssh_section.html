@@ -1,15 +1,10 @@
 <div id="ssh-hosts-section" class="bg-slate-800/60 border border-slate-700 rounded-2xl overflow-hidden">
   <!-- header -->
   <div class="px-5 py-4 border-b border-slate-700">
-    <h2 class="text-sm font-semibold text-slate-200">SSH hosts</h2>
-    <p class="text-xs text-slate-500 mt-0.5">Add Linux servers to monitor OS package updates. Requires SSH access.</p>
+    <h2 class="text-sm font-semibold text-slate-200">SSH hosts <span class="text-xs font-normal text-slate-500 ml-1">optional</span></h2>
+    <p class="text-xs text-slate-500 mt-0.5">Monitor OS package updates on Linux servers. Requires SSH access.</p>
   </div>
   <div class="px-5 py-4 space-y-4">
-
-    <!-- note about docker-only -->
-    <div class="text-xs text-slate-500">
-      Only need Docker/container monitoring? Skip this section and configure Portainer below.
-    </div>
 
     <!-- host list -->
     {% if hosts %}
@@ -20,7 +15,8 @@
           <span class="text-sm text-slate-200 font-medium">{{ h.name }}</span>
           <span class="text-xs text-slate-500 ml-2">{{ h.host }}</span>
           {% if h.get('user') %}<span class="text-xs text-slate-500"> · {{ h.user }}</span>{% endif %}
-          {% if h.get('docker_mode') %}<span class="text-xs text-blue-400 ml-1"> · Docker: on</span>{% endif %}
+          {% if h.get('docker_mode') %}<span class="text-xs text-blue-400 ml-1"> · containers: on</span>{% endif %}
+          {% if h.get('auto_update') %}<span class="text-xs text-green-400 ml-1"> · auto-update: on</span>{% endif %}
         </div>
         <button
           hx-post="/setup/hosts/{{ h.slug }}/remove"
@@ -33,7 +29,7 @@
       {% endfor %}
     </div>
     {% else %}
-    <p class="text-xs text-slate-500 italic">No hosts added yet.</p>
+    <p class="text-xs text-slate-500 italic">No hosts added yet. Skip this step if you only need container monitoring via Portainer.</p>
     {% endif %}
 
     <!-- success/error messages -->
@@ -44,7 +40,7 @@
     <p class="text-sm text-green-400">&#10003; {{ add_success }}</p>
     {% endif %}
 
-    <!-- Docker discovery prompt -->
+    <!-- Docker discovery prompt — credentials are in session, not hidden fields -->
     {% if docker_prompt %}
     <div class="rounded-xl border border-blue-500/40 bg-blue-900/20 px-4 py-4 space-y-3">
       <div class="flex items-start gap-3">
@@ -55,19 +51,12 @@
         <div>
           <p class="text-sm font-medium text-blue-300">Docker detected on {{ docker_prompt.name }}</p>
           <p class="text-xs text-slate-400 mt-0.5">
-            We found {{ docker_prompt.stack_label }} running. Want to monitor them for image updates?
+            We found {{ docker_prompt.stack_label }} running. Enable container monitoring?
           </p>
         </div>
       </div>
       <div class="flex gap-2">
         <form hx-post="/setup/hosts/confirm-add" hx-target="#ssh-hosts-section" hx-swap="outerHTML">
-          <input type="hidden" name="name" value="{{ docker_prompt.name }}">
-          <input type="hidden" name="host" value="{{ docker_prompt.host }}">
-          <input type="hidden" name="user" value="{{ docker_prompt.user }}">
-          <input type="hidden" name="port" value="{{ docker_prompt.port }}">
-          <input type="hidden" name="auth_method" value="{{ docker_prompt.auth_method }}">
-          <input type="hidden" name="ssh_password" value="{{ docker_prompt.ssh_password }}">
-          <input type="hidden" name="key_file" value="{{ docker_prompt.key_file }}">
           <input type="hidden" name="enable_docker" value="yes">
           <button type="submit"
             class="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-sm font-medium text-white transition-colors">
@@ -75,13 +64,6 @@
           </button>
         </form>
         <form hx-post="/setup/hosts/confirm-add" hx-target="#ssh-hosts-section" hx-swap="outerHTML">
-          <input type="hidden" name="name" value="{{ docker_prompt.name }}">
-          <input type="hidden" name="host" value="{{ docker_prompt.host }}">
-          <input type="hidden" name="user" value="{{ docker_prompt.user }}">
-          <input type="hidden" name="port" value="{{ docker_prompt.port }}">
-          <input type="hidden" name="auth_method" value="{{ docker_prompt.auth_method }}">
-          <input type="hidden" name="ssh_password" value="{{ docker_prompt.ssh_password }}">
-          <input type="hidden" name="key_file" value="{{ docker_prompt.key_file }}">
           <input type="hidden" name="enable_docker" value="no">
           <button type="submit"
             class="px-4 py-2 rounded-lg bg-slate-700 hover:bg-slate-600 text-sm font-medium text-slate-300 transition-colors">
@@ -170,6 +152,13 @@
             </div>
           </div>
         </div>
+
+        <!-- Auto-update -->
+        <label class="flex items-center gap-2 cursor-pointer">
+          <input type="checkbox" name="enable_auto_update" value="on"
+            class="w-4 h-4 rounded accent-blue-500">
+          <span class="text-sm text-slate-300">Enable automatic OS updates <span class="text-xs text-slate-500">(weekly, no auto-reboot)</span></span>
+        </label>
 
         <button type="submit"
           class="w-full py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-sm font-medium text-white transition-colors">
