@@ -110,10 +110,10 @@
         <div class="int-bottom">
           {% if proxmox_connected %}
           <span class="int-count count-green">connected</span>
-          <button class="add-btn add-btn-green" onclick="event.stopPropagation();toggleConfig('proxmox')">Edit</button>
+          <button class="add-btn add-btn-green" onclick="event.stopPropagation();openConfig('proxmox')">Edit</button>
           {% else %}
           <span class="int-count count-gray">optional</span>
-          <button class="add-btn add-btn-gray" onclick="event.stopPropagation();toggleConfig('proxmox')">Add</button>
+          <button class="add-btn add-btn-gray" onclick="event.stopPropagation();openConfig('proxmox')">Add</button>
           {% endif %}
         </div>
       </div>
@@ -130,10 +130,10 @@
         <div class="int-bottom">
           {% if pbs_connected %}
           <span class="int-count count-green">connected</span>
-          <button class="add-btn add-btn-green" onclick="event.stopPropagation();toggleConfig('pbs')">Edit</button>
+          <button class="add-btn add-btn-green" onclick="event.stopPropagation();openConfig('pbs')">Edit</button>
           {% else %}
           <span class="int-count count-gray">optional</span>
-          <button class="add-btn add-btn-gray" onclick="event.stopPropagation();toggleConfig('pbs')">Add</button>
+          <button class="add-btn add-btn-gray" onclick="event.stopPropagation();openConfig('pbs')">Add</button>
           {% endif %}
         </div>
       </div>
@@ -150,10 +150,10 @@
         <div class="int-bottom">
           {% if opnsense_connected %}
           <span class="int-count count-green">connected</span>
-          <button class="add-btn add-btn-green" onclick="event.stopPropagation();toggleConfig('opnsense')">Edit</button>
+          <button class="add-btn add-btn-green" onclick="event.stopPropagation();openConfig('opnsense')">Edit</button>
           {% else %}
           <span class="int-count count-gray">optional</span>
-          <button class="add-btn add-btn-gray" onclick="event.stopPropagation();toggleConfig('opnsense')">Add</button>
+          <button class="add-btn add-btn-gray" onclick="event.stopPropagation();openConfig('opnsense')">Add</button>
           {% endif %}
         </div>
       </div>
@@ -169,10 +169,10 @@
         <div class="int-bottom">
           {% if pfsense_connected %}
           <span class="int-count count-green">connected</span>
-          <button class="add-btn add-btn-green" onclick="event.stopPropagation();toggleConfig('pfsense')">Edit</button>
+          <button class="add-btn add-btn-green" onclick="event.stopPropagation();openConfig('pfsense')">Edit</button>
           {% else %}
           <span class="int-count count-gray">optional</span>
-          <button class="add-btn add-btn-gray" onclick="event.stopPropagation();toggleConfig('pfsense')">Add</button>
+          <button class="add-btn add-btn-gray" onclick="event.stopPropagation();openConfig('pfsense')">Add</button>
           {% endif %}
         </div>
       </div>
@@ -189,10 +189,10 @@
         <div class="int-bottom">
           {% if homeassistant_connected %}
           <span class="int-count count-green">connected</span>
-          <button class="add-btn add-btn-green" onclick="event.stopPropagation();toggleConfig('homeassistant')">Edit</button>
+          <button class="add-btn add-btn-green" onclick="event.stopPropagation();openConfig('homeassistant')">Edit</button>
           {% else %}
           <span class="int-count count-gray">optional</span>
-          <button class="add-btn add-btn-gray" onclick="event.stopPropagation();toggleConfig('homeassistant')">Add</button>
+          <button class="add-btn add-btn-gray" onclick="event.stopPropagation();openConfig('homeassistant')">Add</button>
           {% endif %}
         </div>
       </div>
@@ -211,10 +211,10 @@
         <div class="int-bottom">
           {% if portainer_connected %}
           <span class="int-count count-green">connected</span>
-          <button class="add-btn add-btn-green" onclick="event.stopPropagation();toggleConfig('portainer')">Edit</button>
+          <button class="add-btn add-btn-green" onclick="event.stopPropagation();openConfig('portainer')">Edit</button>
           {% else %}
           <span class="int-count count-gray">optional</span>
-          <button class="add-btn add-btn-gray" onclick="event.stopPropagation();toggleConfig('portainer')">Add</button>
+          <button class="add-btn add-btn-gray" onclick="event.stopPropagation();openConfig('portainer')">Add</button>
           {% endif %}
         </div>
       </div>
@@ -232,10 +232,10 @@
         <div class="int-bottom">
           {% if dockerhub_connected %}
           <span class="int-count count-green">connected</span>
-          <button class="add-btn add-btn-green" onclick="event.stopPropagation();toggleConfig('dockerhub')">Edit</button>
+          <button class="add-btn add-btn-green" onclick="event.stopPropagation();openConfig('dockerhub')">Edit</button>
           {% else %}
           <span class="int-count count-gray">optional</span>
-          <button class="add-btn add-btn-gray" onclick="event.stopPropagation();toggleConfig('dockerhub')">Add</button>
+          <button class="add-btn add-btn-gray" onclick="event.stopPropagation();openConfig('dockerhub')">Add</button>
           {% endif %}
         </div>
       </div>
@@ -544,6 +544,21 @@
       tile.classList.add('active');
       section.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     }
+  }
+
+  // Add/Edit buttons always open the form (never toggle closed)
+  function openConfig(id) {
+    const section = document.getElementById('config-' + id);
+    const tile = document.getElementById('tile-' + id);
+    const allSections = document.querySelectorAll('.config-section');
+    const allTiles = document.querySelectorAll('.int-icon');
+
+    allSections.forEach(s => s.style.display = 'none');
+    allTiles.forEach(t => t.classList.remove('active'));
+
+    section.style.display = 'block';
+    tile.classList.add('active');
+    section.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   }
 
   // Auto-open config sections for already-connected integrations

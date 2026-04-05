@@ -24,8 +24,10 @@
       </div>
       <div class="sm:col-span-2">
         <label class="block text-xs font-medium text-slate-400 mb-1.5">Default Key Path <span class="text-slate-500 font-normal">(inside container)</span></label>
-        <input type="text" name="default_key" value="{{ ssh.default_key or '/app/keys/id_ed25519' }}"
+        <input type="password" name="default_key" value="{{ ssh.default_key or '/app/keys/id_ed25519' }}"
+          autocomplete="off"
           class="w-full bg-slate-800 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-200 font-mono focus:outline-none focus:border-blue-500" />
+        <p class="text-xs text-slate-500 mt-1">Masked for security. Edit to change the path.</p>
       </div>
       <div>
         <label class="block text-xs font-medium text-slate-400 mb-1.5">Connect Timeout <span class="text-slate-500 font-normal">(seconds)</span></label>

@@ -6,9 +6,19 @@
 <p class="text-sm text-slate-500 px-5 py-4">No stacks found across configured backends.</p>
 {% else %}
 <tbody class="divide-y divide-slate-700/50" id="au-stacks-tbody">
+  {% set ns = namespace(last_endpoint='') %}
   {% for stack in stacks %}
     {% set update_path = stack.update_path %}
     {% set row_id = update_path | replace('/', '-') | replace(':', '-') %}
+    {% set ep = stack.endpoint_name or stack.host_name or '' %}
+    {% if ep and ep != ns.last_endpoint %}
+    {% set ns.last_endpoint = ep %}
+    <tr class="bg-slate-900/40">
+      <td colspan="2" class="px-5 py-1.5">
+        <span class="text-xs font-medium text-slate-500 uppercase tracking-wider">{{ ep }}</span>
+      </td>
+    </tr>
+    {% endif %}
     <tr id="au-stack-row-{{ row_id }}"
       class="hover:bg-slate-700/20 transition-colors">
       <td class="px-5 py-4">

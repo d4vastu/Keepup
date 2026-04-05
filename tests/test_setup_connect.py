@@ -209,11 +209,12 @@ def test_proxmox_discover_success(setup_client, data_dir):
         instance.discover_resources = AsyncMock(
             return_value=[
                 {
-                    "type": "vm",
+                    "type": "qemu",
                     "node": "pve",
                     "vmid": 100,
                     "name": "ubuntu",
                     "status": "running",
+                    "ip": "",
                 },
             ]
         )

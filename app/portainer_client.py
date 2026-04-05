@@ -45,8 +45,9 @@ class PortainerClient:
 
     async def get_endpoints(self) -> list[dict]:
         data = await self.get("/api/endpoints")
-        # Filter to Docker environments only (type 1 = local Docker, 2 = agent)
-        return [e for e in data if e.get("Type") in (1, 2)]
+        # Docker environments: 1 = local, 2 = agent, 4 = edge agent
+        # Skip Kubernetes (5, 6) and Azure ACI (3)
+        return [e for e in data if e.get("Type") in (1, 2, 4)]
 
     # ------------------------------------------------------------------
     # Stacks
