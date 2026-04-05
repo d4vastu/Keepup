@@ -15,44 +15,37 @@
 
   <div class="max-w-4xl mx-auto px-4 py-8">
 
-    <!-- Header -->
-    <div class="flex flex-wrap items-start justify-between gap-4 mb-8">
-      <div>
-        <h1 class="text-2xl font-bold text-white">Auto-Updates</h1>
-        <p class="text-sm text-slate-500 mt-0.5">Schedule unattended OS and container updates</p>
-      </div>
-      <div class="flex items-center gap-2 flex-wrap justify-end">
-        <a href="/admin/auto-updates/history"
-          class="px-3 py-2 rounded-lg bg-slate-700 hover:bg-slate-600 text-sm font-medium text-slate-300 transition-colors">
-          History
+    <!-- Top bar -->
+    <div class="flex flex-wrap items-center justify-between gap-2 -mx-4 md:-mx-6 px-4 md:px-5 py-2.5 mb-8 border-b border-[#21262d] bg-[#0d1117]">
+      <div class="flex items-center gap-2.5">
+        <a href="/dashboard" class="flex items-center gap-1.5 text-[12px] font-medium px-3 py-1.5 rounded-md bg-[#0a1f10] border border-[#2d4a3e] text-[#3fb950] flex-shrink-0">
+          <svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M2 6.5L8 2l6 4.5V14a.5.5 0 01-.5.5h-4V10h-3v4.5h-4A.5.5 0 012 14V6.5z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>
+          Home
         </a>
-        <a href="/admin"
-          class="px-3 py-2 rounded-lg bg-slate-700 hover:bg-slate-600 text-sm font-medium text-slate-300 transition-colors">
-          Admin
-        </a>
-        <a href="/dashboard"
-          class="px-3 py-2 rounded-lg bg-slate-700 hover:bg-slate-600 text-sm font-medium text-slate-300 transition-colors">
-          Dashboard
-        </a>
-        <!-- Notification bell -->
-        <div class="relative">
-          <button id="notif-btn" onclick="toggleNotifPanel()"
-            class="relative p-2 rounded-lg bg-slate-700 hover:bg-slate-600 transition-colors"
-            aria-label="Notifications">
-            <svg class="w-5 h-5 text-slate-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6 6 0 00-9.33-5.003 6 6 0 00-2.67 5.003v3.159c0 .538-.214 1.055-.595 1.437L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"/>
-            </svg>
-            <span id="notif-badge"
-              hx-get="/api/notifications/badge"
-              hx-trigger="load, every 60s"
-              hx-swap="outerHTML"></span>
-          </button>
-          <div id="notif-panel"
-            class="hidden absolute right-0 top-full mt-2 w-80 sm:w-96 max-w-[calc(100vw-1rem)] bg-slate-800 border border-slate-700 rounded-xl shadow-2xl z-50 overflow-hidden">
-          </div>
+        <div class="w-px h-[18px] bg-[#21262d] flex-shrink-0"></div>
+        <div class="flex items-center gap-2">
+          <img src="/static/logo.svg" alt="Keepup" class="w-7 h-7 rounded-lg flex-shrink-0" />
+          <span class="text-[14px] font-medium tracking-tight text-slate-100">keep<span class="text-[#3fb950]">up</span></span>
         </div>
       </div>
+      <div class="flex items-center gap-2">
+        <a href="/admin/auto-updates/history" class="text-[12px] font-medium px-3 py-1.5 rounded-md border border-[#30363d] bg-transparent text-slate-400 hover:bg-[#161b22] hover:text-slate-100 transition-colors">History</a>
+        <a href="/admin" class="text-[12px] font-medium px-3 py-1.5 rounded-md border border-[#30363d] bg-transparent text-slate-400 hover:bg-[#161b22] hover:text-slate-100 transition-colors">Admin</a>
+        <div class="relative">
+          <button id="notif-btn" onclick="toggleNotifPanel()"
+            class="relative w-8 h-8 rounded-md border border-[#30363d] bg-transparent flex items-center justify-center text-slate-400 hover:bg-[#161b22] hover:text-slate-100 transition-colors"
+            aria-label="Notifications">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M8 1.5C5.5 1.5 3.5 3.5 3.5 6v2.5L2 10v.5h12V10l-1.5-1.5V6C12.5 3.5 10.5 1.5 8 1.5zM6.5 11a1.5 1.5 0 003 0" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            <span id="notif-badge" hx-get="/api/notifications/badge" hx-trigger="load, every 60s" hx-swap="outerHTML"></span>
+          </button>
+          <div id="notif-panel" class="hidden absolute right-0 top-full mt-2 w-80 sm:w-96 max-w-[calc(100vw-1rem)] bg-[#161b22] border border-[#30363d] rounded-xl shadow-2xl z-50 overflow-hidden"></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="mb-6">
+      <h1 class="text-2xl font-bold text-white">Auto-Updates</h1>
+      <p class="text-sm text-slate-500 mt-0.5">Schedule unattended OS and container updates</p>
     </div>
 
     <!-- Risk notice -->
