@@ -18,12 +18,12 @@
   <div class="max-w-6xl mx-auto px-4 py-8">
 
     <!-- Header -->
-    <div class="flex items-center justify-between mb-8">
+    <div class="flex flex-wrap items-start justify-between gap-4 mb-8">
       <div>
         <h1 class="text-2xl font-bold text-white">Keepup</h1>
         <p class="text-sm text-slate-500 mt-0.5">OS packages + Docker stacks across all hosts</p>
       </div>
-      <div class="flex items-center gap-3">
+      <div class="flex items-center gap-2 flex-wrap justify-end">
         <button
           onclick="document.querySelectorAll('[data-check]').forEach(el => htmx.trigger(el, 'check'))"
           class="px-4 py-2 rounded-lg bg-slate-700 hover:bg-slate-600 text-sm font-medium text-white transition-colors">
@@ -48,7 +48,7 @@
               hx-swap="outerHTML"></span>
           </button>
           <div id="notif-panel"
-            class="hidden absolute right-0 top-full mt-2 w-96 bg-slate-800 border border-slate-700 rounded-xl shadow-2xl z-50 overflow-hidden">
+            class="hidden absolute right-0 top-full mt-2 w-80 sm:w-96 max-w-[calc(100vw-1rem)] bg-slate-800 border border-slate-700 rounded-xl shadow-2xl z-50 overflow-hidden">
           </div>
         </div>
       </div>
@@ -64,8 +64,8 @@
         OS Package Updates
       </h2>
 
-      <div class="bg-slate-800/50 rounded-xl border border-slate-700 overflow-hidden">
-        <table class="w-full">
+      <div class="bg-slate-800/50 rounded-xl border border-slate-700 overflow-x-auto">
+        <table class="w-full min-w-[480px]">
           <thead>
             <tr class="border-b border-slate-700">
               <th class="text-left px-5 py-3 text-xs font-medium text-slate-500 uppercase tracking-wider w-48">Host</th>

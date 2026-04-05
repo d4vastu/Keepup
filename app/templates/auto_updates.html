@@ -16,22 +16,22 @@
   <div class="max-w-4xl mx-auto px-4 py-8">
 
     <!-- Header -->
-    <div class="flex items-center justify-between mb-8">
+    <div class="flex flex-wrap items-start justify-between gap-4 mb-8">
       <div>
         <h1 class="text-2xl font-bold text-white">Auto-Updates</h1>
         <p class="text-sm text-slate-500 mt-0.5">Schedule unattended OS and Docker stack updates</p>
       </div>
-      <div class="flex items-center gap-3">
+      <div class="flex items-center gap-2 flex-wrap justify-end">
         <a href="/admin/auto-updates/history"
-          class="px-4 py-2 rounded-lg bg-slate-700 hover:bg-slate-600 text-sm font-medium text-slate-300 transition-colors">
+          class="px-3 py-2 rounded-lg bg-slate-700 hover:bg-slate-600 text-sm font-medium text-slate-300 transition-colors">
           History
         </a>
         <a href="/admin"
-          class="px-4 py-2 rounded-lg bg-slate-700 hover:bg-slate-600 text-sm font-medium text-slate-300 transition-colors">
-          ← Admin
+          class="px-3 py-2 rounded-lg bg-slate-700 hover:bg-slate-600 text-sm font-medium text-slate-300 transition-colors">
+          Admin
         </a>
         <a href="/"
-          class="px-4 py-2 rounded-lg bg-slate-700 hover:bg-slate-600 text-sm font-medium text-slate-300 transition-colors">
+          class="px-3 py-2 rounded-lg bg-slate-700 hover:bg-slate-600 text-sm font-medium text-slate-300 transition-colors">
           Dashboard
         </a>
         <!-- Notification bell -->
@@ -49,7 +49,7 @@
               hx-swap="outerHTML"></span>
           </button>
           <div id="notif-panel"
-            class="hidden absolute right-0 top-full mt-2 w-96 bg-slate-800 border border-slate-700 rounded-xl shadow-2xl z-50 overflow-hidden">
+            class="hidden absolute right-0 top-full mt-2 w-80 sm:w-96 max-w-[calc(100vw-1rem)] bg-slate-800 border border-slate-700 rounded-xl shadow-2xl z-50 overflow-hidden">
           </div>
         </div>
       </div>
@@ -70,8 +70,8 @@
     <!-- OS Updates -->
     <section class="mb-10">
       <h2 class="text-base font-semibold text-slate-300 mb-3">OS Package Updates</h2>
-      <div class="bg-slate-800/50 rounded-xl border border-slate-700 overflow-hidden">
-        <table class="w-full">
+      <div class="bg-slate-800/50 rounded-xl border border-slate-700 overflow-x-auto">
+        <table class="w-full min-w-[480px]">
           <thead>
             <tr class="border-b border-slate-700">
               <th class="text-left px-5 py-3 text-xs font-medium text-slate-500 uppercase tracking-wider w-48">Host</th>
@@ -101,8 +101,8 @@
         </button>
         <span id="au-stacks-spinner" class="htmx-indicator text-xs text-slate-500">Loading...</span>
       </h2>
-      <div class="bg-slate-800/50 rounded-xl border border-slate-700 overflow-hidden">
-        <table class="w-full">
+      <div class="bg-slate-800/50 rounded-xl border border-slate-700 overflow-x-auto">
+        <table class="w-full min-w-[480px]">
           <thead>
             <tr class="border-b border-slate-700">
               <th class="text-left px-5 py-3 text-xs font-medium text-slate-500 uppercase tracking-wider w-48">Stack</th>
