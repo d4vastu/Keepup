@@ -23,6 +23,7 @@ from .config_manager import (
     add_host,
     delete_host,
     get_available_ssh_keys,
+    get_dockerhub_config,
     get_homeassistant_config,
     get_hosts,
     get_opnsense_config,
@@ -929,6 +930,50 @@ async def setup_save_dockerhub(
 @router.post("/setup/finish")
 async def setup_finish(request: Request):
     return RedirectResponse("/login", status_code=303)
+
+
+# ---------------------------------------------------------------------------
+# Setup — Summary (Screen 8)
+# ---------------------------------------------------------------------------
+
+@router.get("/setup/summary", response_class=HTMLResponse)
+async def setup_summary_page(request: Request) -> HTMLResponse:
+    if not admin_exists():
+        return RedirectResponse("/setup", status_code=302)
+
+    # Integrations connected status
+    def _cred_set(name: str, *keys: str) -> bool:
+        creds = get_integration_credentials(name)
+        return all(creds.get(k) for k in keys)
+
+    integrations = [
+        ("Proxmox VE",        get_proxmox_config().get("url"),     _cred_set("proxmox", "api_token")),
+        ("Proxmox Backup",    get_pbs_config().get("url"),         _cred_set("pbs", "api_token")),
+        ("OPNsense",          get_opnsense_config().get("url"),    _cred_set("opnsense", "api_key", "api_secret")),
+        ("pfSense",           get_pfsense_config().get("url"),     _cred_set("pfsense", "api_key")),
+        ("Home Assistant",    get_homeassistant_config().get("url"), _cred_set("homeassistant", "api_token")),
+        ("Portainer",         get_portainer_config().get("url"),   _cred_set("portainer", "api_key")),
+        ("DockerHub",         get_dockerhub_config().get("username"), False),
+    ]
+    # Only show integrations that have a URL/username configured
+    configured_integrations = [(name, bool(url or cred)) for name, url, cred in integrations if url]
+    dockerhub_cfg = get_dockerhub_config()
+    if dockerhub_cfg.get("username"):
+        configured_integrations.append(("DockerHub", True))
+
+    pushover_cfg = get_pushover_config()
+    pushover_creds = get_integration_credentials("pushover")
+    schedule_labels = {"6h": "every 6 hours", "12h": "every 12 hours", "24h": "daily", "manual": "manual only"}
+
+    return templates.TemplateResponse("setup_summary.html", {
+        "request": request,
+        "timezone": get_timezone(),
+        "mfa_enabled": mfa_enrolled(),
+        "hosts": get_hosts(),
+        "configured_integrations": configured_integrations,
+        "pushover_enabled": pushover_cfg.get("enabled", False) and bool(pushover_creds.get("api_token")),
+        "update_schedule_label": schedule_labels.get(get_update_check_schedule(), "manual only"),
+    })
 
 
 # ---------------------------------------------------------------------------

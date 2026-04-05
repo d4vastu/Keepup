@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+  <meta charset="UTF-8" />
+  <link rel="icon" type="image/svg+xml" href="/static/favicon.svg" />
+  <link rel="apple-touch-icon" href="/static/icon-192.svg" />
+  <link rel="manifest" href="/static/manifest.json" />
+  <meta name="theme-color" content="#0d1117" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Setup Complete — Keepup</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>body { background-color: #0d1117; }</style>
+</head>
+<body class="min-h-full text-slate-200 font-sans px-4 py-12">
+
+  <div class="w-full max-w-2xl mx-auto">
+
+    <!-- Header -->
+    <div class="text-center mb-6">
+      <img src="/static/logo.svg" alt="Keepup" class="w-16 h-16 mx-auto mb-4 rounded-2xl" />
+      <h1 class="text-2xl font-bold text-white">You're all set!</h1>
+      <p class="text-sm text-slate-400 mt-1">Here's a summary of your Keepup configuration.</p>
+    </div>
+
+    <!-- Progress bar -->
+    <div class="mb-8">
+      <div class="flex justify-between text-xs text-slate-500 mb-1">
+        <span>Step 8 of 8</span>
+        <span>Complete</span>
+      </div>
+      <div class="w-full bg-slate-700 rounded-full h-1.5">
+        <div class="bg-green-500 h-1.5 rounded-full w-full"></div>
+      </div>
+    </div>
+
+    <div class="space-y-4">
+
+      <!-- Account + Security -->
+      <div class="bg-slate-800/60 border border-slate-700 rounded-2xl px-5 py-4 space-y-2">
+        <h2 class="text-xs font-semibold text-slate-400 uppercase tracking-wide">Account</h2>
+        <div class="space-y-1.5">
+          <div class="flex items-center gap-2 text-sm">
+            <span class="text-green-400">&#10003;</span>
+            <span class="text-slate-300">Admin account created</span>
+          </div>
+          <div class="flex items-center gap-2 text-sm">
+            {% if mfa_enabled %}
+            <span class="text-green-400">&#10003;</span>
+            <span class="text-slate-300">Two-factor authentication enabled</span>
+            {% else %}
+            <span class="text-slate-500">&#8212;</span>
+            <span class="text-slate-500">Two-factor authentication not enabled</span>
+            {% endif %}
+          </div>
+          <div class="flex items-center gap-2 text-sm">
+            <span class="text-green-400">&#10003;</span>
+            <span class="text-slate-300">Recovery code saved</span>
+          </div>
+          <div class="flex items-center gap-2 text-sm">
+            <span class="text-green-400">&#10003;</span>
+            <span class="text-slate-300">Timezone: {{ timezone }}</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Integrations -->
+      <div class="bg-slate-800/60 border border-slate-700 rounded-2xl px-5 py-4 space-y-2">
+        <h2 class="text-xs font-semibold text-slate-400 uppercase tracking-wide">Integrations</h2>
+        {% if configured_integrations %}
+        <div class="space-y-1.5">
+          {% for name, ok in configured_integrations %}
+          <div class="flex items-center gap-2 text-sm">
+            {% if ok %}
+            <span class="text-green-400">&#10003;</span>
+            <span class="text-slate-300">{{ name }}</span>
+            {% else %}
+            <span class="text-amber-400">&#9888;</span>
+            <span class="text-slate-400">{{ name }} (credentials incomplete)</span>
+            {% endif %}
+          </div>
+          {% endfor %}
+        </div>
+        {% else %}
+        <p class="text-sm text-slate-500">No integrations configured. Add them later in Admin → Connections.</p>
+        {% endif %}
+      </div>
+
+      <!-- SSH Hosts -->
+      <div class="bg-slate-800/60 border border-slate-700 rounded-2xl px-5 py-4 space-y-2">
+        <h2 class="text-xs font-semibold text-slate-400 uppercase tracking-wide">SSH Hosts</h2>
+        {% if hosts %}
+        <div class="space-y-1.5">
+          {% for h in hosts %}
+          <div class="flex items-center gap-2 text-sm">
+            <span class="text-green-400">&#10003;</span>
+            <span class="text-slate-300">{{ h.name }}</span>
+            <span class="text-slate-500 text-xs">{{ h.host }}</span>
+            {% if h.get('docker_mode') %}<span class="text-xs text-blue-400">· containers</span>{% endif %}
+            {% if h.get('auto_update') %}<span class="text-xs text-green-400">· auto-update</span>{% endif %}
+          </div>
+          {% endfor %}
+        </div>
+        {% else %}
+        <p class="text-sm text-slate-500">No SSH hosts added. Add them later in Admin → Hosts.</p>
+        {% endif %}
+      </div>
+
+      <!-- Notifications -->
+      <div class="bg-slate-800/60 border border-slate-700 rounded-2xl px-5 py-4 space-y-2">
+        <h2 class="text-xs font-semibold text-slate-400 uppercase tracking-wide">Notifications &amp; Schedule</h2>
+        <div class="space-y-1.5">
+          <div class="flex items-center gap-2 text-sm">
+            {% if pushover_enabled %}
+            <span class="text-green-400">&#10003;</span>
+            <span class="text-slate-300">Pushover notifications enabled</span>
+            {% else %}
+            <span class="text-slate-500">&#8212;</span>
+            <span class="text-slate-500">Pushover not configured</span>
+            {% endif %}
+          </div>
+          <div class="flex items-center gap-2 text-sm">
+            <span class="text-green-400">&#10003;</span>
+            <span class="text-slate-300">Update checks: {{ update_schedule_label }}</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Finish -->
+      <div class="rounded-2xl border border-green-500/30 bg-green-900/10 px-5 py-5 text-center space-y-4">
+        <p class="text-sm text-slate-300">
+          Setup is complete. You can adjust any of these settings later in the Admin panel.
+        </p>
+        <form method="post" action="/setup/finish">
+          <button type="submit"
+            class="px-8 py-3 rounded-xl bg-green-600 hover:bg-green-500 text-sm font-semibold text-white transition-colors">
+            Go to login →
+          </button>
+        </form>
+        <p class="text-xs text-slate-500">You'll be taken to the login page to sign in for the first time.</p>
+      </div>
+
+    </div>
+  </div>
+
+</body>
+</html>
