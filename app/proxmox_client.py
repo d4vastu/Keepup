@@ -86,7 +86,7 @@ class ProxmoxClient:
                     for vm in r.json()["data"]:
                         resources.append(
                             {
-                                "type": "vm",
+                                "type": "qemu",
                                 "node": node_name,
                                 "vmid": vm["vmid"],
                                 "name": vm.get("name", f"vm-{vm['vmid']}"),
