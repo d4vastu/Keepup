@@ -25,8 +25,13 @@ from .config_manager import (
     clear_ssl_config,
     delete_host,
     get_dockerhub_config,
+    get_homeassistant_config,
     get_hosts,
+    get_opnsense_config,
+    get_pbs_config,
+    get_pfsense_config,
     get_portainer_config,
+    get_proxmox_config,
     get_pushover_config,
     get_ssl_config,
     get_ssh_config,
@@ -81,6 +86,54 @@ def _connection_status() -> dict:
     }
 
 
+def _integration_status() -> dict:
+    """Read status for all API integrations."""
+    px_cfg = get_proxmox_config()
+    px_creds = get_integration_credentials("proxmox")
+    pbs_cfg = get_pbs_config()
+    pbs_creds = get_integration_credentials("proxmox_backup")
+    opn_cfg = get_opnsense_config()
+    opn_creds = get_integration_credentials("opnsense")
+    pf_cfg = get_pfsense_config()
+    pf_creds = get_integration_credentials("pfsense")
+    ha_cfg = get_homeassistant_config()
+    ha_creds = get_integration_credentials("homeassistant")
+    port_cfg = get_portainer_config()
+    port_creds = get_integration_credentials("portainer")
+    dh_cfg = get_dockerhub_config()
+    dh_creds = get_integration_credentials("dockerhub")
+
+    return {
+        "proxmox_url": px_cfg.get("url", ""),
+        "proxmox_api_user": px_creds.get("api_user", ""),
+        "proxmox_token_id": px_creds.get("token_id", ""),
+        "proxmox_secret_set": bool(px_creds.get("secret") or px_creds.get("api_token")),
+        "proxmox_configured": bool(px_cfg.get("url") and (px_creds.get("secret") or px_creds.get("api_token"))),
+        "proxmox_verify_ssl": px_cfg.get("verify_ssl", False),
+        "pbs_url": pbs_cfg.get("url", ""),
+        "pbs_api_user": pbs_creds.get("api_user", ""),
+        "pbs_token_id": pbs_creds.get("token_id", ""),
+        "pbs_secret_set": bool(pbs_creds.get("secret") or pbs_creds.get("api_token")),
+        "pbs_configured": bool(pbs_cfg.get("url") and (pbs_creds.get("secret") or pbs_creds.get("api_token"))),
+        "pbs_verify_ssl": pbs_cfg.get("verify_ssl", False),
+        "opnsense_url": opn_cfg.get("url", ""),
+        "opnsense_configured": bool(opn_cfg.get("url") and opn_creds.get("api_key")),
+        "opnsense_verify_ssl": opn_cfg.get("verify_ssl", False),
+        "pfsense_url": pf_cfg.get("url", ""),
+        "pfsense_configured": bool(pf_cfg.get("url") and pf_creds.get("api_key")),
+        "pfsense_verify_ssl": pf_cfg.get("verify_ssl", False),
+        "ha_url": ha_cfg.get("url", ""),
+        "ha_configured": bool(ha_cfg.get("url") and ha_creds.get("token")),
+        "portainer_url": port_cfg.get("url", ""),
+        "portainer_key_set": bool(port_creds.get("api_key")),
+        "portainer_verify_ssl": port_cfg.get("verify_ssl", False),
+        "portainer_configured": bool(port_cfg.get("url") and port_creds.get("api_key")),
+        "dockerhub_user": dh_cfg.get("username", ""),
+        "dockerhub_token_set": bool(dh_creds.get("token")),
+        "dockerhub_configured": bool(dh_cfg.get("username") and dh_creds.get("token")),
+    }
+
+
 def _hosts_with_status() -> list[dict]:
     return [{**h, **credential_status(h["slug"])} for h in get_hosts()]
 
@@ -95,6 +148,101 @@ async def admin_page(request: Request) -> HTMLResponse:
     from fastapi.responses import RedirectResponse as _Redirect
 
     return _Redirect("/admin/connections", status_code=302)
+
+
+@router.get("/integrations", response_class=HTMLResponse)
+async def admin_integrations(request: Request) -> HTMLResponse:
+    from .__version__ import APP_VERSION
+
+    return templates.TemplateResponse(
+        "admin_integrations.html",
+        {"request": request, "integ": _integration_status(), "app_version": APP_VERSION},
+    )
+
+
+@router.post("/integrations/portainer/test", response_class=HTMLResponse)
+async def admin_integrations_test_portainer(
+    request: Request,
+    portainer_url: str = Form(""),
+    portainer_api_key: str = Form(""),
+    portainer_verify_ssl: str = Form(""),
+) -> HTMLResponse:
+    """Test Portainer connection — same logic as connections test, returns inline HTML."""
+    url = portainer_url.strip().rstrip("/")
+    key = portainer_api_key.strip()
+    verify_ssl = portainer_verify_ssl == "on"
+    if not url or not key:
+        return HTMLResponse(
+            '<span class="text-amber-400 text-sm">Enter a URL and API token first.</span>'
+        )
+    try:
+        from .portainer_client import PortainerClient
+
+        client = PortainerClient(url=url, api_key=key, verify_ssl=verify_ssl)
+        endpoints = await client.get_endpoints()
+        count = len(endpoints)
+        return HTMLResponse(
+            f'<span class="text-green-400 text-sm">&#10003; Connected — '
+            f'{count} environment{"s" if count != 1 else ""} found. '
+            f'Click Save to apply.</span>'
+        )
+    except Exception as exc:
+        msg = str(exc)
+        if "401" in msg or "403" in msg:
+            hint = "Invalid API token — check you copied it correctly."
+        elif "Name or service not known" in msg or "connect" in msg.lower():
+            hint = "Can't reach that address — check the URL and that Portainer is running."
+        elif "SSL" in msg or "certificate" in msg.lower():
+            hint = "SSL error — try disabling SSL verification."
+        else:
+            hint = msg
+        return HTMLResponse(f'<span class="text-red-400 text-sm">&#10007; {hint}</span>')
+
+
+@router.post("/integrations/portainer", response_class=HTMLResponse)
+async def admin_integrations_save_portainer(
+    request: Request,
+    portainer_url: str = Form(""),
+    portainer_api_key: str = Form(""),
+    portainer_verify_ssl: str = Form(""),
+) -> HTMLResponse:
+    url = portainer_url.strip().rstrip("/")
+    key = portainer_api_key.strip()
+    verify_ssl = portainer_verify_ssl == "on"
+
+    save_portainer_config(url=url, verify_ssl=verify_ssl)
+    if key:
+        save_integration_credentials("portainer", api_key=key)
+
+    await reload_backends()
+
+    return templates.TemplateResponse(
+        "partials/admin_integrations.html",
+        {"request": request, "integ": _integration_status(), "portainer_saved": True},
+    )
+
+
+@router.post("/integrations/dockerhub", response_class=HTMLResponse)
+async def admin_integrations_save_dockerhub(
+    request: Request,
+    dockerhub_username: str = Form(""),
+    dockerhub_token: str = Form(""),
+) -> HTMLResponse:
+    username = dockerhub_username.strip()
+    token = dockerhub_token.strip()
+
+    save_dockerhub_config(username=username)
+    if token:
+        save_integration_credentials("dockerhub", token=token)
+    elif not username:
+        save_integration_credentials("dockerhub", token="")
+
+    await reload_backends()
+
+    return templates.TemplateResponse(
+        "partials/admin_integrations.html",
+        {"request": request, "integ": _integration_status(), "dockerhub_saved": True},
+    )
 
 
 @router.get("/connections", response_class=HTMLResponse)

@@ -27,13 +27,13 @@ def test_admin_hosts_page_contains_hosts(client):
     assert "Custom User Host" in response.text
 
 
-def test_admin_connections_shows_portainer_configured(client, data_dir, config_file):
+def test_admin_integrations_shows_portainer_configured(client, data_dir, config_file):
     from app.config_manager import save_portainer_config
     from app.credentials import save_integration_credentials
 
     save_portainer_config(url="https://portainer.test:9443", verify_ssl=False)
     save_integration_credentials("portainer", api_key="test-api-key")
-    response = client.get("/admin/connections")
+    response = client.get("/admin/integrations")
     assert "portainer.test" in response.text
 
 
