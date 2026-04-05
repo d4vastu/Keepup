@@ -67,13 +67,33 @@ templates = make_templates()
 
 def _ssh_section_ctx(request: Request, **extra) -> dict:
     """Build the context dict for partials/setup_ssh_section.html."""
+    proxmox_pending = request.session.get("setup_proxmox_pending", [])
+    integration_pending = request.session.get("setup_integration_pending", [])
     return {
         "request": request,
         "hosts": get_hosts(),
         "available_keys": get_available_ssh_keys(),
-        "proxmox_pending": request.session.get("setup_proxmox_pending", []),
+        "proxmox_pending": integration_pending + proxmox_pending,
         **extra,
     }
+
+
+def _queue_integration_host(request: Request, integration_key: str, name: str, url: str) -> None:
+    """Queue the integration host itself as a pending SSH host in the wizard."""
+    from urllib.parse import urlparse
+    hostname = urlparse(url).hostname or "" if url else ""
+    pending: list[dict] = request.session.get("setup_integration_pending", [])
+    # Replace any existing entry for this integration
+    pending = [h for h in pending if h.get("integration") != integration_key]
+    if url and hostname:
+        pending.append({
+            "name": name,
+            "ip": hostname,
+            "type": "integration",
+            "node": "",
+            "integration": integration_key,
+        })
+    request.session["setup_integration_pending"] = pending
 
 
 def _timezone_groups() -> list[tuple[str, list[str]]]:
@@ -388,6 +408,7 @@ async def setup_save_proxmox(
         save_integration_credentials(
             "proxmox", api_user=api_user or None, api_token=api_token or None
         )
+    _queue_integration_host(request, "proxmox", "Proxmox VE", url)
     return templates.TemplateResponse(
         "partials/setup_proxmox_section.html",
         {
@@ -506,6 +527,7 @@ async def setup_save_pbs(
         save_integration_credentials(
             "proxmox_backup", api_user=api_user or None, api_token=api_token or None
         )
+    _queue_integration_host(request, "proxmox_backup", "Proxmox Backup Server", url)
     return HTMLResponse(
         '<p class="text-sm text-green-400">&#10003; Proxmox Backup Server saved.</p>'
     )
@@ -567,6 +589,7 @@ async def setup_save_opnsense(
     save_opnsense_config(url=url, verify_ssl=verify_ssl)
     if key and secret:
         save_integration_credentials("opnsense", api_key=key, api_secret=secret)
+    _queue_integration_host(request, "opnsense", "OPNsense", url)
     return HTMLResponse(
         '<p class="text-sm text-green-400">&#10003; OPNsense saved.</p>'
     )
@@ -620,6 +643,7 @@ async def setup_save_pfsense(
     save_pfsense_config(url=url, verify_ssl=verify_ssl)
     if key:
         save_integration_credentials("pfsense", api_key=key)
+    _queue_integration_host(request, "pfsense", "pfSense", url)
     return HTMLResponse('<p class="text-sm text-green-400">&#10003; pfSense saved.</p>')
 
 
@@ -669,6 +693,7 @@ async def setup_save_homeassistant(
     save_homeassistant_config(url=url)
     if token:
         save_integration_credentials("homeassistant", token=token)
+    _queue_integration_host(request, "homeassistant", "Home Assistant", url)
     return HTMLResponse(
         '<p class="text-sm text-green-400">&#10003; Home Assistant saved. '
         '<span class="text-slate-400">Note: Keepup can alert you to updates but cannot install them automatically.</span></p>'
@@ -849,13 +874,15 @@ async def forgot_password_reset(
 async def setup_hosts_page(request: Request) -> HTMLResponse:
     if not admin_exists():
         return RedirectResponse("/setup", status_code=302)
+    proxmox_pending = request.session.get("setup_proxmox_pending", [])
+    integration_pending = request.session.get("setup_integration_pending", [])
     return templates.TemplateResponse(
         "setup_hosts.html",
         {
             "request": request,
             "hosts": get_hosts(),
             "available_keys": get_available_ssh_keys(),
-            "proxmox_pending": request.session.get("setup_proxmox_pending", []),
+            "proxmox_pending": integration_pending + proxmox_pending,
         },
     )
 

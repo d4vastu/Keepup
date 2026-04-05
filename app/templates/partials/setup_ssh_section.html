@@ -22,9 +22,9 @@
           <circle cx="8" cy="8" r="6" stroke="#388bfd" stroke-width="1.2"/>
           <path d="M8 7v4M8 5.5v.5" stroke="#388bfd" stroke-width="1.4" stroke-linecap="round"/>
         </svg>
-        <span class="text-sm font-medium text-blue-300">{{ proxmox_pending|length }} Proxmox host{{ 's' if proxmox_pending|length != 1 }} detected</span>
+        <span class="text-sm font-medium text-blue-300">{{ proxmox_pending|length }} host{{ 's' if proxmox_pending|length != 1 }} detected</span>
       </div>
-      <p class="text-xs text-slate-500">These VMs were found on your Proxmox node. Name is pre-filled — add the IP and SSH credentials to enable OS package monitoring.</p>
+      <p class="text-xs text-slate-500">These hosts were found via your integrations. Name is pre-filled — verify the IP and add SSH credentials to enable OS package monitoring.</p>
     </div>
 
     <div class="space-y-3">
@@ -35,7 +35,7 @@
           <div class="flex items-center gap-2 text-sm font-medium text-slate-200">
             <span class="w-1.5 h-1.5 rounded-full bg-slate-500 flex-shrink-0" id="dot-{{ loop.index }}"></span>
             {{ host.name }}
-            <span class="text-[10px] px-1.5 py-0.5 rounded border border-slate-700 bg-slate-800 text-slate-500 font-mono">{{ host.node }} · {{ host.type }}</span>
+            <span class="text-[10px] px-1.5 py-0.5 rounded border border-slate-700 bg-slate-800 text-slate-500 font-mono">{% if host.node %}{{ host.node }} · {% endif %}{{ host.type }}</span>
           </div>
         </div>
         <!-- card body -->
@@ -51,7 +51,7 @@
             </div>
             <div>
               <label class="block text-xs text-slate-500 mb-1">IP address</label>
-              <input type="text" name="host" placeholder="192.168.x.x"
+              <input type="text" name="host" value="{{ host.ip or '' }}" placeholder="192.168.x.x"
                 class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-slate-200 font-mono focus:outline-none focus:border-blue-500 placeholder:text-slate-600">
             </div>
           </div>
