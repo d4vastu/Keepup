@@ -1,68 +1,76 @@
-{% set needs_action = stacks | selectattr("update_status", "in", ["update_available", "mixed", "unknown"]) | list %}
-{% if needs_action %}
+{% set needs_update = stacks | selectattr("update_status", "in", ["update_available", "mixed"]) | list %}
+{% set total_count = stacks | length %}
+{% set host_count = stacks | groupby("endpoint_name") | list | length %}
+
+{# OOB: update section-header meta text #}
+{% if needs_update %}
+<span id="docker-meta" hx-swap-oob="true">{{ needs_update | length }} of {{ total_count }} need updating</span>
+{% elif stacks %}
+<span id="docker-meta" hx-swap-oob="true">{{ host_count }} host{{ 's' if host_count != 1 }} · {{ total_count }} container{{ 's' if total_count != 1 }}</span>
+{% else %}
+<span id="docker-meta" hx-swap-oob="true"></span>
+{% endif %}
+
+{% if needs_update %}
 <div class="bg-[#161b22] border border-[#21262d] rounded-lg overflow-hidden">
-  <div class="hidden sm:grid sm:grid-cols-[1fr_1fr_160px] gap-3 px-4 py-2 bg-[#0d1117] border-b border-[#21262d]">
+  <div class="hidden sm:grid sm:grid-cols-[1fr_160px_120px] gap-3 px-4 py-2 bg-[#0d1117] border-b border-[#21262d]">
     <span class="text-[11px] font-medium text-slate-600 uppercase tracking-widest">Container</span>
     <span class="text-[11px] font-medium text-slate-600 uppercase tracking-widest">Status</span>
     <span class="text-[11px] font-medium text-slate-600 uppercase tracking-widest text-right">Action</span>
   </div>
-  {% for stack in needs_action %}
-  {% set action_id = stack.update_path | replace('/', '-') | replace(':', '-') %}
-  <div class="border-b border-[#21262d] last:border-0 px-4 py-3 grid grid-cols-1 sm:grid-cols-[1fr_1fr_160px] gap-2 sm:gap-3 items-start sm:items-center hover:bg-white/[0.02] transition-colors">
-    <!-- Stack name + host tag -->
-    <div>
-      <div class="flex items-center gap-2 flex-wrap">
-        <span class="text-[13px] font-medium text-slate-100">{{ stack.name }}</span>
-        <span class="text-[10px] font-medium px-1.5 py-0.5 rounded bg-[#161b22] border border-[#30363d] text-slate-500 font-mono">{{ stack.endpoint_name }}</span>
+
+  {% for endpoint_name, group_stacks in needs_update | groupby("endpoint_name") %}
+  {% set group_list = group_stacks | list %}
+  <div>
+    <div class="host-group-header">
+      <div class="host-group-name">
+        <svg width="10" height="10" viewBox="0 0 16 16" fill="none">
+          <rect x="2" y="4" width="12" height="3" rx="1" stroke="#8b949e" stroke-width="1.3"/>
+          <rect x="2" y="9" width="12" height="3" rx="1" stroke="#8b949e" stroke-width="1.3"/>
+        </svg>
+        {{ endpoint_name }}
+      </div>
+      <span class="host-group-count">{{ group_list | length }} update{{ 's' if group_list | length != 1 }}</span>
+    </div>
+
+    {% for stack in group_list %}
+    {% set action_id = stack.update_path | replace('/', '-') | replace(':', '-') %}
+    <div class="ct-row">
+      <div class="ct-indent">
+        <span class="ct-line"></span>
+        <span class="ct-name">{{ stack.name }}</span>
+      </div>
+      <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[12px] font-medium bg-amber-900/40 text-amber-400 border border-amber-800/50 w-fit">
+        <span class="w-1.5 h-1.5 rounded-full bg-current flex-shrink-0"></span>
+        {% if stack.update_status == "mixed" %}Partial update{% else %}Update available{% endif %}
+      </span>
+      <div style="text-align:right">
+        <div id="stack-{{ action_id }}-action">
+          <button
+            hx-post="/api/docker/stack/{{ stack.update_path }}/update"
+            hx-target="#stack-{{ action_id }}-action"
+            hx-swap="innerHTML"
+            hx-confirm="Pull and redeploy '{{ stack.name }}'?"
+            class="text-[12px] font-medium px-3 py-1 rounded-md border border-[#2ea043] text-green-400 hover:bg-green-900/20 transition-colors">
+            Redeploy
+          </button>
+        </div>
       </div>
     </div>
-    <!-- Status badge -->
-    <div>
-      {% if stack.update_status == "update_available" %}
-      <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[12px] font-medium bg-amber-900/40 text-amber-400 border border-amber-800/50">
-        <span class="w-1.5 h-1.5 rounded-full bg-current flex-shrink-0"></span>
-        Update available
-      </span>
-      {% elif stack.update_status == "mixed" %}
-      <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[12px] font-medium bg-amber-900/40 text-amber-400 border border-amber-800/50">
-        <span class="w-1.5 h-1.5 rounded-full bg-current flex-shrink-0"></span>
-        Partial update
-      </span>
-      {% else %}
-      <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[12px] font-medium bg-slate-800/60 text-slate-500 border border-slate-700/50">
-        <span class="w-1.5 h-1.5 rounded-full bg-current flex-shrink-0"></span>
-        Unknown
-      </span>
-      {% endif %}
-    </div>
-    <!-- Action -->
-    <div class="sm:text-right">
-      {% if stack.update_status in ["update_available", "mixed"] %}
-      <div id="stack-{{ action_id }}-action">
-        <button
-          hx-post="/api/docker/stack/{{ stack.update_path }}/update"
-          hx-target="#stack-{{ action_id }}-action"
-          hx-swap="innerHTML"
-          hx-confirm="Pull and redeploy '{{ stack.name }}'?"
-          class="text-[12px] font-medium px-3 py-1 rounded-md border border-[#2ea043] text-green-400 hover:bg-green-900/20 transition-colors">
-          Redeploy
-        </button>
-      </div>
-      {% else %}
-      <span class="text-[12px] text-slate-600">—</span>
-      {% endif %}
-    </div>
+    {% endfor %}
   </div>
   {% endfor %}
 </div>
+
 {% elif stacks %}
 <div class="bg-[#161b22] border border-[#21262d] rounded-lg px-4 py-6 flex flex-col items-center gap-2 text-center">
   <div class="w-9 h-9 rounded-full bg-[#0f2b17] border border-[#1a4a25] flex items-center justify-center mb-1">
     <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M3 8l3.5 3.5L13 4" stroke="#3fb950" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
   </div>
-  <div class="text-[13px] font-medium text-green-400">All {{ stacks | length }} container{{ 's' if stacks | length != 1 }} up to date</div>
+  <div class="text-[13px] font-medium text-green-400">All {{ total_count }} container{{ 's' if total_count != 1 }} up to date</div>
   <div class="text-[11px] text-slate-600">{{ stacks | map(attribute='name') | join(' · ') }}</div>
 </div>
+
 {% else %}
 <div class="bg-[#161b22] border border-[#21262d] rounded-lg px-4 py-5">
   <p class="text-[12px] text-slate-500">No containers found.</p>
