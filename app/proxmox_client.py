@@ -4,6 +4,7 @@ Proxmox VE API client.
 Used during setup to verify credentials and discover VMs and LXC containers.
 API token format: user@realm!tokenname=uuid-value
 """
+
 import httpx
 
 
@@ -43,13 +44,15 @@ class ProxmoxClient:
                     r = await c.get(f"/api2/json/nodes/{node_name}/qemu")
                     r.raise_for_status()
                     for vm in r.json()["data"]:
-                        resources.append({
-                            "type": "vm",
-                            "node": node_name,
-                            "vmid": vm["vmid"],
-                            "name": vm.get("name", f"vm-{vm['vmid']}"),
-                            "status": vm.get("status", "unknown"),
-                        })
+                        resources.append(
+                            {
+                                "type": "vm",
+                                "node": node_name,
+                                "vmid": vm["vmid"],
+                                "name": vm.get("name", f"vm-{vm['vmid']}"),
+                                "status": vm.get("status", "unknown"),
+                            }
+                        )
                 except Exception:
                     pass
 
@@ -57,13 +60,15 @@ class ProxmoxClient:
                     r = await c.get(f"/api2/json/nodes/{node_name}/lxc")
                     r.raise_for_status()
                     for ct in r.json()["data"]:
-                        resources.append({
-                            "type": "lxc",
-                            "node": node_name,
-                            "vmid": ct["vmid"],
-                            "name": ct.get("name", f"ct-{ct['vmid']}"),
-                            "status": ct.get("status", "unknown"),
-                        })
+                        resources.append(
+                            {
+                                "type": "lxc",
+                                "node": node_name,
+                                "vmid": ct["vmid"],
+                                "name": ct.get("name", f"ct-{ct['vmid']}"),
+                                "status": ct.get("status", "unknown"),
+                            }
+                        )
                 except Exception:
                     pass
 

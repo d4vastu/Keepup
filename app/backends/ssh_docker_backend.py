@@ -4,6 +4,7 @@ SSH-based Docker Compose backend.
 Connects to hosts over SSH and uses the Docker CLI to discover and manage
 Compose stacks. Requires Docker Compose v2 (docker compose subcommand).
 """
+
 import asyncio
 import json
 from urllib.parse import quote, unquote
@@ -64,10 +65,7 @@ class SSHDockerBackend:
     ) -> list[dict]:
         hosts = self._docker_hosts()
         ssh_cfg = get_ssh_config()
-        tasks = [
-            self._stacks_for_host(h, ssh_cfg, dockerhub_creds)
-            for h in hosts
-        ]
+        tasks = [self._stacks_for_host(h, ssh_cfg, dockerhub_creds) for h in hosts]
         results = await asyncio.gather(*tasks, return_exceptions=True)
         all_stacks = []
         for r in results:
@@ -77,9 +75,7 @@ class SSHDockerBackend:
 
     async def update_stack(self, ref: str) -> None:
         slug, project_name = self._parse_ref(ref)
-        host = next(
-            (h for h in self._docker_hosts() if h["slug"] == slug), None
-        )
+        host = next((h for h in self._docker_hosts() if h["slug"] == slug), None)
         if host is None:
             raise ValueError(f"No Docker-enabled host with slug {slug!r}")
 
@@ -115,7 +111,9 @@ class SSHDockerBackend:
         stacks = []
         async with await _connect(host, ssh_cfg, creds) as conn:
             rows = _parse_json_output(
-                (await conn.run("docker compose ls --all --format json", check=False)).stdout
+                (
+                    await conn.run("docker compose ls --all --format json", check=False)
+                ).stdout
             )
             for row in rows:
                 project_name = row.get("Name", "")
@@ -125,21 +123,21 @@ class SSHDockerBackend:
                 if allowed_stacks is not None and project_name not in allowed_stacks:
                     continue
 
-                images = await self._check_images(
-                    conn, project_name, dockerhub_creds
-                )
+                images = await self._check_images(conn, project_name, dockerhub_creds)
                 rollup = _rollup_status(images)
                 ref = self._make_ref(slug, project_name)
-                stacks.append({
-                    "id": ref,
-                    "name": project_name,
-                    "endpoint_id": slug,
-                    "endpoint_name": host["name"],
-                    "update_status": rollup,
-                    "images": images,
-                    "update_path": f"{self.BACKEND_KEY}/{ref}",
-                    "_config_file": config_file,
-                })
+                stacks.append(
+                    {
+                        "id": ref,
+                        "name": project_name,
+                        "endpoint_id": slug,
+                        "endpoint_name": host["name"],
+                        "update_status": rollup,
+                        "images": images,
+                        "update_path": f"{self.BACKEND_KEY}/{ref}",
+                        "_config_file": config_file,
+                    }
+                )
         return stacks
 
     async def _check_images(
@@ -185,9 +183,7 @@ class SSHDockerBackend:
         return {"name": image_name, "status": status}
 
     async def _get_config_file(self, conn, project_name: str) -> str:
-        result = await conn.run(
-            "docker compose ls --all --format json", check=False
-        )
+        result = await conn.run("docker compose ls --all --format json", check=False)
         rows = _parse_json_output(result.stdout)
         match = next((r for r in rows if r.get("Name") == project_name), None)
         return match.get("ConfigFiles", "") if match else ""
@@ -196,6 +192,7 @@ class SSHDockerBackend:
 # ------------------------------------------------------------------
 # Helpers
 # ------------------------------------------------------------------
+
 
 def _parse_json_output(text: str) -> list[dict]:
     """Parse JSON from docker CLI — handles both array and NDJSON output."""

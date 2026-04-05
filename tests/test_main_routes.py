@@ -1,10 +1,12 @@
 """Smoke tests for main dashboard routes."""
+
 from unittest.mock import AsyncMock, patch, MagicMock
 
 
 # ---------------------------------------------------------------------------
 # / (home) and /dashboard
 # ---------------------------------------------------------------------------
+
 
 def test_home_unauthenticated_returns_landing(anon_client):
     """Unauthenticated / shows the public landing page."""
@@ -55,6 +57,7 @@ def test_unauthenticated_protected_route_redirects_to_login(anon_client):
 # /api/host/{slug}/check
 # ---------------------------------------------------------------------------
 
+
 def test_host_check_unknown_slug_returns_error(client):
     response = client.get("/api/host/does-not-exist/check")
     assert response.status_code == 200
@@ -92,10 +95,13 @@ def test_host_check_shows_reboot_required(client):
 # /api/docker/check
 # ---------------------------------------------------------------------------
 
+
 def test_docker_check_without_backends_returns_error(client, monkeypatch):
     import app.backend_loader as bl
+
     # SSH backend present but no hosts with docker_mode → treated as unconfigured
-    from unittest.mock import MagicMock, AsyncMock
+    from unittest.mock import AsyncMock
+
     ssh_b = MagicMock()
     ssh_b.BACKEND_KEY = "ssh"
     ssh_b.get_stacks_with_update_status = AsyncMock(return_value=[])
@@ -109,6 +115,7 @@ def test_docker_check_without_backends_returns_error(client, monkeypatch):
 # /api/jobs/{job_id}
 # ---------------------------------------------------------------------------
 
+
 def test_job_status_unknown_id(client):
     response = client.get("/api/jobs/doesnotexist")
     assert response.status_code == 200
@@ -118,6 +125,7 @@ def test_job_status_unknown_id(client):
 # ---------------------------------------------------------------------------
 # Sign out button
 # ---------------------------------------------------------------------------
+
 
 def test_dashboard_has_sign_out_link(client):
     response = client.get("/dashboard")
@@ -130,8 +138,14 @@ def test_dashboard_has_sign_out_link(client):
 # Version update notice
 # ---------------------------------------------------------------------------
 
+
 def test_dashboard_shows_update_notice_when_newer_version(client):
-    with patch("app.main._get_latest_version", new=AsyncMock(return_value=("99.0.0", "https://github.com/example/releases/tag/v99.0.0"))):
+    with patch(
+        "app.main._get_latest_version",
+        new=AsyncMock(
+            return_value=("99.0.0", "https://github.com/example/releases/tag/v99.0.0")
+        ),
+    ):
         response = client.get("/dashboard")
     assert response.status_code == 200
     assert "99.0.0" in response.text
@@ -139,14 +153,19 @@ def test_dashboard_shows_update_notice_when_newer_version(client):
 
 
 def test_dashboard_no_update_notice_when_up_to_date(client):
-    with patch("app.main._get_latest_version", new=AsyncMock(return_value=("0.0.1", "https://example.com"))):
+    with patch(
+        "app.main._get_latest_version",
+        new=AsyncMock(return_value=("0.0.1", "https://example.com")),
+    ):
         response = client.get("/dashboard")
     assert response.status_code == 200
     assert "available ↑" not in response.text
 
 
 def test_dashboard_no_update_notice_when_version_check_fails(client):
-    with patch("app.main._get_latest_version", new=AsyncMock(return_value=(None, None))):
+    with patch(
+        "app.main._get_latest_version", new=AsyncMock(return_value=(None, None))
+    ):
         response = client.get("/dashboard")
     assert response.status_code == 200
     assert "available ↑" not in response.text

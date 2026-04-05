@@ -30,6 +30,7 @@ Package = dict[str, str]
 
 _KERNEL_NAMES = frozenset({"linux", "linux-lts", "linux-zen", "linux-hardened"})
 
+
 def _is_kernel_package(name: str) -> bool:
     return (
         name in _KERNEL_NAMES
@@ -67,6 +68,7 @@ def get_package_manager(name: str) -> "PackageManager":
 # Base class
 # ---------------------------------------------------------------------------
 
+
 class PackageManager:
     name: str = "unknown"
 
@@ -89,6 +91,7 @@ class PackageManager:
 # ---------------------------------------------------------------------------
 # APT  (Debian / Ubuntu / Raspberry Pi OS)
 # ---------------------------------------------------------------------------
+
 
 class AptPackageManager(PackageManager):
     name = "apt"
@@ -121,7 +124,9 @@ class AptPackageManager(PackageManager):
                 parts = line.split()
                 available = parts[1] if len(parts) > 1 else "?"
                 current = parts[-1].rstrip("]") if len(parts) > 3 else "?"
-                packages.append({"name": name, "current": current, "available": available})
+                packages.append(
+                    {"name": name, "current": current, "available": available}
+                )
             except Exception:
                 continue
 
@@ -131,6 +136,7 @@ class AptPackageManager(PackageManager):
 # ---------------------------------------------------------------------------
 # DNF  (Fedora / RHEL 8+ / Rocky / AlmaLinux)
 # ---------------------------------------------------------------------------
+
 
 class DnfPackageManager(PackageManager):
     name = "dnf"
@@ -157,7 +163,11 @@ class DnfPackageManager(PackageManager):
 
         if len(parts) > 1:
             after_exit = parts[1]
-            reboot_block = after_exit.split("__REBOOT__", 1)[-1].strip() if "__REBOOT__" in after_exit else ""
+            reboot_block = (
+                after_exit.split("__REBOOT__", 1)[-1].strip()
+                if "__REBOOT__" in after_exit
+                else ""
+            )
             # needs-restarting -r returns 1 when reboot needed
             reboot_required = reboot_block.strip().startswith("1")
 
@@ -165,7 +175,11 @@ class DnfPackageManager(PackageManager):
         # name.arch    available_version    repo
         for line in update_block.splitlines():
             line = line.strip()
-            if not line or line.startswith("Last metadata") or line.startswith("Obsoleting"):
+            if (
+                not line
+                or line.startswith("Last metadata")
+                or line.startswith("Obsoleting")
+            ):
                 continue
             cols = line.split()
             if len(cols) < 3:
@@ -174,7 +188,9 @@ class DnfPackageManager(PackageManager):
             available = cols[1]
             # Strip arch suffix (e.g. bash.x86_64 → bash)
             name = name_arch.rsplit(".", 1)[0]
-            packages.append({"name": name, "current": "installed", "available": available})
+            packages.append(
+                {"name": name, "current": "installed", "available": available}
+            )
 
         return packages, reboot_required or _kernel_update_in(packages)
 
@@ -182,6 +198,7 @@ class DnfPackageManager(PackageManager):
 # ---------------------------------------------------------------------------
 # YUM  (CentOS 7 / RHEL 7)
 # ---------------------------------------------------------------------------
+
 
 class YumPackageManager(PackageManager):
     name = "yum"
@@ -204,6 +221,7 @@ class YumPackageManager(PackageManager):
 # ---------------------------------------------------------------------------
 # Zypper  (openSUSE / SLES)
 # ---------------------------------------------------------------------------
+
 
 class ZypperPackageManager(PackageManager):
     name = "zypper"
@@ -242,7 +260,9 @@ class ZypperPackageManager(PackageManager):
             current = cols[3]
             available = cols[4]
             if name and available:
-                packages.append({"name": name, "current": current, "available": available})
+                packages.append(
+                    {"name": name, "current": current, "available": available}
+                )
 
         return packages, reboot_required or _kernel_update_in(packages)
 
@@ -250,6 +270,7 @@ class ZypperPackageManager(PackageManager):
 # ---------------------------------------------------------------------------
 # Pacman  (Arch Linux / Manjaro)
 # ---------------------------------------------------------------------------
+
 
 class PacmanPackageManager(PackageManager):
     name = "pacman"
@@ -282,6 +303,7 @@ class PacmanPackageManager(PackageManager):
 # ---------------------------------------------------------------------------
 # APK  (Alpine Linux)
 # ---------------------------------------------------------------------------
+
 
 class ApkPackageManager(PackageManager):
     name = "apk"
@@ -322,6 +344,7 @@ class ApkPackageManager(PackageManager):
 # Unknown fallback
 # ---------------------------------------------------------------------------
 
+
 class UnknownPackageManager(PackageManager):
     def __init__(self, name: str = "unknown"):
         self.name = name
@@ -341,10 +364,10 @@ class UnknownPackageManager(PackageManager):
 # ---------------------------------------------------------------------------
 
 _REGISTRY: dict[str, PackageManager] = {
-    "apt":    AptPackageManager(),
-    "dnf":    DnfPackageManager(),
-    "yum":    YumPackageManager(),
+    "apt": AptPackageManager(),
+    "dnf": DnfPackageManager(),
+    "yum": YumPackageManager(),
     "zypper": ZypperPackageManager(),
     "pacman": PacmanPackageManager(),
-    "apk":    ApkPackageManager(),
+    "apk": ApkPackageManager(),
 }

@@ -4,6 +4,7 @@ Centralised backend initialisation.
 Both the app startup and admin save routes call reload_backends() so that
 connection changes take effect immediately without a container restart.
 """
+
 from .config_manager import get_dockerhub_config, get_portainer_config
 from .credentials import get_integration_credentials
 
@@ -40,9 +41,15 @@ async def reload_backends() -> list:
     if url and key:
         from .portainer_client import PortainerClient
         from .backends import PortainerBackend
-        backends.append(PortainerBackend(PortainerClient(url=url, api_key=key, verify_ssl=verify_ssl)))
+
+        backends.append(
+            PortainerBackend(
+                PortainerClient(url=url, api_key=key, verify_ssl=verify_ssl)
+            )
+        )
 
     from .backends import SSHDockerBackend
+
     backends.append(SSHDockerBackend())
 
     _backends = backends
@@ -50,6 +57,7 @@ async def reload_backends() -> list:
     # Propagate to modules that cache the list
     from .auto_update_scheduler import set_backends
     from .auto_updates_router import set_backends as set_auto_updates_backends
+
     set_backends(_backends)
     set_auto_updates_backends(_backends)
 

@@ -4,6 +4,7 @@ Tracks which stacks have already triggered a notification so we don't
 spam on every docker check. Clears entries when the stack goes back
 to up-to-date (i.e. after an update is applied).
 """
+
 import json
 import os
 import threading

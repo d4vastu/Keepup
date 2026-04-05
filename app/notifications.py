@@ -1,4 +1,5 @@
 """Notification store — persisted to data dir, drives the bell badge."""
+
 import json
 import os
 import threading
@@ -30,19 +31,23 @@ def notify(title: str, message: str, level: str = "error") -> None:
     """Add a notification. Also fires Pushover if configured."""
     with _lock:
         entries = _load()
-        entries.insert(0, {
-            "id": uuid.uuid4().hex[:8],
-            "title": title,
-            "message": message,
-            "level": level,
-            "created_at": datetime.now(timezone.utc).isoformat(),
-            "read": False,
-        })
+        entries.insert(
+            0,
+            {
+                "id": uuid.uuid4().hex[:8],
+                "title": title,
+                "message": message,
+                "level": level,
+                "created_at": datetime.now(timezone.utc).isoformat(),
+                "read": False,
+            },
+        )
         _save(entries[:_MAX])
     # Fire-and-forget Pushover push
     try:
         import asyncio
         from .pushover import send_pushover
+
         asyncio.ensure_future(send_pushover(title, message))
     except Exception:
         pass

@@ -39,6 +39,7 @@ def _validate_cron(expr: str) -> str | None:
 # Page
 # ---------------------------------------------------------------------------
 
+
 @router.get("", response_class=HTMLResponse)
 async def auto_updates_page(request: Request) -> HTMLResponse:
     hosts = get_hosts()
@@ -51,6 +52,7 @@ async def auto_updates_page(request: Request) -> HTMLResponse:
 # ---------------------------------------------------------------------------
 # OS / host settings
 # ---------------------------------------------------------------------------
+
 
 @router.post("/hosts/{slug}", response_class=HTMLResponse)
 async def save_host_auto_update(
@@ -88,6 +90,7 @@ async def save_host_auto_update(
 # ---------------------------------------------------------------------------
 # Docker stack settings
 # ---------------------------------------------------------------------------
+
 
 @router.get("/stacks", response_class=HTMLResponse)
 async def auto_update_stacks(request: Request) -> HTMLResponse:

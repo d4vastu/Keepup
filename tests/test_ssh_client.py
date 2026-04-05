@@ -1,4 +1,5 @@
 """Tests for ssh_client.py."""
+
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -12,12 +13,19 @@ from app.ssh_client import (
 )
 
 _APT_PM = AptPackageManager()
-_DETECT_PM_PATCH = patch("app.ssh_client._detect_pm", new=AsyncMock(return_value=_APT_PM))
+_DETECT_PM_PATCH = patch(
+    "app.ssh_client._detect_pm", new=AsyncMock(return_value=_APT_PM)
+)
 
 HOST = {"name": "Test", "host": "10.0.0.1"}
 HOST_KEY = HOST  # alias used by key-auth tests
-SSH_CFG = {"default_user": "root", "default_port": 22, "default_key": "/app/keys/id_ed25519",
-           "connect_timeout": 15, "command_timeout": 60}
+SSH_CFG = {
+    "default_user": "root",
+    "default_port": 22,
+    "default_key": "/app/keys/id_ed25519",
+    "connect_timeout": 15,
+    "command_timeout": 60,
+}
 CREDS_PW = {"ssh_password": "secret"}
 CREDS_EMPTY = {}
 
@@ -35,6 +43,7 @@ def _make_conn(stdout: str = "", returncode: int = 0, stderr: str = "") -> Magic
 # ---------------------------------------------------------------------------
 # test_connection
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_connection_success():
@@ -55,7 +64,9 @@ async def test_connection_unexpected_output():
 
 @pytest.mark.asyncio
 async def test_connection_failure():
-    with patch("app.ssh_client.asyncssh.connect", side_effect=Exception("Connection refused")):
+    with patch(
+        "app.ssh_client.asyncssh.connect", side_effect=Exception("Connection refused")
+    ):
         result = await verify_connection(HOST_KEY, SSH_CFG)
     assert result["ok"] is False
     assert "Connection refused" in result["message"]
@@ -64,7 +75,9 @@ async def test_connection_failure():
 @pytest.mark.asyncio
 async def test_connection_uses_password_when_set():
     conn = _make_conn(stdout="ok\n")
-    with patch("app.ssh_client.asyncssh.connect", new=AsyncMock(return_value=conn)) as mock_connect:
+    with patch(
+        "app.ssh_client.asyncssh.connect", new=AsyncMock(return_value=conn)
+    ) as mock_connect:
         await verify_connection(HOST, SSH_CFG, creds=CREDS_PW)
     call_kwargs = mock_connect.call_args.kwargs
     assert call_kwargs.get("password") == "secret"
@@ -75,7 +88,9 @@ async def test_connection_uses_password_when_set():
 @pytest.mark.asyncio
 async def test_connection_uses_key_when_no_password():
     conn = _make_conn(stdout="ok\n")
-    with patch("app.ssh_client.asyncssh.connect", new=AsyncMock(return_value=conn)) as mock_connect:
+    with patch(
+        "app.ssh_client.asyncssh.connect", new=AsyncMock(return_value=conn)
+    ) as mock_connect:
         await verify_connection(HOST_KEY, SSH_CFG)
     call_kwargs = mock_connect.call_args.kwargs
     assert "client_keys" in call_kwargs
@@ -86,11 +101,15 @@ async def test_connection_uses_key_when_no_password():
 # check_host_updates
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_check_host_updates_no_packages():
     output = "__REBOOT__\nno\n"
     conn = _make_conn(stdout=output)
-    with patch("app.ssh_client.asyncssh.connect", new=AsyncMock(return_value=conn)), _DETECT_PM_PATCH:
+    with (
+        patch("app.ssh_client.asyncssh.connect", new=AsyncMock(return_value=conn)),
+        _DETECT_PM_PATCH,
+    ):
         result = await check_host_updates(HOST_KEY, SSH_CFG)
     assert result["packages"] == []
     assert result["reboot_required"] is False
@@ -104,7 +123,10 @@ async def test_check_host_updates_with_packages():
         "__REBOOT__\nno\n"
     )
     conn = _make_conn(stdout=output)
-    with patch("app.ssh_client.asyncssh.connect", new=AsyncMock(return_value=conn)), _DETECT_PM_PATCH:
+    with (
+        patch("app.ssh_client.asyncssh.connect", new=AsyncMock(return_value=conn)),
+        _DETECT_PM_PATCH,
+    ):
         result = await check_host_updates(HOST_KEY, SSH_CFG)
     assert len(result["packages"]) == 2
     assert result["packages"][0]["name"] == "nginx"
@@ -116,7 +138,10 @@ async def test_check_host_updates_with_packages():
 async def test_check_host_updates_reboot_required():
     output = "__REBOOT__\nyes\n"
     conn = _make_conn(stdout=output)
-    with patch("app.ssh_client.asyncssh.connect", new=AsyncMock(return_value=conn)), _DETECT_PM_PATCH:
+    with (
+        patch("app.ssh_client.asyncssh.connect", new=AsyncMock(return_value=conn)),
+        _DETECT_PM_PATCH,
+    ):
         result = await check_host_updates(HOST_KEY, SSH_CFG)
     assert result["reboot_required"] is True
 
@@ -124,8 +149,13 @@ async def test_check_host_updates_reboot_required():
 @pytest.mark.asyncio
 async def test_check_host_updates_no_reboot_marker():
     # Output without __REBOOT__ sentinel still works
-    conn = _make_conn(stdout="nginx/stable 1.26.0-1 amd64 [upgradable from: 1.24.0-1]\n")
-    with patch("app.ssh_client.asyncssh.connect", new=AsyncMock(return_value=conn)), _DETECT_PM_PATCH:
+    conn = _make_conn(
+        stdout="nginx/stable 1.26.0-1 amd64 [upgradable from: 1.24.0-1]\n"
+    )
+    with (
+        patch("app.ssh_client.asyncssh.connect", new=AsyncMock(return_value=conn)),
+        _DETECT_PM_PATCH,
+    ):
         result = await check_host_updates(HOST_KEY, SSH_CFG)
     assert result["reboot_required"] is False
     assert len(result["packages"]) == 1
@@ -136,7 +166,10 @@ async def test_check_host_updates_skips_non_package_lines():
     # Lines without [upgradable from: hit the continue branch
     output = "Listing... Done\nnginx/stable 1.26.0-1 amd64 [upgradable from: 1.24.0-1]\n__REBOOT__\nno\n"
     conn = _make_conn(stdout=output)
-    with patch("app.ssh_client.asyncssh.connect", new=AsyncMock(return_value=conn)), _DETECT_PM_PATCH:
+    with (
+        patch("app.ssh_client.asyncssh.connect", new=AsyncMock(return_value=conn)),
+        _DETECT_PM_PATCH,
+    ):
         result = await check_host_updates(HOST_KEY, SSH_CFG)
     assert len(result["packages"]) == 1  # Only the upgradable line counted
 
@@ -144,6 +177,7 @@ async def test_check_host_updates_skips_non_package_lines():
 # ---------------------------------------------------------------------------
 # reboot_host
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_reboot_host_returns_message():
@@ -158,11 +192,15 @@ async def test_reboot_host_returns_message():
 # run_host_update_buffered
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_run_host_update_returns_lines():
     output = "Reading package lists...\nUpgrading curl...\n"
     conn = _make_conn(stdout=output)
-    with patch("app.ssh_client.asyncssh.connect", new=AsyncMock(return_value=conn)), _DETECT_PM_PATCH:
+    with (
+        patch("app.ssh_client.asyncssh.connect", new=AsyncMock(return_value=conn)),
+        _DETECT_PM_PATCH,
+    ):
         lines = await run_host_update_buffered(HOST_KEY, SSH_CFG)
     assert "Reading package lists..." in lines
     assert "Upgrading curl..." in lines
@@ -170,8 +208,13 @@ async def test_run_host_update_returns_lines():
 
 @pytest.mark.asyncio
 async def test_run_host_update_includes_stderr_on_error():
-    conn = _make_conn(stdout="some output\n", returncode=1, stderr="E: Could not lock\n")
-    with patch("app.ssh_client.asyncssh.connect", new=AsyncMock(return_value=conn)), _DETECT_PM_PATCH:
+    conn = _make_conn(
+        stdout="some output\n", returncode=1, stderr="E: Could not lock\n"
+    )
+    with (
+        patch("app.ssh_client.asyncssh.connect", new=AsyncMock(return_value=conn)),
+        _DETECT_PM_PATCH,
+    ):
         lines = await run_host_update_buffered(HOST_KEY, SSH_CFG)
     assert "E: Could not lock" in lines
 
@@ -179,8 +222,12 @@ async def test_run_host_update_includes_stderr_on_error():
 @pytest.mark.asyncio
 async def test_run_host_update_respects_timeout():
     import asyncio
+
     conn = _make_conn()
     conn.run = AsyncMock(side_effect=asyncio.TimeoutError())
-    with patch("app.ssh_client.asyncssh.connect", new=AsyncMock(return_value=conn)), _DETECT_PM_PATCH:
+    with (
+        patch("app.ssh_client.asyncssh.connect", new=AsyncMock(return_value=conn)),
+        _DETECT_PM_PATCH,
+    ):
         with pytest.raises(asyncio.TimeoutError):
             await run_host_update_buffered(HOST_KEY, {"command_timeout": 1})

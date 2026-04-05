@@ -9,6 +9,7 @@ Admin account stored in the encrypted credential store under __admin__:
     "backup_key_hash": str,             # sha256 hex of the backup key
   }
 """
+
 import hashlib
 import os
 import secrets
@@ -17,7 +18,11 @@ from pathlib import Path
 import bcrypt as _bcrypt
 import pyotp
 
-from .credentials import delete_integration_credentials, get_integration_credentials, save_integration_credentials
+from .credentials import (
+    delete_integration_credentials,
+    get_integration_credentials,
+    save_integration_credentials,
+)
 
 
 def _hash_password(password: str) -> str:
@@ -30,12 +35,14 @@ def _verify_password(password: str, hashed: str) -> bool:
     except Exception:
         return False
 
+
 _DATA_DIR = Path(os.getenv("DATA_PATH", "/app/data"))
 _SESSION_SECRET_FILE = _DATA_DIR / ".session_secret"
 
 # ---------------------------------------------------------------------------
 # Session secret
 # ---------------------------------------------------------------------------
+
 
 def get_session_secret() -> str:
     _DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -49,6 +56,7 @@ def get_session_secret() -> str:
 # Account existence
 # ---------------------------------------------------------------------------
 
+
 def admin_exists() -> bool:
     return bool(get_integration_credentials("admin").get("password_hash"))
 
@@ -61,14 +69,13 @@ def mfa_enrolled() -> bool:
 # Setup
 # ---------------------------------------------------------------------------
 
+
 def new_totp_secret() -> str:
     return pyotp.random_base32()
 
 
 def get_totp_uri(secret: str) -> str:
-    return pyotp.TOTP(secret).provisioning_uri(
-        name="admin", issuer_name="Keepup"
-    )
+    return pyotp.TOTP(secret).provisioning_uri(name="admin", issuer_name="Keepup")
 
 
 def _generate_backup_key() -> str:
@@ -122,6 +129,7 @@ def delete_admin() -> None:
 # Login verification
 # ---------------------------------------------------------------------------
 
+
 def verify_password(password: str) -> bool:
     h = get_integration_credentials("admin").get("password_hash", "")
     return bool(h) and _verify_password(password, h)
@@ -138,6 +146,7 @@ def verify_totp(code: str) -> bool:
 # Backup key
 # ---------------------------------------------------------------------------
 
+
 def verify_backup_key(key: str) -> bool:
     stored = get_integration_credentials("admin").get("backup_key_hash", "")
     return bool(stored) and _hash_backup_key(key) == stored
@@ -146,6 +155,7 @@ def verify_backup_key(key: str) -> bool:
 # ---------------------------------------------------------------------------
 # Account mutations (all require prior auth)
 # ---------------------------------------------------------------------------
+
 
 def change_password(new_password: str) -> None:
     save_integration_credentials("admin", password_hash=_hash_password(new_password))

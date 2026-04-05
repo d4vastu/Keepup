@@ -35,16 +35,19 @@ def append_log(
     """Prepend a new auto-update result entry. type is 'os' or 'docker'."""
     with _lock:
         entries = _load()
-        entries.insert(0, {
-            "id": uuid.uuid4().hex[:8],
-            "type": type,
-            "target": target,
-            "target_name": target_name,
-            "ran_at": datetime.now(timezone.utc).isoformat(),
-            "status": status,
-            "lines": lines[-50:],
-            "read": False,
-        })
+        entries.insert(
+            0,
+            {
+                "id": uuid.uuid4().hex[:8],
+                "type": type,
+                "target": target,
+                "target_name": target_name,
+                "ran_at": datetime.now(timezone.utc).isoformat(),
+                "status": status,
+                "lines": lines[-50:],
+                "read": False,
+            },
+        )
         _save(entries[:_MAX_ENTRIES])
 
 

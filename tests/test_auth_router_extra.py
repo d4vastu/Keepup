@@ -1,4 +1,5 @@
 """Additional auth router tests to cover gaps."""
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -9,17 +10,20 @@ def auth_client(config_file, data_dir, monkeypatch):
     monkeypatch.setenv("PORTAINER_URL", "")
     monkeypatch.setenv("PORTAINER_API_KEY", "")
     from app.main import app
+
     return TestClient(app, raise_server_exceptions=True)
 
 
 def _create_admin(username="testuser", password="password123"):
     from app.auth import create_admin
+
     return create_admin(username=username, password=password, totp_secret=None)
 
 
 # ---------------------------------------------------------------------------
 # POST /logout
 # ---------------------------------------------------------------------------
+
 
 def test_logout_redirects_to_login(auth_client, data_dir):
     _create_admin()
@@ -34,6 +38,7 @@ def test_logout_redirects_to_login(auth_client, data_dir):
 # GET /setup/recovery-code
 # ---------------------------------------------------------------------------
 
+
 def test_setup_recovery_code_no_session_redirects(auth_client):
     response = auth_client.get("/setup/recovery-code", follow_redirects=False)
     assert response.status_code == 302
@@ -42,11 +47,15 @@ def test_setup_recovery_code_no_session_redirects(auth_client):
 
 def test_setup_recovery_code_after_account_shows_key(auth_client):
     """After account creation, recovery code page shows the key."""
-    auth_client.post("/setup/account", data={
-        "username": "testuser",
-        "password": "password123",
-        "password_confirm": "password123",
-    }, follow_redirects=False)
+    auth_client.post(
+        "/setup/account",
+        data={
+            "username": "testuser",
+            "password": "password123",
+            "password_confirm": "password123",
+        },
+        follow_redirects=False,
+    )
     response = auth_client.get("/setup/recovery-code")
     assert response.status_code == 200
     assert "recovery" in response.text.lower() or "key" in response.text.lower()
@@ -56,12 +65,17 @@ def test_setup_recovery_code_after_account_shows_key(auth_client):
 # POST /setup/recovery-code/confirm
 # ---------------------------------------------------------------------------
 
+
 def test_setup_recovery_code_confirm_redirects(auth_client):
-    auth_client.post("/setup/account", data={
-        "username": "testuser",
-        "password": "password123",
-        "password_confirm": "password123",
-    }, follow_redirects=False)
+    auth_client.post(
+        "/setup/account",
+        data={
+            "username": "testuser",
+            "password": "password123",
+            "password_confirm": "password123",
+        },
+        follow_redirects=False,
+    )
     response = auth_client.post("/setup/recovery-code/confirm", follow_redirects=False)
     assert response.status_code == 303
 
@@ -70,13 +84,18 @@ def test_setup_recovery_code_confirm_redirects(auth_client):
 # GET /setup page when admin exists
 # ---------------------------------------------------------------------------
 
+
 def test_setup_submit_when_admin_exists_redirects(auth_client, data_dir):
     _create_admin()
-    response = auth_client.post("/setup", data={
-        "username": "another",
-        "password": "password123",
-        "password_confirm": "password123",
-    }, follow_redirects=False)
+    response = auth_client.post(
+        "/setup",
+        data={
+            "username": "another",
+            "password": "password123",
+            "password_confirm": "password123",
+        },
+        follow_redirects=False,
+    )
     assert response.status_code == 302
 
 
@@ -84,35 +103,50 @@ def test_setup_submit_when_admin_exists_redirects(auth_client, data_dir):
 # POST /forgot-password/reset
 # ---------------------------------------------------------------------------
 
+
 def test_forgot_password_reset_success(auth_client, data_dir):
     backup_key = _create_admin()
     # Submit backup key to get recovery session
     auth_client.post("/forgot-password", data={"backup_key": backup_key})
     # Now reset password
-    response = auth_client.post("/forgot-password/reset", data={
-        "new_password": "newpassword123",
-        "new_password_confirm": "newpassword123",
-    })
+    response = auth_client.post(
+        "/forgot-password/reset",
+        data={
+            "new_password": "newpassword123",
+            "new_password_confirm": "newpassword123",
+        },
+    )
     assert response.status_code == 200
-    assert "done" in response.text.lower() or "success" in response.text.lower() or "password" in response.text.lower()
+    assert (
+        "done" in response.text.lower()
+        or "success" in response.text.lower()
+        or "password" in response.text.lower()
+    )
 
 
 def test_forgot_password_reset_without_session_redirects(auth_client, data_dir):
     _create_admin()
-    response = auth_client.post("/forgot-password/reset", data={
-        "new_password": "newpassword123",
-        "new_password_confirm": "newpassword123",
-    }, follow_redirects=False)
+    response = auth_client.post(
+        "/forgot-password/reset",
+        data={
+            "new_password": "newpassword123",
+            "new_password_confirm": "newpassword123",
+        },
+        follow_redirects=False,
+    )
     assert response.status_code == 302
 
 
 def test_forgot_password_reset_short_password_error(auth_client, data_dir):
     backup_key = _create_admin()
     auth_client.post("/forgot-password", data={"backup_key": backup_key})
-    response = auth_client.post("/forgot-password/reset", data={
-        "new_password": "short",
-        "new_password_confirm": "short",
-    })
+    response = auth_client.post(
+        "/forgot-password/reset",
+        data={
+            "new_password": "short",
+            "new_password_confirm": "short",
+        },
+    )
     assert response.status_code == 200
     assert "8 characters" in response.text.lower() or "error" in response.text.lower()
 
@@ -120,10 +154,13 @@ def test_forgot_password_reset_short_password_error(auth_client, data_dir):
 def test_forgot_password_reset_mismatch_error(auth_client, data_dir):
     backup_key = _create_admin()
     auth_client.post("/forgot-password", data={"backup_key": backup_key})
-    response = auth_client.post("/forgot-password/reset", data={
-        "new_password": "password123",
-        "new_password_confirm": "different123",
-    })
+    response = auth_client.post(
+        "/forgot-password/reset",
+        data={
+            "new_password": "password123",
+            "new_password_confirm": "different123",
+        },
+    )
     assert response.status_code == 200
     assert "match" in response.text.lower() or "error" in response.text.lower()
 
@@ -131,6 +168,7 @@ def test_forgot_password_reset_mismatch_error(auth_client, data_dir):
 # ---------------------------------------------------------------------------
 # GET /forgot-password
 # ---------------------------------------------------------------------------
+
 
 def test_forgot_password_page_returns_200(auth_client):
     response = auth_client.get("/forgot-password")
@@ -141,19 +179,25 @@ def test_forgot_password_page_returns_200(auth_client):
 # Login with remember_me
 # ---------------------------------------------------------------------------
 
+
 def test_login_with_remember_me(auth_client, data_dir):
     _create_admin()
-    response = auth_client.post("/login", data={
-        "username": "testuser",
-        "password": "password123",
-        "remember_me": "on",
-    }, follow_redirects=False)
+    response = auth_client.post(
+        "/login",
+        data={
+            "username": "testuser",
+            "password": "password123",
+            "remember_me": "on",
+        },
+        follow_redirects=False,
+    )
     assert response.status_code == 303
 
 
 # ---------------------------------------------------------------------------
 # Login with already-authenticated session
 # ---------------------------------------------------------------------------
+
 
 def test_login_page_already_authenticated_redirects(auth_client, data_dir):
     _create_admin()
@@ -169,6 +213,7 @@ def test_login_page_already_authenticated_redirects(auth_client, data_dir):
 # GET /setup/hosts
 # ---------------------------------------------------------------------------
 
+
 def test_setup_hosts_page_returns_200(auth_client, data_dir):
     _create_admin()
     response = auth_client.get("/setup/hosts")
@@ -179,21 +224,29 @@ def test_setup_hosts_page_returns_200(auth_client, data_dir):
 # Login warnings when 2-3 attempts remain
 # ---------------------------------------------------------------------------
 
+
 def test_login_warns_when_few_attempts_remain(auth_client, data_dir):
     from app.auth_router import _ATTEMPTS
+
     _ATTEMPTS.clear()
     _create_admin()
     # Make 3 failed attempts
     for _ in range(3):
-        auth_client.post("/login", data={
+        auth_client.post(
+            "/login",
+            data={
+                "username": "testuser",
+                "password": "wrongpass",
+            },
+        )
+    # 4th should show "2 attempts remaining"
+    response = auth_client.post(
+        "/login",
+        data={
             "username": "testuser",
             "password": "wrongpass",
-        })
-    # 4th should show "2 attempts remaining"
-    response = auth_client.post("/login", data={
-        "username": "testuser",
-        "password": "wrongpass",
-    })
+        },
+    )
     assert response.status_code == 200
     # Should warn about remaining attempts
     assert "attempt" in response.text.lower() or "incorrect" in response.text.lower()

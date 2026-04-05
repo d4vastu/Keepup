@@ -1,4 +1,5 @@
 """Tests for ProxmoxClient — connection and discovery logic."""
+
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 import httpx
@@ -8,7 +9,12 @@ import httpx
 def mock_client():
     """Return a ProxmoxClient with httpx calls mocked."""
     from app.proxmox_client import ProxmoxClient
-    return ProxmoxClient(url="https://192.168.1.10:8006", api_token="user@pam!token=abc", verify_ssl=False)
+
+    return ProxmoxClient(
+        url="https://192.168.1.10:8006",
+        api_token="user@pam!token=abc",
+        verify_ssl=False,
+    )
 
 
 def _make_response(data, status_code=200):
@@ -119,11 +125,11 @@ async def test_discover_resources_multiple_nodes(mock_client):
         elif call_count == 2:
             return _make_response(vms_node1)
         elif call_count == 3:
-            return _make_response([])   # no LXC on node1
+            return _make_response([])  # no LXC on node1
         elif call_count == 4:
             return _make_response(vms_node2)
         else:
-            return _make_response([])   # no LXC on node2
+            return _make_response([])  # no LXC on node2
 
     with patch("httpx.AsyncClient.get", new_callable=AsyncMock, side_effect=fake_get):
         result = await mock_client.discover_resources()

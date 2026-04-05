@@ -1,4 +1,5 @@
 """Shared Jinja2 templates factory with custom filters registered."""
+
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -12,6 +13,7 @@ def _as_local(dt_str: str) -> str:
     try:
         from zoneinfo import ZoneInfo
         from .config_manager import get_timezone
+
         tz_name = get_timezone()
         dt = datetime.fromisoformat(dt_str)
         if dt.tzinfo is None:

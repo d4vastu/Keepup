@@ -270,10 +270,17 @@
             <input type="url" id="pbs-url" name="pbs_url" value="{{ pbs_url or '' }}"
               placeholder="https://192.168.1.11:8007" class="field-input">
           </div>
-          <div class="field">
-            <div class="field-label">API token</div>
-            <input type="password" id="pbs-token" name="pbs_api_token" placeholder="user@pbs!tokenname=uuid" class="field-input">
-            <div class="field-hint">PBS: Configuration → Access Control → API Tokens</div>
+          <div class="field-row">
+            <div class="field">
+              <div class="field-label">API user</div>
+              <input type="text" id="pbs-user" name="pbs_api_user" placeholder="root@pbs" class="field-input">
+              <div class="field-hint">Configuration → Access Control → Users</div>
+            </div>
+            <div class="field">
+              <div class="field-label">API token</div>
+              <input type="password" id="pbs-token" name="pbs_api_token" placeholder="tokenname=uuid" class="field-input">
+              <div class="field-hint">Configuration → Access Control → API Tokens</div>
+            </div>
           </div>
           <div class="ssl-row">
             <input type="checkbox" id="pbs-ssl" name="pbs_verify_ssl" value="on">
@@ -283,11 +290,11 @@
           <div class="btn-row">
             <button class="btn-test"
               hx-post="/setup/connect/pbs/test"
-              hx-include="#pbs-url,#pbs-token,#pbs-ssl"
+              hx-include="#pbs-url,#pbs-user,#pbs-token,#pbs-ssl"
               hx-target="#pbs-test-result">Test connection</button>
             <button class="btn-save"
               hx-post="/setup/connect/pbs/save"
-              hx-include="#pbs-url,#pbs-token,#pbs-ssl"
+              hx-include="#pbs-url,#pbs-user,#pbs-token,#pbs-ssl"
               hx-target="#pbs-result">Save</button>
           </div>
         </div>

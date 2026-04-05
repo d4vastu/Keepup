@@ -1,4 +1,5 @@
 """Tests for registry_client.py."""
+
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -15,6 +16,7 @@ from app.registry_client import (
 # ---------------------------------------------------------------------------
 # parse_image_ref
 # ---------------------------------------------------------------------------
+
 
 def test_parse_bare_image():
     registry, repo, tag = parse_image_ref("nginx")
@@ -67,6 +69,7 @@ def test_parse_image_no_tag_defaults_to_latest():
 # extract_local_digest
 # ---------------------------------------------------------------------------
 
+
 def test_extract_local_digest_found():
     digests = ["linuxserver/sonarr@sha256:abc123def456"]
     result = extract_local_digest(digests, "linuxserver/sonarr")
@@ -93,6 +96,7 @@ def test_extract_local_digest_no_sha():
 # ---------------------------------------------------------------------------
 # _get_bearer_token_from_challenge
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_bearer_token_from_challenge_success():
@@ -137,7 +141,9 @@ async def test_bearer_token_from_challenge_no_realm():
 @pytest.mark.asyncio
 async def test_bearer_token_from_challenge_exception():
     www_auth = 'Bearer realm="https://ghcr.io/token",service="ghcr.io"'
-    with patch("app.registry_client.httpx.AsyncClient", side_effect=Exception("network")):
+    with patch(
+        "app.registry_client.httpx.AsyncClient", side_effect=Exception("network")
+    ):
         token = await _get_bearer_token_from_challenge(www_auth)
     assert token is None
 
@@ -145,6 +151,7 @@ async def test_bearer_token_from_challenge_exception():
 # ---------------------------------------------------------------------------
 # get_remote_digest
 # ---------------------------------------------------------------------------
+
 
 def _make_mock_client(head_responses, get_response=None):
     """Build an AsyncClient mock with a sequence of head() responses."""
@@ -276,7 +283,9 @@ async def test_get_remote_digest_non_200_non_401_returns_none():
 
 @pytest.mark.asyncio
 async def test_get_remote_digest_exception_returns_none():
-    with patch("app.registry_client.httpx.AsyncClient", side_effect=Exception("network error")):
+    with patch(
+        "app.registry_client.httpx.AsyncClient", side_effect=Exception("network error")
+    ):
         digest = await get_remote_digest("nginx:latest")
     assert digest is None
 
@@ -284,6 +293,7 @@ async def test_get_remote_digest_exception_returns_none():
 # ---------------------------------------------------------------------------
 # check_image_update
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_check_image_update_no_local_digest():
@@ -293,20 +303,28 @@ async def test_check_image_update_no_local_digest():
 
 @pytest.mark.asyncio
 async def test_check_image_update_remote_unavailable():
-    with patch("app.registry_client.get_remote_digest", new=AsyncMock(return_value=None)):
+    with patch(
+        "app.registry_client.get_remote_digest", new=AsyncMock(return_value=None)
+    ):
         result = await check_image_update("nginx:latest", local_digest="sha256:abc")
     assert result == "unknown"
 
 
 @pytest.mark.asyncio
 async def test_check_image_update_up_to_date():
-    with patch("app.registry_client.get_remote_digest", new=AsyncMock(return_value="sha256:abc")):
+    with patch(
+        "app.registry_client.get_remote_digest",
+        new=AsyncMock(return_value="sha256:abc"),
+    ):
         result = await check_image_update("nginx:latest", local_digest="sha256:abc")
     assert result == "up_to_date"
 
 
 @pytest.mark.asyncio
 async def test_check_image_update_available():
-    with patch("app.registry_client.get_remote_digest", new=AsyncMock(return_value="sha256:new")):
+    with patch(
+        "app.registry_client.get_remote_digest",
+        new=AsyncMock(return_value="sha256:new"),
+    ):
         result = await check_image_update("nginx:latest", local_digest="sha256:old")
     assert result == "update_available"

@@ -20,7 +20,12 @@ from .auto_updates_router import router as auto_updates_router
 from .backend_loader import get_backends, get_dockerhub_creds, reload_backends
 from .config_manager import get_hosts, get_ssh_config
 from .credentials import get_credentials, save_sudo_password
-from .ssh_client import _needs_sudo, check_host_updates, reboot_host, run_host_update_buffered
+from .ssh_client import (
+    _needs_sudo,
+    check_host_updates,
+    reboot_host,
+    run_host_update_buffered,
+)
 from .__version__ import APP_VERSION
 from .templates_env import make_templates
 
@@ -37,6 +42,7 @@ async def _fetch_latest_version() -> tuple[str | None, str | None]:
     """Return (latest_tag, release_url) or (None, None) on failure."""
     try:
         import httpx
+
         async with httpx.AsyncClient(timeout=5) as c:
             resp = await c.get(
                 f"https://api.github.com/repos/{_GITHUB_REPO}/releases/latest",
@@ -66,8 +72,10 @@ def _newer_version(latest: str | None) -> bool:
     if not latest:
         return False
     try:
+
         def _parts(v: str) -> tuple:
             return tuple(int(x) for x in v.split("."))
+
         return _parts(latest) > _parts(APP_VERSION)
     except Exception:
         return False
@@ -77,8 +85,14 @@ def _newer_version(latest: str | None) -> bool:
 # Auth middleware
 # ---------------------------------------------------------------------------
 
-_PUBLIC_PATHS = {"/", "/login", "/logout", "/setup", "/forgot-password",
-                 "/forgot-password/reset"}
+_PUBLIC_PATHS = {
+    "/",
+    "/login",
+    "/logout",
+    "/setup",
+    "/forgot-password",
+    "/forgot-password/reset",
+}
 
 
 class AuthMiddleware(BaseHTTPMiddleware):
@@ -100,16 +114,20 @@ class AuthMiddleware(BaseHTTPMiddleware):
 setup_log_buffer()
 app = FastAPI(title="Keepup")
 app.add_middleware(AuthMiddleware)
-app.add_middleware(SessionMiddleware,
-                   secret_key=get_session_secret(),
-                   session_cookie="ud_session",
-                   max_age=30 * 24 * 3600,   # 30 days max; login sets shorter if no remember_me
-                   https_only=False,
-                   same_site="lax")
+app.add_middleware(
+    SessionMiddleware,
+    secret_key=get_session_secret(),
+    session_cookie="ud_session",
+    max_age=30 * 24 * 3600,  # 30 days max; login sets shorter if no remember_me
+    https_only=False,
+    same_site="lax",
+)
 app.include_router(auth_router)
 app.include_router(admin_router)
 app.include_router(auto_updates_router)
-app.mount("/static", StaticFiles(directory=Path(__file__).parent / "static"), name="static")
+app.mount(
+    "/static", StaticFiles(directory=Path(__file__).parent / "static"), name="static"
+)
 templates = make_templates()
 
 _DATA_DIR = Path(os.getenv("DATA_PATH", "/app/data"))
@@ -123,6 +141,7 @@ def _check_version_notification() -> None:
         if stored != APP_VERSION:
             if stored:  # only notify on upgrade, not on fresh install
                 from .notifications import notify
+
                 notify(
                     f"Updated to v{APP_VERSION}",
                     f"Keepup was upgraded from v{stored} to v{APP_VERSION}. "
@@ -147,6 +166,7 @@ async def _startup() -> None:
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _get_host(slug: str) -> dict:
     for h in get_hosts():
         if h["slug"] == slug:
@@ -158,20 +178,23 @@ _jobs: dict[str, dict] = {}
 
 
 def _classify_log_line(line: str) -> str:
-    l = line.lower()
-    if any(k in l for k in ("error", "fail", "e:")):
+    lowered = line.lower()
+    if any(k in lowered for k in ("error", "fail", "e:")):
         return "log-line-red"
-    if any(k in l for k in ("warn", "reboot")):
+    if any(k in lowered for k in ("warn", "reboot")):
         return "log-line-yellow"
-    if any(line.startswith(p) for p in ("Get:", "Unpacking", "Setting up", "Processing")):
+    if any(
+        line.startswith(p) for p in ("Get:", "Unpacking", "Setting up", "Processing")
+    ):
         return "log-line-dim"
-    if any(k in l for k in ("upgraded", "installed", "done")):
+    if any(k in lowered for k in ("upgraded", "installed", "done")):
         return "log-line-ok"
     return "log-line-white"
 
 
 def _format_log_lines(lines: list[str]) -> str:
     import html as _html
+
     parts = []
     for line in lines:
         cls = _classify_log_line(line)
@@ -182,6 +205,7 @@ def _format_log_lines(lines: list[str]) -> str:
 # ---------------------------------------------------------------------------
 # Background job runners
 # ---------------------------------------------------------------------------
+
 
 async def _job_run_host_update(job_id: str, host: dict, creds: dict) -> None:
     try:
@@ -209,11 +233,15 @@ async def _job_run_host_restart(job_id: str, host: dict, creds: dict) -> None:
 
 async def _job_run_stack_update(job_id: str, backend_key: str, ref: str) -> None:
     try:
-        backend = next((b for b in get_backends() if b.BACKEND_KEY == backend_key), None)
+        backend = next(
+            (b for b in get_backends() if b.BACKEND_KEY == backend_key), None
+        )
         if backend is None:
             raise ValueError(f"Backend {backend_key!r} not available")
         await backend.update_stack(ref)
-        _jobs[job_id]["lines"] = ["Stack updated — containers restarted with new images."]
+        _jobs[job_id]["lines"] = [
+            "Stack updated — containers restarted with new images."
+        ]
         _jobs[job_id]["status"] = "done"
     except Exception as exc:
         _jobs[job_id]["status"] = "error"
@@ -226,6 +254,7 @@ async def _job_run_stack_update(job_id: str, backend_key: str, ref: str) -> None
 # Routes — pages
 # ---------------------------------------------------------------------------
 
+
 @app.get("/", response_class=HTMLResponse)
 async def home(request: Request) -> HTMLResponse:
     if request.session.get("authenticated"):
@@ -237,9 +266,8 @@ async def home(request: Request) -> HTMLResponse:
 async def main_home(request: Request) -> HTMLResponse:
     hosts = get_hosts()
     backends = get_backends()
-    docker_configured = (
-        any(b.BACKEND_KEY == "portainer" for b in backends)
-        or any(h.get("docker_mode") for h in hosts)
+    docker_configured = any(b.BACKEND_KEY == "portainer" for b in backends) or any(
+        h.get("docker_mode") for h in hosts
     )
     latest_tag, latest_url = await _get_latest_version()
     show_update = _newer_version(latest_tag)
@@ -264,6 +292,7 @@ async def dashboard_redirect(request: Request) -> HTMLResponse:
 # ---------------------------------------------------------------------------
 # Routes — OS updates
 # ---------------------------------------------------------------------------
+
 
 @app.get("/api/host/{slug}/check", response_class=HTMLResponse)
 async def host_check(request: Request, slug: str) -> HTMLResponse:
@@ -313,8 +342,13 @@ async def host_update(
 
         job_id = uuid.uuid4().hex[:8]
         _jobs[job_id] = {
-            "done": False, "status": "running", "error": None, "lines": [],
-            "type": "os_upgrade", "label": host["name"], "sub": host.get("host", ""),
+            "done": False,
+            "status": "running",
+            "error": None,
+            "lines": [],
+            "type": "os_upgrade",
+            "label": host["name"],
+            "sub": host.get("host", ""),
         }
         background_tasks.add_task(_job_run_host_update, job_id, host, creds)
         return templates.TemplateResponse(
@@ -353,8 +387,13 @@ async def host_restart(
 
         job_id = uuid.uuid4().hex[:8]
         _jobs[job_id] = {
-            "done": False, "status": "running", "error": None, "lines": [],
-            "type": "os_restart", "label": host["name"], "sub": host.get("host", ""),
+            "done": False,
+            "status": "running",
+            "error": None,
+            "lines": [],
+            "type": "os_restart",
+            "label": host["name"],
+            "sub": host.get("host", ""),
         }
         background_tasks.add_task(_job_run_host_restart, job_id, host, creds)
         return templates.TemplateResponse(
@@ -372,12 +411,14 @@ async def host_restart(
 # Routes — Docker stacks
 # ---------------------------------------------------------------------------
 
+
 @app.get("/api/docker/check", response_class=HTMLResponse)
 async def docker_check(request: Request) -> HTMLResponse:
     hosts = get_hosts()
     backends = get_backends()
     active = [
-        b for b in backends
+        b
+        for b in backends
         if b.BACKEND_KEY != "ssh" or any(h.get("docker_mode") for h in hosts)
     ]
     if not active:
@@ -397,6 +438,7 @@ async def docker_check(request: Request) -> HTMLResponse:
         # Check for new image updates and fire notifications (deduplicated)
         try:
             from .update_notifier import check_and_notify
+
             check_and_notify(stacks)
         except Exception:
             pass
@@ -411,7 +453,9 @@ async def docker_check(request: Request) -> HTMLResponse:
         )
 
 
-@app.post("/api/docker/stack/{backend_key}/{ref:path}/update", response_class=HTMLResponse)
+@app.post(
+    "/api/docker/stack/{backend_key}/{ref:path}/update", response_class=HTMLResponse
+)
 async def stack_update(
     request: Request,
     backend_key: str,
@@ -427,8 +471,13 @@ async def stack_update(
     job_id = uuid.uuid4().hex[:8]
     stack_name = ref.rsplit("/", 1)[-1]
     _jobs[job_id] = {
-        "done": False, "status": "running", "error": None, "lines": [],
-        "type": "container_redeploy", "label": stack_name, "sub": backend_key,
+        "done": False,
+        "status": "running",
+        "error": None,
+        "lines": [],
+        "type": "container_redeploy",
+        "label": stack_name,
+        "sub": backend_key,
     }
     background_tasks.add_task(_job_run_stack_update, job_id, backend_key, ref)
     return templates.TemplateResponse(
@@ -440,6 +489,7 @@ async def stack_update(
 # ---------------------------------------------------------------------------
 # Routes — Jobs
 # ---------------------------------------------------------------------------
+
 
 @app.get("/api/jobs/{job_id}", response_class=HTMLResponse)
 async def job_status(request: Request, job_id: str) -> HTMLResponse:
@@ -480,6 +530,7 @@ async def job_modal_body(request: Request, job_id: str) -> HTMLResponse:
 # Routes — Notifications
 # ---------------------------------------------------------------------------
 
+
 @app.get("/api/notifications/badge", response_class=HTMLResponse)
 async def notifications_badge(request: Request) -> HTMLResponse:
     count = get_unread_count()
@@ -494,7 +545,7 @@ async def notifications_badge(request: Request) -> HTMLResponse:
         f'hx-trigger="every 60s" hx-swap="outerHTML" '
         f'class="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-red-500 '
         f'text-xs flex items-center justify-center text-white font-bold pointer-events-none">'
-        f'{label}</span>'
+        f"{label}</span>"
     )
 
 

@@ -3,6 +3,7 @@ Checks whether a Docker image has a newer version available on its registry
 by comparing the remote manifest digest against the local digest stored in
 the image's RepoDigests field.
 """
+
 import logging
 import re
 
@@ -62,7 +63,9 @@ async def _get_dockerhub_token(repo: str, creds: dict | None) -> str:
     params = {"service": "registry.docker.io", "scope": f"repository:{repo}:pull"}
     auth = (creds["username"], creds["token"]) if creds else None
     async with httpx.AsyncClient() as client:
-        resp = await client.get("https://auth.docker.io/token", params=params, auth=auth, timeout=10)
+        resp = await client.get(
+            "https://auth.docker.io/token", params=params, auth=auth, timeout=10
+        )
         resp.raise_for_status()
         return resp.json()["token"]
 
@@ -90,7 +93,9 @@ async def _get_bearer_token_from_challenge(www_authenticate: str) -> str | None:
     return None
 
 
-async def get_remote_digest(image: str, dockerhub_creds: dict | None = None) -> str | None:
+async def get_remote_digest(
+    image: str, dockerhub_creds: dict | None = None
+) -> str | None:
     """
     Returns the current remote manifest digest for an image tag, or None on failure.
     Handles DockerHub, ghcr.io, lscr.io, and any registry that uses Bearer auth challenges.
@@ -120,7 +125,11 @@ async def get_remote_digest(image: str, dockerhub_creds: dict | None = None) -> 
                     headers["Authorization"] = f"Bearer {token}"
                     resp = await client.head(url, headers=headers, timeout=15)
                 else:
-                    log.debug("No bearer token for %s (401, no challenge): %s", image, www_auth)
+                    log.debug(
+                        "No bearer token for %s (401, no challenge): %s",
+                        image,
+                        www_auth,
+                    )
                     return None
 
             if resp.status_code == 200:

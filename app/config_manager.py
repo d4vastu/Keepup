@@ -22,13 +22,16 @@ def load_config() -> dict:
 def save_config(config: dict) -> None:
     with _lock:
         _CONFIG_PATH.write_text(
-            yaml.dump(config, default_flow_style=False, allow_unicode=True, sort_keys=False)
+            yaml.dump(
+                config, default_flow_style=False, allow_unicode=True, sort_keys=False
+            )
         )
 
 
 # ---------------------------------------------------------------------------
 # Hosts
 # ---------------------------------------------------------------------------
+
 
 def get_hosts() -> list[dict]:
     config = load_config()
@@ -72,12 +75,18 @@ def add_host(
     """Add a host to config and return its slug."""
     config = load_config()
     hosts = config.setdefault("hosts", [])
-    hosts.append(_build_host_entry(name, host, user, port, key_path=key_path, docker_mode=docker_mode))
+    hosts.append(
+        _build_host_entry(
+            name, host, user, port, key_path=key_path, docker_mode=docker_mode
+        )
+    )
     save_config(config)
     return slugify(name)
 
 
-def update_host(slug: str, name: str, host: str, user: str | None, port: int | None) -> str:
+def update_host(
+    slug: str, name: str, host: str, user: str | None, port: int | None
+) -> str:
     """Update a host entry and return the new slug (may differ if name changed)."""
     config = load_config()
     hosts = config.get("hosts", [])
@@ -103,6 +112,7 @@ def delete_host(slug: str) -> None:
 # ---------------------------------------------------------------------------
 # Docker monitoring settings
 # ---------------------------------------------------------------------------
+
 
 def set_docker_monitoring(
     slug: str,
@@ -153,6 +163,7 @@ def save_wizard_container_selection(selections: list[str]) -> None:
 # SSH settings
 # ---------------------------------------------------------------------------
 
+
 def get_ssh_config() -> dict:
     return load_config().get("ssh", {})
 
@@ -160,6 +171,7 @@ def get_ssh_config() -> dict:
 # ---------------------------------------------------------------------------
 # Integration settings (non-sensitive — URLs/usernames only)
 # ---------------------------------------------------------------------------
+
 
 def get_portainer_config() -> dict:
     return load_config().get("portainer", {})
@@ -327,6 +339,7 @@ def save_homeassistant_config(url: str) -> None:
 # Auto-update settings
 # ---------------------------------------------------------------------------
 
+
 def set_host_auto_update(
     slug: str,
     os_enabled: bool,
@@ -374,14 +387,25 @@ def get_available_ssh_keys() -> list[str]:
     keys_dir = Path("/app/keys")
     if not keys_dir.exists():
         return []
-    return sorted(f.name for f in keys_dir.iterdir() if f.is_file() and not f.name.startswith('.'))
+    return sorted(
+        f.name for f in keys_dir.iterdir() if f.is_file() and not f.name.startswith(".")
+    )
 
 
 def reset_config() -> None:
     """Remove all user-configured data (factory reset). Preserves the config file itself."""
     config = load_config()
-    for key in ("hosts", "portainer", "dockerhub", "stack_auto_update",
-                "proxmox", "proxmox_backup", "opnsense", "pfsense", "homeassistant"):
+    for key in (
+        "hosts",
+        "portainer",
+        "dockerhub",
+        "stack_auto_update",
+        "proxmox",
+        "proxmox_backup",
+        "opnsense",
+        "pfsense",
+        "homeassistant",
+    ):
         config.pop(key, None)
     save_config(config)
 

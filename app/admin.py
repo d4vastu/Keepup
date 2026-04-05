@@ -82,25 +82,25 @@ def _connection_status() -> dict:
 
 
 def _hosts_with_status() -> list[dict]:
-    return [
-        {**h, **credential_status(h["slug"])}
-        for h in get_hosts()
-    ]
+    return [{**h, **credential_status(h["slug"])} for h in get_hosts()]
 
 
 # ---------------------------------------------------------------------------
 # Admin page
 # ---------------------------------------------------------------------------
 
+
 @router.get("", response_class=HTMLResponse)
 async def admin_page(request: Request) -> HTMLResponse:
     from fastapi.responses import RedirectResponse as _Redirect
+
     return _Redirect("/admin/connections", status_code=302)
 
 
 @router.get("/connections", response_class=HTMLResponse)
 async def admin_connections(request: Request) -> HTMLResponse:
     from .__version__ import APP_VERSION
+
     return templates.TemplateResponse(
         "admin.html",
         {"request": request, "conn": _connection_status(), "app_version": APP_VERSION},
@@ -110,6 +110,7 @@ async def admin_connections(request: Request) -> HTMLResponse:
 @router.get("/hosts", response_class=HTMLResponse)
 async def admin_hosts_page(request: Request) -> HTMLResponse:
     from .__version__ import APP_VERSION
+
     return templates.TemplateResponse(
         "admin_hosts.html",
         {"request": request, "hosts": _hosts_with_status(), "app_version": APP_VERSION},
@@ -119,6 +120,7 @@ async def admin_hosts_page(request: Request) -> HTMLResponse:
 @router.get("/ssh", response_class=HTMLResponse)
 async def admin_ssh_page(request: Request) -> HTMLResponse:
     from .__version__ import APP_VERSION
+
     return templates.TemplateResponse(
         "admin_ssh.html",
         {"request": request, "ssh": get_ssh_config(), "app_version": APP_VERSION},
@@ -128,6 +130,7 @@ async def admin_ssh_page(request: Request) -> HTMLResponse:
 # ---------------------------------------------------------------------------
 # Hosts — CRUD
 # ---------------------------------------------------------------------------
+
 
 @router.post("/hosts", response_class=HTMLResponse)
 async def admin_add_host(
@@ -219,6 +222,7 @@ async def admin_delete_host(request: Request, slug: str) -> HTMLResponse:
 # Hosts — credentials
 # ---------------------------------------------------------------------------
 
+
 @router.get("/hosts/{slug}/credentials", response_class=HTMLResponse)
 async def admin_credentials_form(request: Request, slug: str) -> HTMLResponse:
     hosts = get_hosts()
@@ -244,7 +248,9 @@ async def admin_save_credentials(
     try:
         save_credentials(
             slug=slug,
-            ssh_password=ssh_password.strip() or None if auth_method == "password" else "",
+            ssh_password=ssh_password.strip() or None
+            if auth_method == "password"
+            else "",
             ssh_key=ssh_key.strip() or None if auth_method == "key" else "",
             sudo_password=sudo_password.strip() or None,
         )
@@ -253,7 +259,12 @@ async def admin_save_credentials(
         host = next((h for h in hosts if h["slug"] == slug), {})
         return templates.TemplateResponse(
             "partials/admin_host_credentials.html",
-            {"request": request, "host": host, "status": credential_status(slug), "error": str(exc)},
+            {
+                "request": request,
+                "host": host,
+                "status": credential_status(slug),
+                "error": str(exc),
+            },
         )
     # Return hosts list and trigger Docker auto-discovery for this host
     return templates.TemplateResponse(
@@ -261,7 +272,7 @@ async def admin_save_credentials(
         {
             "request": request,
             "hosts": _hosts_with_status(),
-            "discover_docker": slug,   # triggers auto-discovery in the template
+            "discover_docker": slug,  # triggers auto-discovery in the template
         },
     )
 
@@ -270,6 +281,7 @@ async def admin_save_credentials(
 # Hosts — connection test
 # ---------------------------------------------------------------------------
 
+
 @router.post("/hosts/{slug}/test", response_class=HTMLResponse)
 async def admin_test_host(request: Request, slug: str) -> HTMLResponse:
     hosts = get_hosts()
@@ -277,6 +289,7 @@ async def admin_test_host(request: Request, slug: str) -> HTMLResponse:
     if not host:
         return HTMLResponse("<span class='text-red-400 text-xs'>Host not found</span>")
     from .credentials import get_credentials
+
     result = await verify_connection(host, get_ssh_config(), get_credentials(slug))
     return templates.TemplateResponse(
         "partials/admin_host_test_result.html",
@@ -292,6 +305,7 @@ async def admin_test_host(request: Request, slug: str) -> HTMLResponse:
 # Docker monitoring — discover and configure
 # ---------------------------------------------------------------------------
 
+
 @router.delete("/hosts/{slug}/docker-prompt", response_class=HTMLResponse)
 async def admin_dismiss_docker_prompt(request: Request, slug: str) -> HTMLResponse:
     """Dismiss the Docker discovery prompt without saving anything."""
@@ -306,6 +320,7 @@ async def admin_docker_discover(request: Request, slug: str) -> HTMLResponse:
     if not host:
         return HTMLResponse("")
     from .backends.ssh_docker_backend import SSHDockerBackend
+
     backend = SSHDockerBackend()
     stacks = await backend.discover_stacks(host)
     if not stacks:
@@ -344,6 +359,7 @@ async def admin_save_docker_monitoring(
 # Connections — Portainer
 # ---------------------------------------------------------------------------
 
+
 @router.post("/connections/portainer/test", response_class=HTMLResponse)
 async def admin_test_portainer(
     request: Request,
@@ -362,6 +378,7 @@ async def admin_test_portainer(
         )
     try:
         from .portainer_client import PortainerClient
+
         client = PortainerClient(url=url, api_key=key, verify_ssl=verify_ssl)
         endpoints = await client.get_endpoints()
         count = len(endpoints)
@@ -374,13 +391,19 @@ async def admin_test_portainer(
         msg = str(exc)
         if "401" in msg or "403" in msg:
             hint = "Invalid API token — check you copied it correctly."
-        elif "Name or service not known" in msg or "ConnectionRefused" in msg.lower() or "connect" in msg.lower():
+        elif (
+            "Name or service not known" in msg
+            or "ConnectionRefused" in msg.lower()
+            or "connect" in msg.lower()
+        ):
             hint = "Can't reach that address — check the URL and that Portainer is running."
         elif "SSL" in msg or "certificate" in msg.lower():
             hint = "SSL error — try enabling &ldquo;Ignore SSL warnings&rdquo; below."
         else:
             hint = msg
-        return HTMLResponse(f'<span class="text-red-400 text-sm">&#10007; {hint}</span>')
+        return HTMLResponse(
+            f'<span class="text-red-400 text-sm">&#10007; {hint}</span>'
+        )
 
 
 @router.post("/connections/portainer", response_class=HTMLResponse)
@@ -410,6 +433,7 @@ async def admin_save_portainer(
 # Connections — DockerHub
 # ---------------------------------------------------------------------------
 
+
 @router.post("/connections/dockerhub", response_class=HTMLResponse)
 async def admin_save_dockerhub(
     request: Request,
@@ -437,9 +461,11 @@ async def admin_save_dockerhub(
 # Connections — Pushover
 # ---------------------------------------------------------------------------
 
+
 @router.post("/connections/pushover/test", response_class=HTMLResponse)
 async def admin_test_pushover(request: Request) -> HTMLResponse:
     from .pushover import send_pushover
+
     success = await send_pushover("Test", "Keepup test notification")
     if success:
         return HTMLResponse(
@@ -477,6 +503,7 @@ async def admin_save_pushover(
 # About page
 # ---------------------------------------------------------------------------
 
+
 @router.get("/about", response_class=HTMLResponse)
 async def admin_about(request: Request) -> HTMLResponse:
     from .__version__ import APP_VERSION
@@ -487,13 +514,18 @@ async def admin_about(request: Request) -> HTMLResponse:
         async with httpx.AsyncClient(timeout=5) as client:
             resp = await client.get(
                 "https://api.github.com/repos/d4vastu/Keepup/releases",
-                headers={"Accept": "application/vnd.github.v3+json", "User-Agent": "keepup"},
+                headers={
+                    "Accept": "application/vnd.github.v3+json",
+                    "User-Agent": "keepup",
+                },
             )
             if resp.status_code == 200:
                 raw = resp.json()[:10]
                 now = datetime.now(timezone.utc)
                 for r in raw:
-                    pub = datetime.fromisoformat(r["published_at"].replace("Z", "+00:00"))
+                    pub = datetime.fromisoformat(
+                        r["published_at"].replace("Z", "+00:00")
+                    )
                     delta = now - pub
                     days = delta.days
                     if days == 0:
@@ -523,7 +555,9 @@ async def admin_about(request: Request) -> HTMLResponse:
             "timezone": get_timezone(),
             "releases": releases,
             "latest_version": latest_version,
-            "is_latest": latest_version == f"v{APP_VERSION}" if latest_version else False,
+            "is_latest": latest_version == f"v{APP_VERSION}"
+            if latest_version
+            else False,
         },
     )
 
@@ -531,6 +565,7 @@ async def admin_about(request: Request) -> HTMLResponse:
 # ---------------------------------------------------------------------------
 # Auto-update history
 # ---------------------------------------------------------------------------
+
 
 @router.get("/auto-updates/history", response_class=HTMLResponse)
 async def admin_auto_update_history(request: Request) -> HTMLResponse:
@@ -624,6 +659,7 @@ def _account_context() -> dict:
 @router.get("/account", response_class=HTMLResponse)
 async def admin_account(request: Request) -> HTMLResponse:
     from .__version__ import APP_VERSION
+
     return templates.TemplateResponse(
         "admin_account.html",
         {"request": request, **_account_context(), "app_version": APP_VERSION},
@@ -638,6 +674,7 @@ async def admin_save_timezone(
     tz = timezone.strip() or "UTC"
     try:
         from zoneinfo import ZoneInfo
+
         ZoneInfo(tz)  # validate
         save_timezone(tz)
         return templates.TemplateResponse(
@@ -647,7 +684,11 @@ async def admin_save_timezone(
     except Exception:
         return templates.TemplateResponse(
             "partials/admin_account.html",
-            {"request": request, **_account_context(), "tz_error": f"Unknown timezone: {tz!r}"},
+            {
+                "request": request,
+                **_account_context(),
+                "tz_error": f"Unknown timezone: {tz!r}",
+            },
         )
 
 
@@ -728,7 +769,11 @@ async def admin_mfa_remove(
     if not verify_password(current_password) or not verify_totp(totp_code):
         return templates.TemplateResponse(
             "partials/admin_account.html",
-            {"request": request, **_account_context(), "mfa_remove_error": "Password or code incorrect."},
+            {
+                "request": request,
+                **_account_context(),
+                "mfa_remove_error": "Password or code incorrect.",
+            },
         )
     remove_mfa()
     return templates.TemplateResponse(
@@ -745,7 +790,11 @@ async def admin_regenerate_backup_key(
     if not verify_password(current_password):
         return templates.TemplateResponse(
             "partials/admin_account.html",
-            {"request": request, **_account_context(), "bk_error": "Current password is incorrect."},
+            {
+                "request": request,
+                **_account_context(),
+                "bk_error": "Current password is incorrect.",
+            },
         )
     new_key = regenerate_backup_key()
     return templates.TemplateResponse(
@@ -763,17 +812,26 @@ async def admin_factory_reset(
     if not verify_password(current_password):
         return templates.TemplateResponse(
             "partials/admin_account.html",
-            {"request": request, **_account_context(), "reset_error": "Password is incorrect."},
+            {
+                "request": request,
+                **_account_context(),
+                "reset_error": "Password is incorrect.",
+            },
         )
     if confirm_text.strip().upper() != "RESET":
         return templates.TemplateResponse(
             "partials/admin_account.html",
-            {"request": request, **_account_context(), "reset_error": 'Type "RESET" in the confirmation field.'},
+            {
+                "request": request,
+                **_account_context(),
+                "reset_error": 'Type "RESET" in the confirmation field.',
+            },
         )
     wipe_credential_store()
     reset_config()
     request.session.clear()
     from fastapi.responses import Response
+
     resp = Response(status_code=200)
     resp.headers["HX-Redirect"] = "/setup"
     return resp
@@ -783,15 +841,18 @@ async def admin_factory_reset(
 # HTTPS / TLS
 # ---------------------------------------------------------------------------
 
+
 async def _restart_after_delay() -> None:
     """Send SIGTERM to PID 1 (uvicorn) after a brief delay so the response is sent first."""
     import signal
+
     await asyncio.sleep(3)
     os.kill(1, signal.SIGTERM)
 
 
 def _ssl_context() -> dict:
     from .ssl_manager import ssl_enabled, get_cert_info
+
     ssl_cfg = get_ssl_config()
     return {
         "ssl_enabled": ssl_enabled(),
@@ -804,6 +865,7 @@ def _ssl_context() -> dict:
 @router.get("/https", response_class=HTMLResponse)
 async def admin_https(request: Request) -> HTMLResponse:
     from .__version__ import APP_VERSION
+
     return templates.TemplateResponse(
         "admin_https.html",
         {"request": request, **_ssl_context(), "app_version": APP_VERSION},
@@ -816,11 +878,16 @@ async def admin_https_self_signed(
     hostname: str = Form(""),
 ) -> HTMLResponse:
     from .ssl_manager import generate_self_signed_cert, save_ssl_files
+
     hostname = hostname.strip()
     if not hostname:
         return templates.TemplateResponse(
             "partials/admin_https.html",
-            {"request": request, **_ssl_context(), "error": "Enter your server's IP address or hostname."},
+            {
+                "request": request,
+                **_ssl_context(),
+                "error": "Enter your server's IP address or hostname.",
+            },
         )
     cert_pem, key_pem = generate_self_signed_cert(hostname)
     save_ssl_files(cert_pem, key_pem)
@@ -828,13 +895,18 @@ async def admin_https_self_signed(
     asyncio.ensure_future(_restart_after_delay())
     return templates.TemplateResponse(
         "partials/admin_https_restarting.html",
-        {"request": request, "new_url": f"https://{hostname}:8765", "action": "enabling"},
+        {
+            "request": request,
+            "new_url": f"https://{hostname}:8765",
+            "action": "enabling",
+        },
     )
 
 
 @router.post("/https/disable", response_class=HTMLResponse)
 async def admin_https_disable(request: Request) -> HTMLResponse:
     from .ssl_manager import remove_ssl_files
+
     remove_ssl_files()
     clear_ssl_config()
     asyncio.ensure_future(_restart_after_delay())
@@ -848,6 +920,7 @@ async def admin_https_disable(request: Request) -> HTMLResponse:
 # ---------------------------------------------------------------------------
 # Logs
 # ---------------------------------------------------------------------------
+
 
 @router.get("/logs", response_class=HTMLResponse)
 async def admin_logs(request: Request) -> HTMLResponse:

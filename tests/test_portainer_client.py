@@ -1,4 +1,5 @@
 """Tests for portainer_client.py."""
+
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -46,6 +47,7 @@ IMAGE_INFO = {
 # get / put wrappers
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_get_raises_on_http_error(client):
     mock_resp = MagicMock()  # sync mock — raise_for_status is not awaited
@@ -65,6 +67,7 @@ async def test_get_raises_on_http_error(client):
 # get_endpoints
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_get_endpoints_filters_non_docker(client):
     with patch.object(client, "get", new=AsyncMock(return_value=ENDPOINTS)):
@@ -77,6 +80,7 @@ async def test_get_endpoints_filters_non_docker(client):
 # get_stacks / get_stack_file
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_get_stacks(client):
     with patch.object(client, "get", new=AsyncMock(return_value=STACKS)):
@@ -86,7 +90,9 @@ async def test_get_stacks(client):
 
 @pytest.mark.asyncio
 async def test_get_stack_file(client):
-    with patch.object(client, "get", new=AsyncMock(return_value={"StackFileContent": "version: '3'"})):
+    with patch.object(
+        client, "get", new=AsyncMock(return_value={"StackFileContent": "version: '3'"})
+    ):
         content = await client.get_stack_file(10)
     assert content == "version: '3'"
 
@@ -102,14 +108,19 @@ async def test_get_stack_file_missing_key(client):
 # update_stack
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_update_stack(client):
     stack_data = {"Id": 10, "Env": [{"name": "KEY", "value": "val"}]}
     put_mock = AsyncMock(return_value={"Id": 10})
 
-    with patch.object(client, "get", new=AsyncMock(return_value=stack_data)), \
-         patch.object(client, "get_stack_file", new=AsyncMock(return_value="version: '3'")), \
-         patch.object(client, "put", new=put_mock):
+    with (
+        patch.object(client, "get", new=AsyncMock(return_value=stack_data)),
+        patch.object(
+            client, "get_stack_file", new=AsyncMock(return_value="version: '3'")
+        ),
+        patch.object(client, "put", new=put_mock),
+    ):
         result = await client.update_stack(10, 1)
 
     assert result == {"Id": 10}
@@ -122,14 +133,26 @@ async def test_update_stack(client):
 # get_stacks_with_update_status
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_stacks_with_update_status_up_to_date(client):
-    with patch.object(client, "get_endpoints", new=AsyncMock(return_value=ENDPOINTS[:2])), \
-         patch.object(client, "get_stacks", new=AsyncMock(return_value=[STACKS[0]])), \
-         patch.object(client, "_get_containers", new=AsyncMock(return_value=[CONTAINERS[0]])), \
-         patch.object(client, "_get_image_info", new=AsyncMock(return_value=IMAGE_INFO)), \
-         patch("app.portainer_client.check_image_update", new=AsyncMock(return_value="up_to_date")), \
-         patch("app.portainer_client.extract_local_digest", return_value="sha256:current"):
+    with (
+        patch.object(
+            client, "get_endpoints", new=AsyncMock(return_value=ENDPOINTS[:2])
+        ),
+        patch.object(client, "get_stacks", new=AsyncMock(return_value=[STACKS[0]])),
+        patch.object(
+            client, "_get_containers", new=AsyncMock(return_value=[CONTAINERS[0]])
+        ),
+        patch.object(client, "_get_image_info", new=AsyncMock(return_value=IMAGE_INFO)),
+        patch(
+            "app.portainer_client.check_image_update",
+            new=AsyncMock(return_value="up_to_date"),
+        ),
+        patch(
+            "app.portainer_client.extract_local_digest", return_value="sha256:current"
+        ),
+    ):
         results = await client.get_stacks_with_update_status()
 
     assert len(results) == 1
@@ -138,12 +161,21 @@ async def test_stacks_with_update_status_up_to_date(client):
 
 @pytest.mark.asyncio
 async def test_stacks_with_update_status_update_available(client):
-    with patch.object(client, "get_endpoints", new=AsyncMock(return_value=ENDPOINTS[:1])), \
-         patch.object(client, "get_stacks", new=AsyncMock(return_value=[STACKS[0]])), \
-         patch.object(client, "_get_containers", new=AsyncMock(return_value=[CONTAINERS[0]])), \
-         patch.object(client, "_get_image_info", new=AsyncMock(return_value=IMAGE_INFO)), \
-         patch("app.portainer_client.check_image_update", new=AsyncMock(return_value="update_available")), \
-         patch("app.portainer_client.extract_local_digest", return_value="sha256:old"):
+    with (
+        patch.object(
+            client, "get_endpoints", new=AsyncMock(return_value=ENDPOINTS[:1])
+        ),
+        patch.object(client, "get_stacks", new=AsyncMock(return_value=[STACKS[0]])),
+        patch.object(
+            client, "_get_containers", new=AsyncMock(return_value=[CONTAINERS[0]])
+        ),
+        patch.object(client, "_get_image_info", new=AsyncMock(return_value=IMAGE_INFO)),
+        patch(
+            "app.portainer_client.check_image_update",
+            new=AsyncMock(return_value="update_available"),
+        ),
+        patch("app.portainer_client.extract_local_digest", return_value="sha256:old"),
+    ):
         results = await client.get_stacks_with_update_status()
 
     assert results[0]["update_status"] == "update_available"
@@ -163,12 +195,16 @@ async def test_stacks_with_mixed_status(client):
         call_count["n"] += 1
         return result
 
-    with patch.object(client, "get_endpoints", new=AsyncMock(return_value=ENDPOINTS[:1])), \
-         patch.object(client, "get_stacks", new=AsyncMock(return_value=[STACKS[0]])), \
-         patch.object(client, "_get_containers", new=AsyncMock(return_value=containers)), \
-         patch.object(client, "_get_image_info", new=AsyncMock(return_value=IMAGE_INFO)), \
-         patch("app.portainer_client.check_image_update", new=mock_check), \
-         patch("app.portainer_client.extract_local_digest", return_value="sha256:x"):
+    with (
+        patch.object(
+            client, "get_endpoints", new=AsyncMock(return_value=ENDPOINTS[:1])
+        ),
+        patch.object(client, "get_stacks", new=AsyncMock(return_value=[STACKS[0]])),
+        patch.object(client, "_get_containers", new=AsyncMock(return_value=containers)),
+        patch.object(client, "_get_image_info", new=AsyncMock(return_value=IMAGE_INFO)),
+        patch("app.portainer_client.check_image_update", new=mock_check),
+        patch("app.portainer_client.extract_local_digest", return_value="sha256:x"),
+    ):
         results = await client.get_stacks_with_update_status()
 
     assert results[0]["update_status"] == "mixed"
@@ -176,9 +212,13 @@ async def test_stacks_with_mixed_status(client):
 
 @pytest.mark.asyncio
 async def test_stacks_unknown_when_no_containers(client):
-    with patch.object(client, "get_endpoints", new=AsyncMock(return_value=ENDPOINTS[:1])), \
-         patch.object(client, "get_stacks", new=AsyncMock(return_value=[STACKS[0]])), \
-         patch.object(client, "_get_containers", new=AsyncMock(return_value=[])):
+    with (
+        patch.object(
+            client, "get_endpoints", new=AsyncMock(return_value=ENDPOINTS[:1])
+        ),
+        patch.object(client, "get_stacks", new=AsyncMock(return_value=[STACKS[0]])),
+        patch.object(client, "_get_containers", new=AsyncMock(return_value=[])),
+    ):
         results = await client.get_stacks_with_update_status()
 
     assert results[0]["update_status"] == "unknown"
@@ -187,9 +227,15 @@ async def test_stacks_unknown_when_no_containers(client):
 @pytest.mark.asyncio
 async def test_stacks_endpoint_container_fetch_failure(client):
     """Container fetch failure for an endpoint should not crash — uses empty list."""
-    with patch.object(client, "get_endpoints", new=AsyncMock(return_value=ENDPOINTS[:1])), \
-         patch.object(client, "get_stacks", new=AsyncMock(return_value=[STACKS[0]])), \
-         patch.object(client, "_get_containers", new=AsyncMock(side_effect=Exception("timeout"))):
+    with (
+        patch.object(
+            client, "get_endpoints", new=AsyncMock(return_value=ENDPOINTS[:1])
+        ),
+        patch.object(client, "get_stacks", new=AsyncMock(return_value=[STACKS[0]])),
+        patch.object(
+            client, "_get_containers", new=AsyncMock(side_effect=Exception("timeout"))
+        ),
+    ):
         results = await client.get_stacks_with_update_status()
 
     assert results[0]["update_status"] == "unknown"
@@ -197,11 +243,19 @@ async def test_stacks_endpoint_container_fetch_failure(client):
 
 @pytest.mark.asyncio
 async def test_stacks_image_check_exception_gives_unknown(client):
-    with patch.object(client, "get_endpoints", new=AsyncMock(return_value=ENDPOINTS[:1])), \
-         patch.object(client, "get_stacks", new=AsyncMock(return_value=[STACKS[0]])), \
-         patch.object(client, "_get_containers", new=AsyncMock(return_value=[CONTAINERS[0]])), \
-         patch.object(client, "_get_image_info", new=AsyncMock(side_effect=Exception("err"))), \
-         patch("app.portainer_client.extract_local_digest", return_value="sha256:x"):
+    with (
+        patch.object(
+            client, "get_endpoints", new=AsyncMock(return_value=ENDPOINTS[:1])
+        ),
+        patch.object(client, "get_stacks", new=AsyncMock(return_value=[STACKS[0]])),
+        patch.object(
+            client, "_get_containers", new=AsyncMock(return_value=[CONTAINERS[0]])
+        ),
+        patch.object(
+            client, "_get_image_info", new=AsyncMock(side_effect=Exception("err"))
+        ),
+        patch("app.portainer_client.extract_local_digest", return_value="sha256:x"),
+    ):
         results = await client.get_stacks_with_update_status()
 
     assert results[0]["images"][0]["status"] == "unknown"
@@ -215,12 +269,16 @@ async def test_stacks_skips_duplicate_images(client):
         {**CONTAINERS[0], "Id": "c2"},  # same Image as c1
     ]
     check_mock = AsyncMock(return_value="up_to_date")
-    with patch.object(client, "get_endpoints", new=AsyncMock(return_value=ENDPOINTS[:1])), \
-         patch.object(client, "get_stacks", new=AsyncMock(return_value=[STACKS[0]])), \
-         patch.object(client, "_get_containers", new=AsyncMock(return_value=containers)), \
-         patch.object(client, "_get_image_info", new=AsyncMock(return_value=IMAGE_INFO)), \
-         patch("app.portainer_client.check_image_update", new=check_mock), \
-         patch("app.portainer_client.extract_local_digest", return_value="sha256:x"):
+    with (
+        patch.object(
+            client, "get_endpoints", new=AsyncMock(return_value=ENDPOINTS[:1])
+        ),
+        patch.object(client, "get_stacks", new=AsyncMock(return_value=[STACKS[0]])),
+        patch.object(client, "_get_containers", new=AsyncMock(return_value=containers)),
+        patch.object(client, "_get_image_info", new=AsyncMock(return_value=IMAGE_INFO)),
+        patch("app.portainer_client.check_image_update", new=check_mock),
+        patch("app.portainer_client.extract_local_digest", return_value="sha256:x"),
+    ):
         results = await client.get_stacks_with_update_status()
 
     # Image was only checked once despite two containers
@@ -265,9 +323,13 @@ async def test_stacks_sorted_by_endpoint_then_name(client):
         {"Id": 1, "Name": "zoo", "EndpointId": 1, "Env": []},
         {"Id": 2, "Name": "app", "EndpointId": 1, "Env": []},
     ]
-    with patch.object(client, "get_endpoints", new=AsyncMock(return_value=ENDPOINTS[:1])), \
-         patch.object(client, "get_stacks", new=AsyncMock(return_value=stacks)), \
-         patch.object(client, "_get_containers", new=AsyncMock(return_value=[])):
+    with (
+        patch.object(
+            client, "get_endpoints", new=AsyncMock(return_value=ENDPOINTS[:1])
+        ),
+        patch.object(client, "get_stacks", new=AsyncMock(return_value=stacks)),
+        patch.object(client, "_get_containers", new=AsyncMock(return_value=[])),
+    ):
         results = await client.get_stacks_with_update_status()
 
     assert results[0]["name"] == "app"

@@ -120,15 +120,19 @@ def _client_ip(request: Request) -> str:
 # Setup — screen 1: welcome + timezone
 # ---------------------------------------------------------------------------
 
+
 @router.get("/setup", response_class=HTMLResponse)
 async def setup_welcome(request: Request) -> HTMLResponse:
     if admin_exists():
         return RedirectResponse("/login", status_code=302)
-    return templates.TemplateResponse("setup_welcome.html", {
-        "request": request,
-        "timezone_groups": _timezone_groups(),
-        "current_tz": get_timezone(),
-    })
+    return templates.TemplateResponse(
+        "setup_welcome.html",
+        {
+            "request": request,
+            "timezone_groups": _timezone_groups(),
+            "current_tz": get_timezone(),
+        },
+    )
 
 
 @router.post("/setup", response_class=HTMLResponse)
@@ -145,6 +149,7 @@ async def setup_welcome_submit(
 # ---------------------------------------------------------------------------
 # Setup — screen 2: account credentials
 # ---------------------------------------------------------------------------
+
 
 @router.get("/setup/account", response_class=HTMLResponse)
 async def setup_account(request: Request) -> HTMLResponse:
@@ -168,8 +173,10 @@ async def setup_account_submit(
 
     if len(username) < 2:
         errors.append("Username must be at least 2 characters.")
-    elif not re.match(r'^[a-zA-Z0-9_-]+$', username):
-        errors.append("Username may only contain letters, numbers, hyphens, and underscores.")
+    elif not re.match(r"^[a-zA-Z0-9_-]+$", username):
+        errors.append(
+            "Username may only contain letters, numbers, hyphens, and underscores."
+        )
 
     if len(password) < 8:
         errors.append("Password must be at least 8 characters.")
@@ -177,11 +184,14 @@ async def setup_account_submit(
         errors.append("Passwords do not match.")
 
     if errors:
-        return templates.TemplateResponse("setup_account.html", {
-            "request": request,
-            "errors": errors,
-            "username_value": username,
-        })
+        return templates.TemplateResponse(
+            "setup_account.html",
+            {
+                "request": request,
+                "errors": errors,
+                "username_value": username,
+            },
+        )
 
     backup_key = create_admin(username=username, password=password, totp_secret=None)
     request.session["setup_account_done"] = True
@@ -193,17 +203,21 @@ async def setup_account_submit(
 # Setup — screen 3: two-factor authentication
 # ---------------------------------------------------------------------------
 
+
 @router.get("/setup/security", response_class=HTMLResponse)
 async def setup_security(request: Request) -> HTMLResponse:
     if not request.session.get("setup_account_done"):
         return RedirectResponse("/login", status_code=302)
     secret = new_totp_secret()
     request.session["setup_totp_secret"] = secret
-    return templates.TemplateResponse("setup_security.html", {
-        "request": request,
-        "totp_uri": get_totp_uri(secret),
-        "totp_secret": secret,
-    })
+    return templates.TemplateResponse(
+        "setup_security.html",
+        {
+            "request": request,
+            "totp_uri": get_totp_uri(secret),
+            "totp_secret": secret,
+        },
+    )
 
 
 @router.post("/setup/security", response_class=HTMLResponse)
@@ -217,16 +231,23 @@ async def setup_security_submit(
 
     if enable_mfa == "on":
         session_secret = request.session.get("setup_totp_secret", "")
-        if not session_secret or not pyotp.TOTP(session_secret).verify(totp_code.strip(), valid_window=1):
+        if not session_secret or not pyotp.TOTP(session_secret).verify(
+            totp_code.strip(), valid_window=1
+        ):
             secret = session_secret or new_totp_secret()
             request.session["setup_totp_secret"] = secret
-            return templates.TemplateResponse("setup_security.html", {
-                "request": request,
-                "totp_uri": get_totp_uri(secret),
-                "totp_secret": secret,
-                "errors": ["Authenticator code is incorrect. Make sure your phone's time is synced and try again."],
-                "enable_mfa_checked": True,
-            })
+            return templates.TemplateResponse(
+                "setup_security.html",
+                {
+                    "request": request,
+                    "totp_uri": get_totp_uri(secret),
+                    "totp_secret": secret,
+                    "errors": [
+                        "Authenticator code is incorrect. Make sure your phone's time is synced and try again."
+                    ],
+                    "enable_mfa_checked": True,
+                },
+            )
         enroll_mfa(session_secret)
         request.session.pop("setup_totp_secret", None)
 
@@ -237,15 +258,19 @@ async def setup_security_submit(
 # Setup — screen 4: recovery code
 # ---------------------------------------------------------------------------
 
+
 @router.get("/setup/recovery-code", response_class=HTMLResponse)
 async def setup_recovery_code(request: Request) -> HTMLResponse:
     backup_key = request.session.get("setup_backup_key")
     if not backup_key:
         return RedirectResponse("/login", status_code=302)
-    return templates.TemplateResponse("setup_recovery.html", {
-        "request": request,
-        "backup_key": backup_key,
-    })
+    return templates.TemplateResponse(
+        "setup_recovery.html",
+        {
+            "request": request,
+            "backup_key": backup_key,
+        },
+    )
 
 
 @router.post("/setup/recovery-code/confirm", response_class=HTMLResponse)
@@ -258,6 +283,7 @@ async def setup_recovery_code_confirm(request: Request) -> HTMLResponse:
 # ---------------------------------------------------------------------------
 # Setup — screen 5: connect integrations
 # ---------------------------------------------------------------------------
+
 
 @router.get("/setup/connect", response_class=HTMLResponse)
 async def setup_connect(request: Request) -> HTMLResponse:
@@ -278,38 +304,51 @@ async def setup_connect(request: Request) -> HTMLResponse:
     port_creds = get_integration_credentials("portainer")
     dh_cfg = get_integration_credentials("dockerhub")
 
-    return templates.TemplateResponse("setup_connect.html", {
-        "request": request,
-        "proxmox_url": px_cfg.get("url", ""),
-        "proxmox_connected": bool(px_cfg.get("url") and px_creds.get("api_token")),
-        "pbs_url": pbs_cfg.get("url", ""),
-        "pbs_connected": bool(pbs_cfg.get("url") and pbs_creds.get("api_token")),
-        "opnsense_url": opn_cfg.get("url", ""),
-        "opnsense_connected": bool(opn_cfg.get("url") and opn_creds.get("api_key")),
-        "pfsense_url": pf_cfg.get("url", ""),
-        "pfsense_connected": bool(pf_cfg.get("url") and pf_creds.get("api_key")),
-        "homeassistant_url": ha_cfg.get("url", ""),
-        "homeassistant_connected": bool(ha_cfg.get("url") and ha_creds.get("token")),
-        "portainer_url": port_cfg.get("url", ""),
-        "portainer_connected": bool(port_cfg.get("url") and port_creds.get("api_key")),
-        "dockerhub_connected": bool(dh_cfg.get("token")),
-    })
+    return templates.TemplateResponse(
+        "setup_connect.html",
+        {
+            "request": request,
+            "proxmox_url": px_cfg.get("url", ""),
+            "proxmox_connected": bool(px_cfg.get("url") and px_creds.get("api_token")),
+            "pbs_url": pbs_cfg.get("url", ""),
+            "pbs_connected": bool(pbs_cfg.get("url") and pbs_creds.get("api_token")),
+            "opnsense_url": opn_cfg.get("url", ""),
+            "opnsense_connected": bool(opn_cfg.get("url") and opn_creds.get("api_key")),
+            "pfsense_url": pf_cfg.get("url", ""),
+            "pfsense_connected": bool(pf_cfg.get("url") and pf_creds.get("api_key")),
+            "homeassistant_url": ha_cfg.get("url", ""),
+            "homeassistant_connected": bool(
+                ha_cfg.get("url") and ha_creds.get("token")
+            ),
+            "portainer_url": port_cfg.get("url", ""),
+            "portainer_connected": bool(
+                port_cfg.get("url") and port_creds.get("api_key")
+            ),
+            "dockerhub_connected": bool(dh_cfg.get("token")),
+        },
+    )
 
 
 # --- Proxmox ---
+
 
 @router.post("/setup/connect/proxmox/test", response_class=HTMLResponse)
 async def setup_test_proxmox(
     request: Request,
     proxmox_url: str = Form(""),
+    proxmox_api_user: str = Form(""),
     proxmox_api_token: str = Form(""),
     proxmox_verify_ssl: str = Form(""),
 ) -> HTMLResponse:
     url = proxmox_url.strip().rstrip("/")
-    token = proxmox_api_token.strip()
+    api_user = proxmox_api_user.strip()
+    api_token = proxmox_api_token.strip()
     verify_ssl = proxmox_verify_ssl == "on"
-    if not url or not token:
-        return HTMLResponse('<span class="text-amber-400 text-sm">Enter a URL and API token first.</span>')
+    if not url or not api_user or not api_token:
+        return HTMLResponse(
+            '<span class="text-amber-400 text-sm">Enter a URL, API user, and API token first.</span>'
+        )
+    token = f"{api_user}!{api_token}"
     try:
         client = ProxmoxClient(url=url, api_token=token, verify_ssl=verify_ssl)
         version = await client.get_version()
@@ -327,28 +366,37 @@ async def setup_test_proxmox(
             hint = "SSL error — try disabling SSL verification."
         else:
             hint = msg[:120]
-        return HTMLResponse(f'<span class="text-red-400 text-sm">&#10007; {hint}</span>')
+        return HTMLResponse(
+            f'<span class="text-red-400 text-sm">&#10007; {hint}</span>'
+        )
 
 
 @router.post("/setup/connect/proxmox/save", response_class=HTMLResponse)
 async def setup_save_proxmox(
     request: Request,
     proxmox_url: str = Form(""),
+    proxmox_api_user: str = Form(""),
     proxmox_api_token: str = Form(""),
     proxmox_verify_ssl: str = Form(""),
 ) -> HTMLResponse:
     url = proxmox_url.strip().rstrip("/")
-    token = proxmox_api_token.strip()
+    api_user = proxmox_api_user.strip()
+    api_token = proxmox_api_token.strip()
     verify_ssl = proxmox_verify_ssl == "on"
     save_proxmox_config(url=url, verify_ssl=verify_ssl)
-    if token:
-        save_integration_credentials("proxmox", api_token=token)
-    return templates.TemplateResponse("partials/setup_proxmox_section.html", {
-        "request": request,
-        "proxmox_url": url,
-        "proxmox_connected": True,
-        "proxmox_saved": True,
-    })
+    if api_user or api_token:
+        save_integration_credentials(
+            "proxmox", api_user=api_user or None, api_token=api_token or None
+        )
+    return templates.TemplateResponse(
+        "partials/setup_proxmox_section.html",
+        {
+            "request": request,
+            "proxmox_url": url,
+            "proxmox_connected": True,
+            "proxmox_saved": True,
+        },
+    )
 
 
 @router.post("/setup/connect/proxmox/discover", response_class=HTMLResponse)
@@ -356,21 +404,31 @@ async def setup_proxmox_discover(request: Request) -> HTMLResponse:
     cfg = get_proxmox_config()
     creds = get_integration_credentials("proxmox")
     url = cfg.get("url", "")
-    token = creds.get("api_token", "")
+    api_user = creds.get("api_user", "")
+    api_token = creds.get("api_token", "")
+    # Support both new format (api_user + api_token) and legacy (full token in api_token)
+    token = f"{api_user}!{api_token}" if api_user else api_token
     verify_ssl = cfg.get("verify_ssl", False)
     if not url or not token:
-        return HTMLResponse('<p class="text-sm text-red-400">Proxmox not configured.</p>')
+        return HTMLResponse(
+            '<p class="text-sm text-red-400">Proxmox not configured.</p>'
+        )
     try:
         client = ProxmoxClient(url=url, api_token=token, verify_ssl=verify_ssl)
         resources = await client.discover_resources()
-        return templates.TemplateResponse("partials/setup_proxmox_section.html", {
-            "request": request,
-            "proxmox_url": url,
-            "proxmox_connected": True,
-            "proxmox_resources": resources,
-        })
+        return templates.TemplateResponse(
+            "partials/setup_proxmox_section.html",
+            {
+                "request": request,
+                "proxmox_url": url,
+                "proxmox_connected": True,
+                "proxmox_resources": resources,
+            },
+        )
     except Exception as exc:
-        return HTMLResponse(f'<p class="text-sm text-red-400">Discovery failed: {exc}</p>')
+        return HTMLResponse(
+            f'<p class="text-sm text-red-400">Discovery failed: {exc}</p>'
+        )
 
 
 @router.post("/setup/connect/proxmox/select-hosts", response_class=HTMLResponse)
@@ -381,7 +439,9 @@ async def setup_proxmox_select_hosts(request: Request) -> HTMLResponse:
     for entry in selected:
         parts = entry.split(":", 3)
         if len(parts) == 4:
-            pending.append({"node": parts[0], "vmid": parts[1], "name": parts[3], "type": parts[2]})
+            pending.append(
+                {"node": parts[0], "vmid": parts[1], "name": parts[3], "type": parts[2]}
+            )
     request.session["setup_proxmox_pending"] = pending
     count = len(pending)
     label = f"{count} host{'s' if count != 1 else ''}"
@@ -392,18 +452,24 @@ async def setup_proxmox_select_hosts(request: Request) -> HTMLResponse:
 
 # --- Proxmox Backup Server ---
 
+
 @router.post("/setup/connect/pbs/test", response_class=HTMLResponse)
 async def setup_test_pbs(
     request: Request,
     pbs_url: str = Form(""),
+    pbs_api_user: str = Form(""),
     pbs_api_token: str = Form(""),
     pbs_verify_ssl: str = Form(""),
 ) -> HTMLResponse:
     url = pbs_url.strip().rstrip("/")
-    token = pbs_api_token.strip()
+    api_user = pbs_api_user.strip()
+    api_token = pbs_api_token.strip()
     verify_ssl = pbs_verify_ssl == "on"
-    if not url or not token:
-        return HTMLResponse('<span class="text-amber-400 text-sm">Enter a URL and API token first.</span>')
+    if not url or not api_user or not api_token:
+        return HTMLResponse(
+            '<span class="text-amber-400 text-sm">Enter a URL, API user, and API token first.</span>'
+        )
+    token = f"{api_user}!{api_token}"
     try:
         async with httpx.AsyncClient(verify=verify_ssl, timeout=10) as c:
             resp = await c.get(
@@ -418,26 +484,35 @@ async def setup_test_pbs(
     except Exception as exc:
         msg = str(exc)
         hint = "Invalid API token." if ("401" in msg or "403" in msg) else msg[:120]
-        return HTMLResponse(f'<span class="text-red-400 text-sm">&#10007; {hint}</span>')
+        return HTMLResponse(
+            f'<span class="text-red-400 text-sm">&#10007; {hint}</span>'
+        )
 
 
 @router.post("/setup/connect/pbs/save", response_class=HTMLResponse)
 async def setup_save_pbs(
     request: Request,
     pbs_url: str = Form(""),
+    pbs_api_user: str = Form(""),
     pbs_api_token: str = Form(""),
     pbs_verify_ssl: str = Form(""),
 ) -> HTMLResponse:
     url = pbs_url.strip().rstrip("/")
-    token = pbs_api_token.strip()
+    api_user = pbs_api_user.strip()
+    api_token = pbs_api_token.strip()
     verify_ssl = pbs_verify_ssl == "on"
     save_pbs_config(url=url, verify_ssl=verify_ssl)
-    if token:
-        save_integration_credentials("proxmox_backup", api_token=token)
-    return HTMLResponse('<p class="text-sm text-green-400">&#10003; Proxmox Backup Server saved.</p>')
+    if api_user or api_token:
+        save_integration_credentials(
+            "proxmox_backup", api_user=api_user or None, api_token=api_token or None
+        )
+    return HTMLResponse(
+        '<p class="text-sm text-green-400">&#10003; Proxmox Backup Server saved.</p>'
+    )
 
 
 # --- OPNsense ---
+
 
 @router.post("/setup/connect/opnsense/test", response_class=HTMLResponse)
 async def setup_test_opnsense(
@@ -452,7 +527,9 @@ async def setup_test_opnsense(
     secret = opnsense_api_secret.strip()
     verify_ssl = opnsense_verify_ssl == "on"
     if not url or not key or not secret:
-        return HTMLResponse('<span class="text-amber-400 text-sm">Enter URL, API key, and API secret first.</span>')
+        return HTMLResponse(
+            '<span class="text-amber-400 text-sm">Enter URL, API key, and API secret first.</span>'
+        )
     try:
         async with httpx.AsyncClient(verify=verify_ssl, timeout=10) as c:
             resp = await c.get(
@@ -460,11 +537,19 @@ async def setup_test_opnsense(
                 auth=(key, secret),
             )
             resp.raise_for_status()
-        return HTMLResponse('<span class="text-green-400 text-sm">&#10003; Connected. Click Save to continue.</span>')
+        return HTMLResponse(
+            '<span class="text-green-400 text-sm">&#10003; Connected. Click Save to continue.</span>'
+        )
     except Exception as exc:
         msg = str(exc)
-        hint = "Invalid API key or secret." if ("401" in msg or "403" in msg) else msg[:120]
-        return HTMLResponse(f'<span class="text-red-400 text-sm">&#10007; {hint}</span>')
+        hint = (
+            "Invalid API key or secret."
+            if ("401" in msg or "403" in msg)
+            else msg[:120]
+        )
+        return HTMLResponse(
+            f'<span class="text-red-400 text-sm">&#10007; {hint}</span>'
+        )
 
 
 @router.post("/setup/connect/opnsense/save", response_class=HTMLResponse)
@@ -482,10 +567,13 @@ async def setup_save_opnsense(
     save_opnsense_config(url=url, verify_ssl=verify_ssl)
     if key and secret:
         save_integration_credentials("opnsense", api_key=key, api_secret=secret)
-    return HTMLResponse('<p class="text-sm text-green-400">&#10003; OPNsense saved.</p>')
+    return HTMLResponse(
+        '<p class="text-sm text-green-400">&#10003; OPNsense saved.</p>'
+    )
 
 
 # --- pfSense ---
+
 
 @router.post("/setup/connect/pfsense/test", response_class=HTMLResponse)
 async def setup_test_pfsense(
@@ -498,7 +586,9 @@ async def setup_test_pfsense(
     key = pfsense_api_key.strip()
     verify_ssl = pfsense_verify_ssl == "on"
     if not url or not key:
-        return HTMLResponse('<span class="text-amber-400 text-sm">Enter a URL and API key first.</span>')
+        return HTMLResponse(
+            '<span class="text-amber-400 text-sm">Enter a URL and API key first.</span>'
+        )
     try:
         async with httpx.AsyncClient(verify=verify_ssl, timeout=10) as c:
             resp = await c.get(
@@ -506,11 +596,15 @@ async def setup_test_pfsense(
                 headers={"Authorization": key},
             )
             resp.raise_for_status()
-        return HTMLResponse('<span class="text-green-400 text-sm">&#10003; Connected. Click Save to continue.</span>')
+        return HTMLResponse(
+            '<span class="text-green-400 text-sm">&#10003; Connected. Click Save to continue.</span>'
+        )
     except Exception as exc:
         msg = str(exc)
         hint = "Invalid API key." if ("401" in msg or "403" in msg) else msg[:120]
-        return HTMLResponse(f'<span class="text-red-400 text-sm">&#10007; {hint}</span>')
+        return HTMLResponse(
+            f'<span class="text-red-400 text-sm">&#10007; {hint}</span>'
+        )
 
 
 @router.post("/setup/connect/pfsense/save", response_class=HTMLResponse)
@@ -531,6 +625,7 @@ async def setup_save_pfsense(
 
 # --- Home Assistant ---
 
+
 @router.post("/setup/connect/homeassistant/test", response_class=HTMLResponse)
 async def setup_test_homeassistant(
     request: Request,
@@ -540,7 +635,9 @@ async def setup_test_homeassistant(
     url = ha_url.strip().rstrip("/")
     token = ha_token.strip()
     if not url or not token:
-        return HTMLResponse('<span class="text-amber-400 text-sm">Enter a URL and access token first.</span>')
+        return HTMLResponse(
+            '<span class="text-amber-400 text-sm">Enter a URL and access token first.</span>'
+        )
     try:
         async with httpx.AsyncClient(verify=False, timeout=10) as c:
             resp = await c.get(
@@ -556,7 +653,9 @@ async def setup_test_homeassistant(
     except Exception as exc:
         msg = str(exc)
         hint = "Invalid access token." if ("401" in msg or "403" in msg) else msg[:120]
-        return HTMLResponse(f'<span class="text-red-400 text-sm">&#10007; {hint}</span>')
+        return HTMLResponse(
+            f'<span class="text-red-400 text-sm">&#10007; {hint}</span>'
+        )
 
 
 @router.post("/setup/connect/homeassistant/save", response_class=HTMLResponse)
@@ -580,17 +679,23 @@ async def setup_save_homeassistant(
 # Login
 # ---------------------------------------------------------------------------
 
+
 @router.get("/login", response_class=HTMLResponse)
 async def login_page(request: Request) -> HTMLResponse:
     if not admin_exists():
         return RedirectResponse("/setup", status_code=302)
     if request.session.get("authenticated"):
         return RedirectResponse("/", status_code=302)
-    return templates.TemplateResponse("login.html", {
-        "request": request,
-        "needs_mfa": mfa_enrolled(),
-        "needs_username": bool(get_integration_credentials("admin").get("username")),
-    })
+    return templates.TemplateResponse(
+        "login.html",
+        {
+            "request": request,
+            "needs_mfa": mfa_enrolled(),
+            "needs_username": bool(
+                get_integration_credentials("admin").get("username")
+            ),
+        },
+    )
 
 
 @router.post("/login", response_class=HTMLResponse)
@@ -607,12 +712,15 @@ async def login_submit(
 
     if not allowed:
         mins = remaining // 60 + 1
-        return templates.TemplateResponse("login.html", {
-            "request": request,
-            "needs_mfa": mfa_enrolled(),
-            "needs_username": needs_username,
-            "error": f"Too many failed attempts. Try again in {mins} minute{'s' if mins != 1 else ''}.",
-        })
+        return templates.TemplateResponse(
+            "login.html",
+            {
+                "request": request,
+                "needs_mfa": mfa_enrolled(),
+                "needs_username": needs_username,
+                "error": f"Too many failed attempts. Try again in {mins} minute{'s' if mins != 1 else ''}.",
+            },
+        )
 
     ok = verify_login(username, password)
     if ok and mfa_enrolled():
@@ -628,12 +736,15 @@ async def login_submit(
             error = f"Incorrect credentials. {attempts_left} attempt{'s' if attempts_left != 1 else ''} remaining before lockout."
         else:
             error = "Incorrect username, password, or authenticator code."
-        return templates.TemplateResponse("login.html", {
-            "request": request,
-            "needs_mfa": mfa_enrolled(),
-            "needs_username": needs_username,
-            "error": error,
-        })
+        return templates.TemplateResponse(
+            "login.html",
+            {
+                "request": request,
+                "needs_mfa": mfa_enrolled(),
+                "needs_username": needs_username,
+                "error": error,
+            },
+        )
 
     _clear_attempts(ip)
     request.session["authenticated"] = True
@@ -654,12 +765,16 @@ async def logout(request: Request):
 # Forgot password
 # ---------------------------------------------------------------------------
 
+
 @router.get("/forgot-password", response_class=HTMLResponse)
 async def forgot_password_page(request: Request) -> HTMLResponse:
-    return templates.TemplateResponse("forgot_password.html", {
-        "request": request,
-        "step": "key",
-    })
+    return templates.TemplateResponse(
+        "forgot_password.html",
+        {
+            "request": request,
+            "step": "key",
+        },
+    )
 
 
 @router.post("/forgot-password", response_class=HTMLResponse)
@@ -668,16 +783,22 @@ async def forgot_password_submit(
     backup_key: str = Form(""),
 ) -> HTMLResponse:
     if not verify_backup_key(backup_key):
-        return templates.TemplateResponse("forgot_password.html", {
-            "request": request,
-            "step": "key",
-            "error": "That backup key is not correct.",
-        })
+        return templates.TemplateResponse(
+            "forgot_password.html",
+            {
+                "request": request,
+                "step": "key",
+                "error": "That backup key is not correct.",
+            },
+        )
     request.session["recovery_verified"] = True
-    return templates.TemplateResponse("forgot_password.html", {
-        "request": request,
-        "step": "reset",
-    })
+    return templates.TemplateResponse(
+        "forgot_password.html",
+        {
+            "request": request,
+            "step": "reset",
+        },
+    )
 
 
 @router.post("/forgot-password/reset", response_class=HTMLResponse)
@@ -696,36 +817,47 @@ async def forgot_password_reset(
         errors.append("Passwords do not match.")
 
     if errors:
-        return templates.TemplateResponse("forgot_password.html", {
-            "request": request,
-            "step": "reset",
-            "errors": errors,
-        })
+        return templates.TemplateResponse(
+            "forgot_password.html",
+            {
+                "request": request,
+                "step": "reset",
+                "errors": errors,
+            },
+        )
 
     from .auth import change_password
+
     change_password(new_password)
     request.session.pop("recovery_verified", None)
 
-    return templates.TemplateResponse("forgot_password.html", {
-        "request": request,
-        "step": "done",
-    })
+    return templates.TemplateResponse(
+        "forgot_password.html",
+        {
+            "request": request,
+            "step": "done",
+        },
+    )
 
 
 # ---------------------------------------------------------------------------
 # Setup — SSH hosts (Screen 6)
 # ---------------------------------------------------------------------------
 
+
 @router.get("/setup/hosts", response_class=HTMLResponse)
 async def setup_hosts_page(request: Request) -> HTMLResponse:
     if not admin_exists():
         return RedirectResponse("/setup", status_code=302)
-    return templates.TemplateResponse("setup_hosts.html", {
-        "request": request,
-        "hosts": get_hosts(),
-        "available_keys": get_available_ssh_keys(),
-        "proxmox_pending": request.session.get("setup_proxmox_pending", []),
-    })
+    return templates.TemplateResponse(
+        "setup_hosts.html",
+        {
+            "request": request,
+            "hosts": get_hosts(),
+            "available_keys": get_available_ssh_keys(),
+            "proxmox_pending": request.session.get("setup_proxmox_pending", []),
+        },
+    )
 
 
 @router.post("/setup/hosts/add", response_class=HTMLResponse)
@@ -748,11 +880,21 @@ async def setup_add_host(
     auto_update = enable_auto_update == "on"
 
     if not name or not host_addr:
-        return templates.TemplateResponse("partials/setup_ssh_section.html", _ssh_section_ctx(
-            request,
-            add_error="Name and host/IP are required.",
-            form={"name": name, "host": host_addr, "user": user_val or "", "port": port or "", "auth_method": auth_method, "key_file": key_file},
-        ))
+        return templates.TemplateResponse(
+            "partials/setup_ssh_section.html",
+            _ssh_section_ctx(
+                request,
+                add_error="Name and host/IP are required.",
+                form={
+                    "name": name,
+                    "host": host_addr,
+                    "user": user_val or "",
+                    "port": port or "",
+                    "auth_method": auth_method,
+                    "key_file": key_file,
+                },
+            ),
+        )
 
     host_entry: dict = {"name": name, "host": host_addr}
     if user_val:
@@ -768,11 +910,21 @@ async def setup_add_host(
 
     result = await verify_connection(host_entry, get_ssh_config(), creds)
     if not result["ok"]:
-        return templates.TemplateResponse("partials/setup_ssh_section.html", _ssh_section_ctx(
-            request,
-            add_error=f"Could not connect: {result['message']}",
-            form={"name": name, "host": host_addr, "user": user_val or "", "port": port or "", "auth_method": auth_method, "key_file": key_file},
-        ))
+        return templates.TemplateResponse(
+            "partials/setup_ssh_section.html",
+            _ssh_section_ctx(
+                request,
+                add_error=f"Could not connect: {result['message']}",
+                form={
+                    "name": name,
+                    "host": host_addr,
+                    "user": user_val or "",
+                    "port": port or "",
+                    "auth_method": auth_method,
+                    "key_file": key_file,
+                },
+            ),
+        )
 
     # Connection succeeded — check for Docker before committing
     stack_count = await detect_docker_stacks(host_entry, get_ssh_config(), creds)
@@ -790,22 +942,32 @@ async def setup_add_host(
             "key_file": key_file,
             "auto_update": auto_update,
         }
-        return templates.TemplateResponse("partials/setup_ssh_section.html", _ssh_section_ctx(
-            request,
-            docker_prompt={"name": name, "stack_label": label},
-        ))
+        return templates.TemplateResponse(
+            "partials/setup_ssh_section.html",
+            _ssh_section_ctx(
+                request,
+                docker_prompt={"name": name, "stack_label": label},
+            ),
+        )
 
     # No Docker — add host directly
-    slug = add_host(name=name, host=host_addr, user=user_val, port=port_val, key_path=key_path)
+    slug = add_host(
+        name=name, host=host_addr, user=user_val, port=port_val, key_path=key_path
+    )
     if auth_method == "password" and ssh_password.strip():
         save_credentials(slug, ssh_password=ssh_password.strip())
     if auto_update:
-        set_host_auto_update(slug, os_enabled=True, os_schedule="weekly", auto_reboot=False)
+        set_host_auto_update(
+            slug, os_enabled=True, os_schedule="weekly", auto_reboot=False
+        )
 
-    return templates.TemplateResponse("partials/setup_ssh_section.html", _ssh_section_ctx(
-        request,
-        add_success=f"{name} added successfully.",
-    ))
+    return templates.TemplateResponse(
+        "partials/setup_ssh_section.html",
+        _ssh_section_ctx(
+            request,
+            add_success=f"{name} added successfully.",
+        ),
+    )
 
 
 @router.post("/setup/hosts/confirm-add", response_class=HTMLResponse)
@@ -815,10 +977,13 @@ async def setup_confirm_add_host(
 ) -> HTMLResponse:
     pending = request.session.pop("pending_ssh_host", None)
     if not pending:
-        return templates.TemplateResponse("partials/setup_ssh_section.html", _ssh_section_ctx(
-            request,
-            add_error="Session expired — please add the host again.",
-        ))
+        return templates.TemplateResponse(
+            "partials/setup_ssh_section.html",
+            _ssh_section_ctx(
+                request,
+                add_error="Session expired — please add the host again.",
+            ),
+        )
 
     name = pending["name"]
     host_addr = pending["host"]
@@ -832,24 +997,37 @@ async def setup_confirm_add_host(
     key_path = f"/app/keys/{key_file}" if auth_method == "key" and key_file else None
     docker_mode = "all" if enable_docker == "yes" else None
 
-    slug = add_host(name=name, host=host_addr, user=user_val, port=port_val,
-                    key_path=key_path, docker_mode=docker_mode)
+    slug = add_host(
+        name=name,
+        host=host_addr,
+        user=user_val,
+        port=port_val,
+        key_path=key_path,
+        docker_mode=docker_mode,
+    )
     if auth_method == "password" and ssh_password:
         save_credentials(slug, ssh_password=ssh_password)
     if auto_update:
-        set_host_auto_update(slug, os_enabled=True, os_schedule="weekly", auto_reboot=False)
+        set_host_auto_update(
+            slug, os_enabled=True, os_schedule="weekly", auto_reboot=False
+        )
 
-    return templates.TemplateResponse("partials/setup_ssh_section.html", _ssh_section_ctx(
-        request,
-        add_success=f"{name} added{' with container monitoring' if docker_mode else ''} successfully.",
-    ))
+    return templates.TemplateResponse(
+        "partials/setup_ssh_section.html",
+        _ssh_section_ctx(
+            request,
+            add_success=f"{name} added{' with container monitoring' if docker_mode else ''} successfully.",
+        ),
+    )
 
 
 @router.post("/setup/hosts/{slug}/remove", response_class=HTMLResponse)
 async def setup_remove_host(request: Request, slug: str) -> HTMLResponse:
     delete_host(slug)
     delete_credentials(slug)
-    return templates.TemplateResponse("partials/setup_ssh_section.html", _ssh_section_ctx(request))
+    return templates.TemplateResponse(
+        "partials/setup_ssh_section.html", _ssh_section_ctx(request)
+    )
 
 
 @router.post("/setup/hosts/card-test", response_class=HTMLResponse)
@@ -952,9 +1130,12 @@ async def setup_test_portainer(
     key = portainer_api_key.strip()
     verify_ssl = portainer_verify_ssl == "on"
     if not url or not key:
-        return HTMLResponse('<span class="text-amber-400 text-sm">Enter a URL and API token first.</span>')
+        return HTMLResponse(
+            '<span class="text-amber-400 text-sm">Enter a URL and API token first.</span>'
+        )
     try:
         from .portainer_client import PortainerClient
+
         client = PortainerClient(url=url, api_key=key, verify_ssl=verify_ssl)
         endpoints = await client.get_endpoints()
         count = len(endpoints)
@@ -971,7 +1152,9 @@ async def setup_test_portainer(
             hint = "SSL error — try disabling SSL verification."
         else:
             hint = msg[:120]
-        return HTMLResponse(f'<span class="text-red-400 text-sm">&#10007; {hint}</span>')
+        return HTMLResponse(
+            f'<span class="text-red-400 text-sm">&#10007; {hint}</span>'
+        )
 
 
 @router.post("/setup/portainer/save", response_class=HTMLResponse)
@@ -991,12 +1174,15 @@ async def setup_save_portainer(
     port_cfg = get_portainer_config()
     port_creds = get_integration_credentials("portainer")
     portainer_connected = bool(port_cfg.get("url") and port_creds.get("api_key"))
-    return templates.TemplateResponse("partials/setup_portainer_section.html", {
-        "request": request,
-        "portainer_url": port_cfg.get("url", ""),
-        "portainer_connected": portainer_connected,
-        "portainer_saved": True,
-    })
+    return templates.TemplateResponse(
+        "partials/setup_portainer_section.html",
+        {
+            "request": request,
+            "portainer_url": port_cfg.get("url", ""),
+            "portainer_connected": portainer_connected,
+            "portainer_saved": True,
+        },
+    )
 
 
 @router.post("/setup/dockerhub/save", response_class=HTMLResponse)
@@ -1011,7 +1197,9 @@ async def setup_save_dockerhub(
     if token:
         save_integration_credentials("dockerhub", token=token)
     await reload_backends()
-    return HTMLResponse('<p class="text-sm text-green-400">&#10003; DockerHub credentials saved.</p>')
+    return HTMLResponse(
+        '<p class="text-sm text-green-400">&#10003; DockerHub credentials saved.</p>'
+    )
 
 
 @router.post("/setup/finish")
@@ -1022,6 +1210,7 @@ async def setup_finish(request: Request):
 # ---------------------------------------------------------------------------
 # Setup — Summary (Screen 8)
 # ---------------------------------------------------------------------------
+
 
 @router.get("/setup/summary", response_class=HTMLResponse)
 async def setup_summary_page(request: Request) -> HTMLResponse:
@@ -1034,39 +1223,69 @@ async def setup_summary_page(request: Request) -> HTMLResponse:
         return all(creds.get(k) for k in keys)
 
     integrations = [
-        ("Proxmox VE",        get_proxmox_config().get("url"),     _cred_set("proxmox", "api_token")),
-        ("Proxmox Backup",    get_pbs_config().get("url"),         _cred_set("pbs", "api_token")),
-        ("OPNsense",          get_opnsense_config().get("url"),    _cred_set("opnsense", "api_key", "api_secret")),
-        ("pfSense",           get_pfsense_config().get("url"),     _cred_set("pfsense", "api_key")),
-        ("Home Assistant",    get_homeassistant_config().get("url"), _cred_set("homeassistant", "api_token")),
-        ("Portainer",         get_portainer_config().get("url"),   _cred_set("portainer", "api_key")),
-        ("DockerHub",         get_dockerhub_config().get("username"), False),
+        (
+            "Proxmox VE",
+            get_proxmox_config().get("url"),
+            _cred_set("proxmox", "api_token"),
+        ),
+        ("Proxmox Backup", get_pbs_config().get("url"), _cred_set("pbs", "api_token")),
+        (
+            "OPNsense",
+            get_opnsense_config().get("url"),
+            _cred_set("opnsense", "api_key", "api_secret"),
+        ),
+        ("pfSense", get_pfsense_config().get("url"), _cred_set("pfsense", "api_key")),
+        (
+            "Home Assistant",
+            get_homeassistant_config().get("url"),
+            _cred_set("homeassistant", "api_token"),
+        ),
+        (
+            "Portainer",
+            get_portainer_config().get("url"),
+            _cred_set("portainer", "api_key"),
+        ),
+        ("DockerHub", get_dockerhub_config().get("username"), False),
     ]
     # Only show integrations that have a URL/username configured
-    configured_integrations = [(name, bool(url or cred)) for name, url, cred in integrations if url]
+    configured_integrations = [
+        (name, bool(url or cred)) for name, url, cred in integrations if url
+    ]
     dockerhub_cfg = get_dockerhub_config()
     if dockerhub_cfg.get("username"):
         configured_integrations.append(("DockerHub", True))
 
     pushover_cfg = get_pushover_config()
     pushover_creds = get_integration_credentials("pushover")
-    schedule_labels = {"6h": "every 6 hours", "12h": "every 12 hours", "24h": "daily", "manual": "manual only"}
+    schedule_labels = {
+        "6h": "every 6 hours",
+        "12h": "every 12 hours",
+        "24h": "daily",
+        "manual": "manual only",
+    }
 
-    return templates.TemplateResponse("setup_summary.html", {
-        "request": request,
-        "timezone": get_timezone(),
-        "mfa_enabled": mfa_enrolled(),
-        "hosts": get_hosts(),
-        "configured_integrations": configured_integrations,
-        "pushover_enabled": pushover_cfg.get("enabled", False) and bool(pushover_creds.get("api_token")),
-        "update_schedule_label": schedule_labels.get(get_update_check_schedule(), "manual only"),
-    })
+    return templates.TemplateResponse(
+        "setup_summary.html",
+        {
+            "request": request,
+            "timezone": get_timezone(),
+            "mfa_enabled": mfa_enrolled(),
+            "hosts": get_hosts(),
+            "configured_integrations": configured_integrations,
+            "pushover_enabled": pushover_cfg.get("enabled", False)
+            and bool(pushover_creds.get("api_token")),
+            "update_schedule_label": schedule_labels.get(
+                get_update_check_schedule(), "manual only"
+            ),
+        },
+    )
 
 
 # ---------------------------------------------------------------------------
 # ---------------------------------------------------------------------------
 # Setup — Container monitoring (Screen 7)
 # ---------------------------------------------------------------------------
+
 
 @router.get("/setup/containers", response_class=HTMLResponse)
 async def setup_containers_page(request: Request) -> HTMLResponse:
@@ -1078,26 +1297,31 @@ async def setup_containers_page(request: Request) -> HTMLResponse:
     host_data = []
     for h in hosts:
         from .credentials import get_credentials
+
         creds = get_credentials(h["slug"])
         containers = await discover_containers(h, ssh_cfg, creds)
-        host_data.append({
-            "id": h["slug"],
-            "name": h["name"],
-            "ip": h.get("host", ""),
-            "containers": containers,
-        })
+        host_data.append(
+            {
+                "id": h["slug"],
+                "name": h["name"],
+                "ip": h.get("host", ""),
+                "containers": containers,
+            }
+        )
 
-    return templates.TemplateResponse("setup_containers.html", {
-        "request": request,
-        "hosts": host_data,
-    })
+    return templates.TemplateResponse(
+        "setup_containers.html",
+        {
+            "request": request,
+            "hosts": host_data,
+        },
+    )
 
 
 @router.post("/setup/containers/save", response_class=HTMLResponse)
-async def setup_containers_save(
-    request: Request,
-    containers: list[str] = Form(default=[]),
-) -> HTMLResponse:
+async def setup_containers_save(request: Request) -> HTMLResponse:
+    form = await request.form()
+    containers = form.getlist("containers")
     save_wizard_container_selection(containers)
     return RedirectResponse("/setup/notifications", status_code=303)
 
@@ -1105,6 +1329,7 @@ async def setup_containers_save(
 # ---------------------------------------------------------------------------
 # Setup — Notifications + update check schedule (Screen 8)
 # ---------------------------------------------------------------------------
+
 
 @router.get("/setup/notifications", response_class=HTMLResponse)
 async def setup_notifications_page(request: Request) -> HTMLResponse:
@@ -1114,21 +1339,24 @@ async def setup_notifications_page(request: Request) -> HTMLResponse:
     pushover_cfg = get_pushover_config()
     email_cfg = get_email_config()
     email_creds = get_integration_credentials("email")
-    return templates.TemplateResponse("setup_notifications.html", {
-        "request": request,
-        "pushover_token_set": bool(pushover_creds.get("api_token")),
-        "pushover_user_set": bool(pushover_creds.get("user_key")),
-        "pushover_enabled": pushover_cfg.get("enabled", False),
-        "email_configured": bool(email_cfg.get("smtp_host")),
-        "email_sender": email_cfg.get("sender_address", ""),
-        "email_recipient": email_cfg.get("recipient_address", ""),
-        "email_smtp_host": email_cfg.get("smtp_host", ""),
-        "email_smtp_port": email_cfg.get("smtp_port", 587),
-        "email_tls": email_cfg.get("tls", True),
-        "email_sender_name": email_cfg.get("sender_name", ""),
-        "email_password_set": bool(email_creds.get("smtp_password")),
-        "update_schedule": get_update_check_schedule(),
-    })
+    return templates.TemplateResponse(
+        "setup_notifications.html",
+        {
+            "request": request,
+            "pushover_token_set": bool(pushover_creds.get("api_token")),
+            "pushover_user_set": bool(pushover_creds.get("user_key")),
+            "pushover_enabled": pushover_cfg.get("enabled", False),
+            "email_configured": bool(email_cfg.get("smtp_host")),
+            "email_sender": email_cfg.get("sender_address", ""),
+            "email_recipient": email_cfg.get("recipient_address", ""),
+            "email_smtp_host": email_cfg.get("smtp_host", ""),
+            "email_smtp_port": email_cfg.get("smtp_port", 587),
+            "email_tls": email_cfg.get("tls", True),
+            "email_sender_name": email_cfg.get("sender_name", ""),
+            "email_password_set": bool(email_creds.get("smtp_password")),
+            "update_schedule": get_update_check_schedule(),
+        },
+    )
 
 
 @router.post("/setup/notifications/pushover/test", response_class=HTMLResponse)
@@ -1140,22 +1368,33 @@ async def setup_test_pushover(
     token = pushover_token.strip()
     user_key = pushover_user_key.strip()
     if not token or not user_key:
-        return HTMLResponse('<span class="text-amber-400 text-sm">Enter an app token and user key first.</span>')
+        return HTMLResponse(
+            '<span class="text-amber-400 text-sm">Enter an app token and user key first.</span>'
+        )
     try:
         async with httpx.AsyncClient(timeout=10) as c:
-            resp = await c.post("https://api.pushover.net/1/messages.json", data={
-                "token": token,
-                "user": user_key,
-                "title": "Keepup test",
-                "message": "Keepup setup — Pushover is connected.",
-            })
+            resp = await c.post(
+                "https://api.pushover.net/1/messages.json",
+                data={
+                    "token": token,
+                    "user": user_key,
+                    "title": "Keepup test",
+                    "message": "Keepup setup — Pushover is connected.",
+                },
+            )
             if resp.status_code == 200:
-                return HTMLResponse('<span class="text-green-400 text-sm">&#10003; Test notification sent.</span>')
+                return HTMLResponse(
+                    '<span class="text-green-400 text-sm">&#10003; Test notification sent.</span>'
+                )
             body = resp.json()
             errors = ", ".join(body.get("errors", [str(resp.status_code)]))
-            return HTMLResponse(f'<span class="text-red-400 text-sm">&#10007; {errors}</span>')
+            return HTMLResponse(
+                f'<span class="text-red-400 text-sm">&#10007; {errors}</span>'
+            )
     except Exception as exc:
-        return HTMLResponse(f'<span class="text-red-400 text-sm">&#10007; {str(exc)[:120]}</span>')
+        return HTMLResponse(
+            f'<span class="text-red-400 text-sm">&#10007; {str(exc)[:120]}</span>'
+        )
 
 
 @router.post("/setup/notifications/pushover/save", response_class=HTMLResponse)
@@ -1171,7 +1410,9 @@ async def setup_save_pushover(
     if token:
         save_integration_credentials("pushover", api_token=token, user_key=user_key)
     save_pushover_config(enabled=enabled)
-    return HTMLResponse('<span class="text-green-400 text-sm">&#10003; Pushover settings saved.</span>')
+    return HTMLResponse(
+        '<span class="text-green-400 text-sm">&#10003; Pushover settings saved.</span>'
+    )
 
 
 @router.post("/setup/notifications/schedule/save", response_class=HTMLResponse)
@@ -1180,9 +1421,16 @@ async def setup_save_schedule(
     update_schedule: str = Form("manual"),
 ) -> HTMLResponse:
     save_update_check_schedule(update_schedule)
-    labels = {"6h": "every 6 hours", "12h": "every 12 hours", "24h": "daily", "manual": "manual only"}
+    labels = {
+        "6h": "every 6 hours",
+        "12h": "every 12 hours",
+        "24h": "daily",
+        "manual": "manual only",
+    }
     label = labels.get(update_schedule, "manual only")
-    return HTMLResponse(f'<span class="text-green-400 text-sm">&#10003; Update checks set to {label}.</span>')
+    return HTMLResponse(
+        f'<span class="text-green-400 text-sm">&#10003; Update checks set to {label}.</span>'
+    )
 
 
 @router.post("/setup/notifications/email/save", response_class=HTMLResponse)
@@ -1197,7 +1445,9 @@ async def setup_save_email(
     tls: str = Form(""),
 ) -> HTMLResponse:
     if not smtp_host.strip():
-        return HTMLResponse('<span class="text-amber-400 text-sm">SMTP host is required.</span>')
+        return HTMLResponse(
+            '<span class="text-amber-400 text-sm">SMTP host is required.</span>'
+        )
     save_email_config(
         sender_name=sender_name.strip(),
         sender_address=sender_address.strip(),
@@ -1208,7 +1458,9 @@ async def setup_save_email(
     )
     if smtp_password.strip():
         save_integration_credentials("email", smtp_password=smtp_password.strip())
-    return HTMLResponse('<span class="text-green-400 text-sm">&#10003; Email settings saved.</span>')
+    return HTMLResponse(
+        '<span class="text-green-400 text-sm">&#10003; Email settings saved.</span>'
+    )
 
 
 @router.post("/setup/notifications/email/test", response_class=HTMLResponse)
@@ -1228,7 +1480,9 @@ async def setup_test_email(
 
     host = smtp_host.strip()
     if not host or not sender_address.strip() or not recipient_address.strip():
-        return HTMLResponse('<span class="text-amber-400 text-sm">Fill in SMTP host, sender and recipient first.</span>')
+        return HTMLResponse(
+            '<span class="text-amber-400 text-sm">Fill in SMTP host, sender and recipient first.</span>'
+        )
 
     # Fall back to saved password if none entered
     if not smtp_password.strip():
@@ -1236,38 +1490,56 @@ async def setup_test_email(
         smtp_password = creds.get("smtp_password", "")
 
     try:
-        msg = MIMEText("This is a test email from Keepup to verify your SMTP configuration.")
+        msg = MIMEText(
+            "This is a test email from Keepup to verify your SMTP configuration."
+        )
         msg["Subject"] = "Keepup test email"
-        msg["From"] = f"{sender_name.strip()} <{sender_address.strip()}>" if sender_name.strip() else sender_address.strip()
+        msg["From"] = (
+            f"{sender_name.strip()} <{sender_address.strip()}>"
+            if sender_name.strip()
+            else sender_address.strip()
+        )
         msg["To"] = recipient_address.strip()
 
-        use_tls = (tls == "on")
+        use_tls = tls == "on"
         if use_tls:
             context = ssl.create_default_context()
-            with smtplib.SMTP_SSL(host, smtp_port, context=context, timeout=10) as server:
+            with smtplib.SMTP_SSL(
+                host, smtp_port, context=context, timeout=10
+            ) as server:
                 if smtp_password:
                     server.login(sender_address.strip(), smtp_password)
-                server.sendmail(sender_address.strip(), [recipient_address.strip()], msg.as_string())
+                server.sendmail(
+                    sender_address.strip(), [recipient_address.strip()], msg.as_string()
+                )
         else:
             with smtplib.SMTP(host, smtp_port, timeout=10) as server:
                 server.ehlo()
                 server.starttls()
                 if smtp_password:
                     server.login(sender_address.strip(), smtp_password)
-                server.sendmail(sender_address.strip(), [recipient_address.strip()], msg.as_string())
+                server.sendmail(
+                    sender_address.strip(), [recipient_address.strip()], msg.as_string()
+                )
 
-        return HTMLResponse('<span class="text-green-400 text-sm">&#10003; Test email sent.</span>')
+        return HTMLResponse(
+            '<span class="text-green-400 text-sm">&#10003; Test email sent.</span>'
+        )
     except Exception as exc:
-        return HTMLResponse(f'<span class="text-red-400 text-sm">&#10007; {str(exc)[:160]}</span>')
+        return HTMLResponse(
+            f'<span class="text-red-400 text-sm">&#10007; {str(exc)[:160]}</span>'
+        )
 
 
 @router.post("/setup/notifications/email/delete", response_class=HTMLResponse)
 async def setup_delete_email(request: Request) -> HTMLResponse:
     from .config_manager import load_config, save_config
+
     config = load_config()
     config.pop("email", None)
     save_config(config)
     from .credentials import delete_credentials
+
     try:
         delete_credentials("email")
     except Exception:

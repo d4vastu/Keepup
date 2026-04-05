@@ -10,6 +10,7 @@ def test_notifications_badge_zero(client):
 
 def test_notifications_badge_with_errors(client, monkeypatch):
     import app.main as m
+
     monkeypatch.setattr(m, "get_unread_count", lambda: 3)
     response = client.get("/api/notifications/badge")
     assert response.status_code == 200
@@ -18,6 +19,7 @@ def test_notifications_badge_with_errors(client, monkeypatch):
 
 def test_notifications_badge_high_count(client, monkeypatch):
     import app.main as m
+
     monkeypatch.setattr(m, "get_unread_count", lambda: 15)
     response = client.get("/api/notifications/badge")
     assert response.status_code == 200

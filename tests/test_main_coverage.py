@@ -1,4 +1,5 @@
 """Targeted tests to cover remaining uncovered lines in app/main.py."""
+
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -9,13 +10,17 @@ from fastapi.testclient import TestClient
 # Line 41: no admin → redirect to /setup
 # ---------------------------------------------------------------------------
 
-def test_protected_route_no_admin_redirects_to_setup(config_file, data_dir, monkeypatch):
+
+def test_protected_route_no_admin_redirects_to_setup(
+    config_file, data_dir, monkeypatch
+):
     """When no admin account exists, any protected route redirects to /setup."""
     monkeypatch.setenv("PORTAINER_URL", "https://portainer.test:9443")
     monkeypatch.setenv("PORTAINER_API_KEY", "test-api-key")
     monkeypatch.setenv("PORTAINER_VERIFY_SSL", "false")
 
     from app.main import app
+
     # No create_admin call — credential store is empty
     tc = TestClient(app, raise_server_exceptions=True)
     response = tc.get("/dashboard", follow_redirects=False)
@@ -26,6 +31,7 @@ def test_protected_route_no_admin_redirects_to_setup(config_file, data_dir, monk
 # ---------------------------------------------------------------------------
 # Lines 72-86: _check_version_notification()
 # ---------------------------------------------------------------------------
+
 
 def test_version_notification_fresh_install(tmp_path, monkeypatch):
     """Fresh install: no existing version file → writes version, no notification."""
@@ -88,6 +94,7 @@ def test_version_notification_exception_silenced(tmp_path, monkeypatch):
 # Lines 91-94: _startup() async handler
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_startup_calls_all_hooks(monkeypatch):
     """_startup() calls _check_version_notification, reload_backends,
@@ -116,18 +123,28 @@ async def test_startup_calls_all_hooks(monkeypatch):
 # Lines 311-312: check_and_notify exception swallowed inside docker_check
 # ---------------------------------------------------------------------------
 
+
 def test_docker_check_notify_exception_is_swallowed(client, monkeypatch):
     """If check_and_notify raises, docker_check still returns a 200 response."""
     import app.backend_loader as bl
 
     ssh_b = MagicMock()
     ssh_b.BACKEND_KEY = "portainer"
-    ssh_b.get_stacks_with_update_status = AsyncMock(return_value=[
-        {"name": "myapp", "status": "up-to-date", "backend_key": "portainer", "ref": "myapp"}
-    ])
+    ssh_b.get_stacks_with_update_status = AsyncMock(
+        return_value=[
+            {
+                "name": "myapp",
+                "status": "up-to-date",
+                "backend_key": "portainer",
+                "ref": "myapp",
+            }
+        ]
+    )
     monkeypatch.setattr(bl, "_backends", [ssh_b])
 
-    with patch("app.update_notifier.check_and_notify", side_effect=RuntimeError("notif boom")):
+    with patch(
+        "app.update_notifier.check_and_notify", side_effect=RuntimeError("notif boom")
+    ):
         response = client.get("/api/docker/check")
 
     assert response.status_code == 200
@@ -136,6 +153,7 @@ def test_docker_check_notify_exception_is_swallowed(client, monkeypatch):
 # ---------------------------------------------------------------------------
 # Lines 317-318: outer gather exception → error partial
 # ---------------------------------------------------------------------------
+
 
 def test_docker_check_gather_exception_returns_error_partial(client, monkeypatch):
     """If asyncio.gather itself raises, docker_check returns the error partial."""
@@ -161,32 +179,41 @@ def test_docker_check_gather_exception_returns_error_partial(client, monkeypatch
 # _newer_version and _fetch_latest_version helpers
 # ---------------------------------------------------------------------------
 
+
 def test_newer_version_returns_true_when_latest_is_higher():
     import app.main as m
+
     assert m._newer_version("99.0.0") is True
 
 
 def test_newer_version_returns_false_when_same():
     import app.main as m
+
     assert m._newer_version(m.APP_VERSION) is False
 
 
 def test_newer_version_returns_false_on_none():
     import app.main as m
+
     assert m._newer_version(None) is False
 
 
 def test_newer_version_returns_false_on_bad_input():
     import app.main as m
+
     assert m._newer_version("not-a-version") is False
 
 
 @pytest.mark.asyncio
 async def test_fetch_latest_version_success(monkeypatch):
     import app.main as m
+
     resp = MagicMock()
     resp.status_code = 200
-    resp.json.return_value = {"tag_name": "v1.2.3", "html_url": "https://github.com/example"}
+    resp.json.return_value = {
+        "tag_name": "v1.2.3",
+        "html_url": "https://github.com/example",
+    }
     mock_client = AsyncMock()
     mock_client.get = AsyncMock(return_value=resp)
     ctx = MagicMock()
@@ -201,6 +228,7 @@ async def test_fetch_latest_version_success(monkeypatch):
 @pytest.mark.asyncio
 async def test_fetch_latest_version_http_error(monkeypatch):
     import app.main as m
+
     resp = MagicMock()
     resp.status_code = 403
     mock_client = AsyncMock()
@@ -217,6 +245,7 @@ async def test_fetch_latest_version_http_error(monkeypatch):
 @pytest.mark.asyncio
 async def test_fetch_latest_version_exception(monkeypatch):
     import app.main as m
+
     with patch("httpx.AsyncClient", side_effect=Exception("network down")):
         tag, url = await m._fetch_latest_version()
     assert tag is None

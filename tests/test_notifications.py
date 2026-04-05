@@ -1,4 +1,5 @@
 """Tests for notification store (app/notifications.py) and related routes."""
+
 from unittest.mock import AsyncMock, patch
 
 
@@ -6,8 +7,10 @@ from unittest.mock import AsyncMock, patch
 # Unit tests for notifications module
 # ---------------------------------------------------------------------------
 
+
 def test_notify_adds_entry(data_dir, monkeypatch):
     import app.notifications as n
+
     monkeypatch.setattr(n, "_NOTIF_PATH", data_dir / "notifications.json")
     monkeypatch.setattr(n, "_DATA_DIR", data_dir)
 
@@ -23,6 +26,7 @@ def test_notify_adds_entry(data_dir, monkeypatch):
 
 def test_get_unread_count(data_dir, monkeypatch):
     import app.notifications as n
+
     monkeypatch.setattr(n, "_NOTIF_PATH", data_dir / "notifications.json")
     monkeypatch.setattr(n, "_DATA_DIR", data_dir)
 
@@ -34,6 +38,7 @@ def test_get_unread_count(data_dir, monkeypatch):
 
 def test_mark_all_read(data_dir, monkeypatch):
     import app.notifications as n
+
     monkeypatch.setattr(n, "_NOTIF_PATH", data_dir / "notifications.json")
     monkeypatch.setattr(n, "_DATA_DIR", data_dir)
 
@@ -47,6 +52,7 @@ def test_mark_all_read(data_dir, monkeypatch):
 
 def test_get_notifications_limit(data_dir, monkeypatch):
     import app.notifications as n
+
     monkeypatch.setattr(n, "_NOTIF_PATH", data_dir / "notifications.json")
     monkeypatch.setattr(n, "_DATA_DIR", data_dir)
 
@@ -59,6 +65,7 @@ def test_get_notifications_limit(data_dir, monkeypatch):
 
 def test_empty_store_returns_empty(data_dir, monkeypatch):
     import app.notifications as n
+
     monkeypatch.setattr(n, "_NOTIF_PATH", data_dir / "notifications.json")
     monkeypatch.setattr(n, "_DATA_DIR", data_dir)
 
@@ -70,6 +77,7 @@ def test_empty_store_returns_empty(data_dir, monkeypatch):
 # Route tests
 # ---------------------------------------------------------------------------
 
+
 def test_notifications_badge_zero(client):
     response = client.get("/api/notifications/badge")
     assert response.status_code == 200
@@ -78,6 +86,7 @@ def test_notifications_badge_zero(client):
 
 def test_notifications_badge_with_unread(client, monkeypatch):
     import app.main as m
+
     monkeypatch.setattr(m, "get_unread_count", lambda: 5)
     response = client.get("/api/notifications/badge")
     assert response.status_code == 200
@@ -92,14 +101,21 @@ def test_notifications_panel_empty(client):
 
 def test_notifications_panel_with_entry(client, monkeypatch):
     import app.main as m
-    monkeypatch.setattr(m, "get_notifications", lambda limit=20: [{
-        "id": "abc123",
-        "title": "Update failed",
-        "message": "Something went wrong",
-        "level": "error",
-        "created_at": "2026-04-04T12:00:00+00:00",
-        "read": False,
-    }])
+
+    monkeypatch.setattr(
+        m,
+        "get_notifications",
+        lambda limit=20: [
+            {
+                "id": "abc123",
+                "title": "Update failed",
+                "message": "Something went wrong",
+                "level": "error",
+                "created_at": "2026-04-04T12:00:00+00:00",
+                "read": False,
+            }
+        ],
+    )
     response = client.get("/api/notifications/panel")
     assert response.status_code == 200
     assert "Update failed" in response.text
@@ -121,36 +137,44 @@ def test_auto_updates_page_has_history_link(client):
 # Auto-update history route
 # ---------------------------------------------------------------------------
 
+
 def test_auto_update_history_empty(client):
     response = client.get("/admin/auto-updates/history")
     assert response.status_code == 200
-    assert "No auto-update runs" in response.text or "Auto-Update History" in response.text
+    assert (
+        "No auto-update runs" in response.text or "Auto-Update History" in response.text
+    )
 
 
 def test_auto_update_history_with_entries(client, monkeypatch):
     import app.admin as a
-    monkeypatch.setattr(a, "get_recent", lambda n: [
-        {
-            "id": "abc123",
-            "type": "os",
-            "target": "test-host",
-            "target_name": "Test Host",
-            "ran_at": "2026-04-04T12:00:00+00:00",
-            "status": "success",
-            "lines": ["All packages up to date."],
-            "read": True,
-        },
-        {
-            "id": "def456",
-            "type": "docker",
-            "target": "portainer/3:1",
-            "target_name": "My Stack",
-            "ran_at": "2026-04-04T11:00:00+00:00",
-            "status": "error",
-            "lines": ["Connection refused"],
-            "read": False,
-        },
-    ])
+
+    monkeypatch.setattr(
+        a,
+        "get_recent",
+        lambda n: [
+            {
+                "id": "abc123",
+                "type": "os",
+                "target": "test-host",
+                "target_name": "Test Host",
+                "ran_at": "2026-04-04T12:00:00+00:00",
+                "status": "success",
+                "lines": ["All packages up to date."],
+                "read": True,
+            },
+            {
+                "id": "def456",
+                "type": "docker",
+                "target": "portainer/3:1",
+                "target_name": "My Stack",
+                "ran_at": "2026-04-04T11:00:00+00:00",
+                "status": "error",
+                "lines": ["Connection refused"],
+                "read": False,
+            },
+        ],
+    )
     response = client.get("/admin/auto-updates/history")
     assert response.status_code == 200
     assert "Test Host" in response.text
@@ -163,22 +187,29 @@ def test_auto_update_history_with_entries(client, monkeypatch):
 # Pushover config routes
 # ---------------------------------------------------------------------------
 
+
 def test_pushover_save_returns_200(client):
-    response = client.post("/admin/connections/pushover", data={
-        "pushover_api_token": "test-token",
-        "pushover_user_key": "test-user-key",
-        "pushover_enabled": "on",
-    })
+    response = client.post(
+        "/admin/connections/pushover",
+        data={
+            "pushover_api_token": "test-token",
+            "pushover_user_key": "test-user-key",
+            "pushover_enabled": "on",
+        },
+    )
     assert response.status_code == 200
     assert "pushover" in response.text.lower() or "Pushover" in response.text
 
 
 def test_pushover_save_no_credentials(client):
-    response = client.post("/admin/connections/pushover", data={
-        "pushover_api_token": "",
-        "pushover_user_key": "",
-        "pushover_enabled": "",
-    })
+    response = client.post(
+        "/admin/connections/pushover",
+        data={
+            "pushover_api_token": "",
+            "pushover_user_key": "",
+            "pushover_enabled": "",
+        },
+    )
     assert response.status_code == 200
 
 
@@ -207,9 +238,11 @@ def test_admin_connections_includes_pushover(client):
 # Branch coverage for notifications.py
 # ---------------------------------------------------------------------------
 
+
 def test_load_returns_empty_on_corrupt_json(data_dir, monkeypatch):
     """_load() silently returns [] when JSON is corrupt (lines 20-21)."""
     import app.notifications as n
+
     notif_path = data_dir / "notifications.json"
     notif_path.write_text("NOT VALID JSON{{")
     monkeypatch.setattr(n, "_NOTIF_PATH", notif_path)
@@ -219,6 +252,7 @@ def test_load_returns_empty_on_corrupt_json(data_dir, monkeypatch):
 def test_notify_pushover_ensure_future_exception_is_swallowed(data_dir, monkeypatch):
     """If asyncio.ensure_future raises, notify() swallows it (lines 47-48)."""
     import app.notifications as n
+
     monkeypatch.setattr(n, "_NOTIF_PATH", data_dir / "notifications.json")
 
     with patch("asyncio.ensure_future", side_effect=RuntimeError("no event loop")):

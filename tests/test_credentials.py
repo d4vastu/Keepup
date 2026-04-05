@@ -1,4 +1,5 @@
 """Tests for the encrypted credential store."""
+
 import pytest
 
 
@@ -11,14 +12,17 @@ def _use_data_dir(data_dir):
 # Key auto-generation
 # ---------------------------------------------------------------------------
 
+
 def test_fernet_key_auto_created(data_dir):
     from app.credentials import _get_fernet, _SECRET_FILE
+
     _get_fernet()
     assert _SECRET_FILE.exists()
 
 
 def test_fernet_key_is_stable(data_dir):
     from app.credentials import _get_fernet
+
     f1 = _get_fernet()
     f2 = _get_fernet()
     # Encrypting with one and decrypting with the other must work
@@ -30,8 +34,10 @@ def test_fernet_key_is_stable(data_dir):
 # save / get round-trip
 # ---------------------------------------------------------------------------
 
+
 def test_save_and_get_ssh_password(data_dir):
     from app.credentials import save_credentials, get_credentials
+
     save_credentials("myhost", ssh_password="s3cr3t")
     creds = get_credentials("myhost")
     assert creds["ssh_password"] == "s3cr3t"
@@ -39,6 +45,7 @@ def test_save_and_get_ssh_password(data_dir):
 
 def test_save_and_get_ssh_key(data_dir):
     from app.credentials import save_credentials, get_credentials
+
     save_credentials("myhost", ssh_key="-----BEGIN OPENSSH PRIVATE KEY-----\n...")
     creds = get_credentials("myhost")
     assert creds["ssh_key"].startswith("-----BEGIN OPENSSH PRIVATE KEY-----")
@@ -46,6 +53,7 @@ def test_save_and_get_ssh_key(data_dir):
 
 def test_save_and_get_sudo_password(data_dir):
     from app.credentials import save_credentials, get_credentials
+
     save_credentials("myhost", sudo_password="sudopass")
     creds = get_credentials("myhost")
     assert creds["sudo_password"] == "sudopass"
@@ -53,6 +61,7 @@ def test_save_and_get_sudo_password(data_dir):
 
 def test_none_does_not_overwrite_existing(data_dir):
     from app.credentials import save_credentials, get_credentials
+
     save_credentials("myhost", ssh_password="original")
     save_credentials("myhost", ssh_password=None, sudo_password="newsudo")
     creds = get_credentials("myhost")
@@ -62,6 +71,7 @@ def test_none_does_not_overwrite_existing(data_dir):
 
 def test_empty_string_clears_field(data_dir):
     from app.credentials import save_credentials, get_credentials
+
     save_credentials("myhost", ssh_password="original")
     save_credentials("myhost", ssh_password="")
     creds = get_credentials("myhost")
@@ -70,11 +80,13 @@ def test_empty_string_clears_field(data_dir):
 
 def test_get_credentials_unknown_host_returns_empty(data_dir):
     from app.credentials import get_credentials
+
     assert get_credentials("nonexistent") == {}
 
 
 def test_multiple_hosts_isolated(data_dir):
     from app.credentials import save_credentials, get_credentials
+
     save_credentials("host-a", ssh_password="aaa")
     save_credentials("host-b", ssh_password="bbb")
     assert get_credentials("host-a")["ssh_password"] == "aaa"
@@ -85,8 +97,10 @@ def test_multiple_hosts_isolated(data_dir):
 # delete
 # ---------------------------------------------------------------------------
 
+
 def test_delete_credentials(data_dir):
     from app.credentials import save_credentials, get_credentials, delete_credentials
+
     save_credentials("myhost", ssh_password="s3cr3t")
     delete_credentials("myhost")
     assert get_credentials("myhost") == {}
@@ -94,6 +108,7 @@ def test_delete_credentials(data_dir):
 
 def test_delete_nonexistent_is_safe(data_dir):
     from app.credentials import delete_credentials
+
     delete_credentials("does-not-exist")  # should not raise
 
 
@@ -101,8 +116,10 @@ def test_delete_nonexistent_is_safe(data_dir):
 # rename
 # ---------------------------------------------------------------------------
 
+
 def test_rename_credentials(data_dir):
     from app.credentials import save_credentials, get_credentials, rename_credentials
+
     save_credentials("old-slug", ssh_password="pass")
     rename_credentials("old-slug", "new-slug")
     assert get_credentials("new-slug")["ssh_password"] == "pass"
@@ -111,6 +128,7 @@ def test_rename_credentials(data_dir):
 
 def test_rename_same_slug_is_noop(data_dir):
     from app.credentials import save_credentials, get_credentials, rename_credentials
+
     save_credentials("myhost", ssh_password="pass")
     rename_credentials("myhost", "myhost")
     assert get_credentials("myhost")["ssh_password"] == "pass"
@@ -118,6 +136,7 @@ def test_rename_same_slug_is_noop(data_dir):
 
 def test_rename_nonexistent_is_safe(data_dir):
     from app.credentials import rename_credentials
+
     rename_credentials("ghost", "new-ghost")  # should not raise
 
 
@@ -125,8 +144,10 @@ def test_rename_nonexistent_is_safe(data_dir):
 # save_sudo_password shortcut
 # ---------------------------------------------------------------------------
 
+
 def test_save_sudo_password(data_dir):
     from app.credentials import save_sudo_password, get_credentials
+
     save_sudo_password("myhost", "sudopass123")
     assert get_credentials("myhost")["sudo_password"] == "sudopass123"
 
@@ -135,14 +156,21 @@ def test_save_sudo_password(data_dir):
 # credential_status
 # ---------------------------------------------------------------------------
 
+
 def test_credential_status_empty(data_dir):
     from app.credentials import credential_status
+
     status = credential_status("myhost")
-    assert status == {"has_ssh_password": False, "has_ssh_key": False, "has_sudo_password": False}
+    assert status == {
+        "has_ssh_password": False,
+        "has_ssh_key": False,
+        "has_sudo_password": False,
+    }
 
 
 def test_credential_status_with_password(data_dir):
     from app.credentials import save_credentials, credential_status
+
     save_credentials("myhost", ssh_password="pass")
     status = credential_status("myhost")
     assert status["has_ssh_password"] is True
@@ -152,6 +180,7 @@ def test_credential_status_with_password(data_dir):
 
 def test_credential_status_with_key_and_sudo(data_dir):
     from app.credentials import save_credentials, credential_status
+
     save_credentials("myhost", ssh_key="-----BEGIN...", sudo_password="sudo")
     status = credential_status("myhost")
     assert status["has_ssh_key"] is True
@@ -163,8 +192,10 @@ def test_credential_status_with_key_and_sudo(data_dir):
 # Encryption: credentials.json is not plaintext
 # ---------------------------------------------------------------------------
 
+
 def test_credentials_file_is_not_plaintext(data_dir):
     from app.credentials import save_credentials, _CREDS_FILE
+
     save_credentials("myhost", ssh_password="supersecret")
     raw = _CREDS_FILE.read_bytes()
     assert b"supersecret" not in raw
@@ -175,8 +206,14 @@ def test_credentials_file_is_not_plaintext(data_dir):
 # Integration credentials — delete and wipe (PR1 additions)
 # ---------------------------------------------------------------------------
 
+
 def test_delete_integration_credentials_removes_entry(data_dir):
-    from app.credentials import save_integration_credentials, get_integration_credentials, delete_integration_credentials
+    from app.credentials import (
+        save_integration_credentials,
+        get_integration_credentials,
+        delete_integration_credentials,
+    )
+
     save_integration_credentials("portainer", api_key="mykey")
     assert get_integration_credentials("portainer").get("api_key") == "mykey"
     delete_integration_credentials("portainer")
@@ -185,12 +222,20 @@ def test_delete_integration_credentials_removes_entry(data_dir):
 
 def test_delete_integration_credentials_safe_for_nonexistent(data_dir):
     from app.credentials import delete_integration_credentials
+
     # Should not raise even if key doesn't exist
     delete_integration_credentials("nonexistent-key")
 
 
 def test_wipe_credential_store_clears_everything(data_dir):
-    from app.credentials import save_credentials, save_integration_credentials, wipe_credential_store, get_credentials, get_integration_credentials
+    from app.credentials import (
+        save_credentials,
+        save_integration_credentials,
+        wipe_credential_store,
+        get_credentials,
+        get_integration_credentials,
+    )
+
     save_credentials("myhost", ssh_password="pass")
     save_integration_credentials("portainer", api_key="key")
     wipe_credential_store()
@@ -200,6 +245,7 @@ def test_wipe_credential_store_clears_everything(data_dir):
 
 def test_wipe_credential_store_then_get_returns_empty(data_dir):
     from app.credentials import save_credentials, wipe_credential_store, get_credentials
+
     save_credentials("host-a", ssh_password="aaa")
     save_credentials("host-b", ssh_password="bbb")
     wipe_credential_store()

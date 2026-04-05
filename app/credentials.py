@@ -7,6 +7,7 @@ is auto-generated on first run and stored at /app/data/.secret.
 
 Nothing sensitive is ever written to config.yml.
 """
+
 import json
 import os
 from pathlib import Path
@@ -51,6 +52,7 @@ def _save_store(store: dict) -> None:
 # Public API
 # ---------------------------------------------------------------------------
 
+
 def get_credentials(slug: str) -> dict:
     """Return the credential dict for a host slug. Never raises."""
     return _load_store().get(slug, {})
@@ -75,11 +77,11 @@ def save_credentials(
         ("sudo_password", sudo_password),
     ]:
         if value is None:
-            continue           # don't touch existing value
+            continue  # don't touch existing value
         if value == "":
-            entry.pop(field, None)   # clear
+            entry.pop(field, None)  # clear
         else:
-            entry[field] = value     # set
+            entry[field] = value  # set
 
     store[slug] = entry
     _save_store(store)
@@ -108,6 +110,7 @@ def rename_credentials(old_slug: str, new_slug: str) -> None:
 # ---------------------------------------------------------------------------
 # Integration credentials (Portainer, DockerHub, etc.)
 # ---------------------------------------------------------------------------
+
 
 def get_integration_credentials(key: str) -> dict:
     """Return stored credentials for a named integration. Never raises."""

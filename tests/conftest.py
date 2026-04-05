@@ -1,4 +1,3 @@
-
 import pytest
 import yaml
 from fastapi.testclient import TestClient
@@ -13,7 +12,12 @@ SAMPLE_CONFIG = {
     },
     "hosts": [
         {"name": "Test Host", "host": "192.168.1.10"},
-        {"name": "Custom User Host", "host": "192.168.1.20", "user": "admin", "port": 2222},
+        {
+            "name": "Custom User Host",
+            "host": "192.168.1.20",
+            "user": "admin",
+            "port": 2222,
+        },
     ],
 }
 
@@ -25,6 +29,7 @@ def config_file(tmp_path, monkeypatch):
     cfg.write_text(yaml.dump(SAMPLE_CONFIG, default_flow_style=False))
 
     import app.config_manager as cm
+
     monkeypatch.setattr(cm, "_CONFIG_PATH", cfg)
 
     return cfg
@@ -37,21 +42,25 @@ def data_dir(tmp_path, monkeypatch):
     d.mkdir()
 
     import app.credentials as creds
+
     monkeypatch.setattr(creds, "_DATA_DIR", d)
     monkeypatch.setattr(creds, "_SECRET_FILE", d / ".secret")
     monkeypatch.setattr(creds, "_CREDS_FILE", d / "credentials.json")
 
     # Also patch app.auth so get_session_secret() doesn't try to write /app/data
     import app.auth as auth
+
     monkeypatch.setattr(auth, "_DATA_DIR", d)
     monkeypatch.setattr(auth, "_SESSION_SECRET_FILE", d / ".session_secret")
 
     # Patch notifications and auto_update_log data paths
     import app.notifications as notifs
+
     monkeypatch.setattr(notifs, "_DATA_DIR", d)
     monkeypatch.setattr(notifs, "_NOTIF_PATH", d / "notifications.json")
 
     import app.auto_update_log as aul
+
     monkeypatch.setattr(aul, "_DATA_DIR", d)
     monkeypatch.setattr(aul, "_LOG_PATH", d / "auto_update_log.json")
 
@@ -73,8 +82,15 @@ def client(config_file, data_dir, monkeypatch):
 
     tc = TestClient(app, raise_server_exceptions=True)
     # Log in — cookies persist in the TestClient
-    resp = tc.post("/login", data={"username": "testadmin", "password": "testpassword123"}, follow_redirects=False)
-    assert resp.status_code in (302, 303), f"Login failed with status {resp.status_code}: {resp.text[:200]}"
+    resp = tc.post(
+        "/login",
+        data={"username": "testadmin", "password": "testpassword123"},
+        follow_redirects=False,
+    )
+    assert resp.status_code in (
+        302,
+        303,
+    ), f"Login failed with status {resp.status_code}: {resp.text[:200]}"
     return tc
 
 

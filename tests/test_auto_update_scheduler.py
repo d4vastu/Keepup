@@ -1,4 +1,5 @@
 """Tests for auto_update_scheduler module."""
+
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -7,6 +8,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 def _setup(config_file, data_dir, monkeypatch):
     """Each test gets isolated config and data dirs, and a clean log."""
     import app.auto_update_log as log_mod
+
     monkeypatch.setattr(log_mod, "_LOG_PATH", data_dir / "auto_update_log.json")
 
 
@@ -14,10 +16,12 @@ def _setup(config_file, data_dir, monkeypatch):
 # _run_os_update
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_run_os_update_host_not_found(config_file):
     """If the host slug doesn't exist, function returns silently."""
     from app.auto_update_scheduler import _run_os_update
+
     # No exception should be raised
     await _run_os_update("nonexistent-host")
 
@@ -28,7 +32,9 @@ async def test_run_os_update_disabled(config_file):
     from app.auto_update_scheduler import _run_os_update
     from app.auto_update_log import get_recent
 
-    with patch("app.auto_update_scheduler.run_host_update_buffered", new=AsyncMock()) as mock_update:
+    with patch(
+        "app.auto_update_scheduler.run_host_update_buffered", new=AsyncMock()
+    ) as mock_update:
         await _run_os_update("test-host")
 
     mock_update.assert_not_called()
@@ -44,11 +50,17 @@ async def test_run_os_update_success(config_file):
 
     # Enable auto-update for test-host
     raw = yaml.safe_load(config_file.read_text())
-    raw["hosts"][0]["auto_update"] = {"os_enabled": True, "os_schedule": "0 3 * * *", "auto_reboot": False}
+    raw["hosts"][0]["auto_update"] = {
+        "os_enabled": True,
+        "os_schedule": "0 3 * * *",
+        "auto_reboot": False,
+    }
     config_file.write_text(yaml.dump(raw))
 
-    with patch("app.auto_update_scheduler.run_host_update_buffered",
-               new=AsyncMock(return_value=["Package updated."])):
+    with patch(
+        "app.auto_update_scheduler.run_host_update_buffered",
+        new=AsyncMock(return_value=["Package updated."]),
+    ):
         await _run_os_update("test-host")
 
     entries = get_recent(10)
@@ -65,11 +77,17 @@ async def test_run_os_update_failure_logs_error(config_file):
     from app.auto_update_log import get_recent
 
     raw = yaml.safe_load(config_file.read_text())
-    raw["hosts"][0]["auto_update"] = {"os_enabled": True, "os_schedule": "0 3 * * *", "auto_reboot": False}
+    raw["hosts"][0]["auto_update"] = {
+        "os_enabled": True,
+        "os_schedule": "0 3 * * *",
+        "auto_reboot": False,
+    }
     config_file.write_text(yaml.dump(raw))
 
-    with patch("app.auto_update_scheduler.run_host_update_buffered",
-               new=AsyncMock(side_effect=Exception("SSH timeout"))):
+    with patch(
+        "app.auto_update_scheduler.run_host_update_buffered",
+        new=AsyncMock(side_effect=Exception("SSH timeout")),
+    ):
         await _run_os_update("test-host")
 
     entries = get_recent(10)
@@ -86,11 +104,19 @@ async def test_run_os_update_sudo_required_but_no_password(config_file):
     from app.auto_update_log import get_recent
 
     raw = yaml.safe_load(config_file.read_text())
-    raw["hosts"][0]["auto_update"] = {"os_enabled": True, "os_schedule": "0 3 * * *", "auto_reboot": False}
+    raw["hosts"][0]["auto_update"] = {
+        "os_enabled": True,
+        "os_schedule": "0 3 * * *",
+        "auto_reboot": False,
+    }
     config_file.write_text(yaml.dump(raw))
 
-    with patch("app.auto_update_scheduler._needs_sudo", return_value=True), \
-         patch("app.auto_update_scheduler.run_host_update_buffered", new=AsyncMock()) as mock_update:
+    with (
+        patch("app.auto_update_scheduler._needs_sudo", return_value=True),
+        patch(
+            "app.auto_update_scheduler.run_host_update_buffered", new=AsyncMock()
+        ) as mock_update,
+    ):
         await _run_os_update("test-host")
 
     mock_update.assert_not_called()
@@ -107,14 +133,26 @@ async def test_run_os_update_with_auto_reboot(config_file):
     from app.auto_update_log import get_recent
 
     raw = yaml.safe_load(config_file.read_text())
-    raw["hosts"][0]["auto_update"] = {"os_enabled": True, "os_schedule": "0 3 * * *", "auto_reboot": True}
+    raw["hosts"][0]["auto_update"] = {
+        "os_enabled": True,
+        "os_schedule": "0 3 * * *",
+        "auto_reboot": True,
+    }
     config_file.write_text(yaml.dump(raw))
 
-    with patch("app.auto_update_scheduler.run_host_update_buffered",
-               new=AsyncMock(return_value=["Updated."])), \
-         patch("app.auto_update_scheduler.check_host_updates",
-               new=AsyncMock(return_value={"packages": [], "reboot_required": True})), \
-         patch("app.auto_update_scheduler.reboot_host", new=AsyncMock(return_value=[])) as mock_reboot:
+    with (
+        patch(
+            "app.auto_update_scheduler.run_host_update_buffered",
+            new=AsyncMock(return_value=["Updated."]),
+        ),
+        patch(
+            "app.auto_update_scheduler.check_host_updates",
+            new=AsyncMock(return_value={"packages": [], "reboot_required": True}),
+        ),
+        patch(
+            "app.auto_update_scheduler.reboot_host", new=AsyncMock(return_value=[])
+        ) as mock_reboot,
+    ):
         await _run_os_update("test-host")
 
     mock_reboot.assert_called_once()
@@ -125,6 +163,7 @@ async def test_run_os_update_with_auto_reboot(config_file):
 # ---------------------------------------------------------------------------
 # _run_stack_update
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_run_stack_update_invalid_path(config_file):
@@ -196,9 +235,11 @@ async def test_run_stack_update_failure_logs_error(config_file):
 # apply_host_schedule / apply_stack_schedule
 # ---------------------------------------------------------------------------
 
+
 def test_apply_host_schedule_no_auto_update(config_file):
     """Host without auto_update config is silently skipped."""
     from app.auto_update_scheduler import apply_host_schedule
+
     apply_host_schedule("test-host")  # Should not raise
 
 
@@ -208,7 +249,11 @@ def test_apply_host_schedule_with_valid_cron(config_file):
     from app.auto_update_scheduler import apply_host_schedule, scheduler
 
     raw = yaml.safe_load(config_file.read_text())
-    raw["hosts"][0]["auto_update"] = {"os_enabled": True, "os_schedule": "0 3 * * *", "auto_reboot": False}
+    raw["hosts"][0]["auto_update"] = {
+        "os_enabled": True,
+        "os_schedule": "0 3 * * *",
+        "auto_reboot": False,
+    }
     config_file.write_text(yaml.dump(raw))
 
     apply_host_schedule("test-host")
@@ -235,4 +280,5 @@ def test_apply_stack_schedule_with_valid_cron(config_file):
 def test_apply_all_schedules_runs_without_error(config_file):
     """apply_all_schedules processes all hosts and stacks."""
     from app.auto_update_scheduler import apply_all_schedules
+
     apply_all_schedules()  # Should not raise

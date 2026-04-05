@@ -7,6 +7,7 @@ Handles:
   - Checking Docker image update status via registry digest comparison
   - Triggering stack pull + redeploy
 """
+
 import asyncio
 import httpx
 from .registry_client import extract_local_digest, check_image_update
@@ -126,7 +127,8 @@ class PortainerClient:
             # Portainer stack names can be mixed-case — compare case-insensitively.
             stack_name_lower = stack_name.lower()
             stack_containers = [
-                c for c in containers
+                c
+                for c in containers
                 if c.get("Labels", {}).get("com.docker.compose.project", "").lower()
                 == stack_name_lower
             ]
@@ -174,7 +176,9 @@ class PortainerClient:
                     "id": stack_id,
                     "name": stack_name,
                     "endpoint_id": endpoint_id,
-                    "endpoint_name": endpoint_map.get(endpoint_id, f"env-{endpoint_id}"),
+                    "endpoint_name": endpoint_map.get(
+                        endpoint_id, f"env-{endpoint_id}"
+                    ),
                     "update_status": rollup,
                     "images": image_statuses,
                 }

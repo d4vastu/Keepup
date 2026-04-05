@@ -1,4 +1,5 @@
 """Pushover push notification sender."""
+
 import httpx
 from .credentials import get_integration_credentials
 
@@ -13,12 +14,15 @@ async def send_pushover(title: str, message: str) -> bool:
         return False
     try:
         async with httpx.AsyncClient(timeout=10) as client:
-            resp = await client.post(PUSHOVER_API, data={
-                "token": token,
-                "user": user_key,
-                "title": title,
-                "message": message,
-            })
+            resp = await client.post(
+                PUSHOVER_API,
+                data={
+                    "token": token,
+                    "user": user_key,
+                    "title": title,
+                    "message": message,
+                },
+            )
             return resp.status_code == 200
     except Exception:
         return False

@@ -1,4 +1,5 @@
 """SSL certificate management."""
+
 import datetime
 import ipaddress
 import os
@@ -50,10 +51,12 @@ def generate_self_signed_cert(hostname: str) -> tuple[str, str]:
     """Generate a 2-year self-signed cert for hostname (IP or DNS). Returns (cert_pem, key_pem)."""
     key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
 
-    subject = issuer = x509.Name([
-        x509.NameAttribute(NameOID.COMMON_NAME, hostname),
-        x509.NameAttribute(NameOID.ORGANIZATION_NAME, "Keepup"),
-    ])
+    subject = issuer = x509.Name(
+        [
+            x509.NameAttribute(NameOID.COMMON_NAME, hostname),
+            x509.NameAttribute(NameOID.ORGANIZATION_NAME, "Keepup"),
+        ]
+    )
 
     try:
         ip = ipaddress.ip_address(hostname)

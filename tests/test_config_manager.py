@@ -15,6 +15,7 @@ from app.config_manager import (
 # slugify
 # ---------------------------------------------------------------------------
 
+
 def test_slugify_basic():
     assert slugify("Proxmox Main") == "proxmox-main"
 
@@ -30,6 +31,7 @@ def test_slugify_already_lower():
 # ---------------------------------------------------------------------------
 # get_hosts
 # ---------------------------------------------------------------------------
+
 
 def test_get_hosts_returns_all(config_file):
     hosts = get_hosts()
@@ -75,6 +77,7 @@ def test_load_config_missing_file_returns_defaults(tmp_path, monkeypatch):
 # ---------------------------------------------------------------------------
 # add_host
 # ---------------------------------------------------------------------------
+
 
 def test_add_host_minimal(config_file):
     add_host(name="New Host", host="10.0.0.1", user=None, port=None)
@@ -125,8 +128,11 @@ def test_add_host_returns_slug(config_file):
 # update_host
 # ---------------------------------------------------------------------------
 
+
 def test_update_host_changes_name(config_file):
-    update_host("test-host", name="Renamed Host", host="192.168.1.10", user=None, port=None)
+    update_host(
+        "test-host", name="Renamed Host", host="192.168.1.10", user=None, port=None
+    )
     hosts = get_hosts()
     names = [h["name"] for h in hosts]
     assert "Renamed Host" in names
@@ -141,7 +147,9 @@ def test_update_host_changes_ip(config_file):
 
 
 def test_update_host_adds_optional_fields(config_file):
-    update_host("test-host", name="Test Host", host="192.168.1.10", user="ubuntu", port=2222)
+    update_host(
+        "test-host", name="Test Host", host="192.168.1.10", user="ubuntu", port=2222
+    )
     hosts = get_hosts()
     host = next(h for h in hosts if h["name"] == "Test Host")
     assert host["user"] == "ubuntu"
@@ -156,13 +164,16 @@ def test_update_host_unknown_slug_is_noop(config_file):
 
 
 def test_update_host_returns_new_slug(config_file):
-    new_slug = update_host("test-host", name="Renamed Host", host="192.168.1.10", user=None, port=None)
+    new_slug = update_host(
+        "test-host", name="Renamed Host", host="192.168.1.10", user=None, port=None
+    )
     assert new_slug == "renamed-host"
 
 
 # ---------------------------------------------------------------------------
 # delete_host
 # ---------------------------------------------------------------------------
+
 
 def test_delete_host_removes_it(config_file):
     delete_host("test-host")
@@ -185,6 +196,7 @@ def test_delete_host_unknown_slug_is_noop(config_file):
 # ---------------------------------------------------------------------------
 # SSH config
 # ---------------------------------------------------------------------------
+
 
 def test_get_ssh_config_returns_defaults(config_file):
     ssh = get_ssh_config()
@@ -218,13 +230,16 @@ def test_update_ssh_config_writes_to_file(config_file):
 # SSL config
 # ---------------------------------------------------------------------------
 
+
 def test_get_ssl_config_default_empty(config_file):
     from app.config_manager import get_ssl_config
+
     assert get_ssl_config() == {}
 
 
 def test_save_ssl_config(config_file):
     from app.config_manager import save_ssl_config, get_ssl_config
+
     save_ssl_config(mode="self-signed", hostname="192.168.1.10")
     cfg = get_ssl_config()
     assert cfg["mode"] == "self-signed"
@@ -233,6 +248,7 @@ def test_save_ssl_config(config_file):
 
 def test_clear_ssl_config(config_file):
     from app.config_manager import save_ssl_config, clear_ssl_config, get_ssl_config
+
     save_ssl_config(mode="self-signed", hostname="192.168.1.10")
     clear_ssl_config()
     assert get_ssl_config() == {}

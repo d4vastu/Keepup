@@ -10,7 +10,9 @@ def _needs_sudo(host: dict, ssh_cfg: dict) -> bool:
     return user != "root"
 
 
-async def _connect(host: dict, ssh_cfg: dict, creds: dict | None = None) -> asyncssh.SSHClientConnection:
+async def _connect(
+    host: dict, ssh_cfg: dict, creds: dict | None = None
+) -> asyncssh.SSHClientConnection:
     creds = creds or {}
     kwargs: dict = {
         "host": host["host"],
@@ -53,30 +55,41 @@ async def _run(
     return await coro
 
 
-async def _detect_pm(conn: asyncssh.SSHClientConnection, sudo_password: str | None, needs_sudo: bool):
-    result = await _run(conn, DETECT_CMD, sudo_password=sudo_password, needs_sudo=needs_sudo)
+async def _detect_pm(
+    conn: asyncssh.SSHClientConnection, sudo_password: str | None, needs_sudo: bool
+):
+    result = await _run(
+        conn, DETECT_CMD, sudo_password=sudo_password, needs_sudo=needs_sudo
+    )
     return get_package_manager(result.stdout.strip())
 
 
-async def verify_connection(host: dict, ssh_cfg: dict, creds: dict | None = None) -> dict:
+async def verify_connection(
+    host: dict, ssh_cfg: dict, creds: dict | None = None
+) -> dict:
     """Returns {"ok": bool, "message": str}."""
     try:
         async with await _connect(host, ssh_cfg, creds) as conn:
             result = await conn.run("echo ok", check=False)
         if result.stdout.strip() == "ok":
             return {"ok": True, "message": "Connected successfully."}
-        return {"ok": False, "message": "Connected but command returned unexpected output."}
+        return {
+            "ok": False,
+            "message": "Connected but command returned unexpected output.",
+        }
     except Exception as exc:
         return {"ok": False, "message": str(exc)}
 
 
-async def discover_containers(host: dict, ssh_cfg: dict, creds: dict | None = None) -> list[dict]:
+async def discover_containers(
+    host: dict, ssh_cfg: dict, creds: dict | None = None
+) -> list[dict]:
     """Return list of running containers as [{"id": name, "name": name, "image": image}, ...].
     Returns empty list on error or if Docker not available."""
     try:
         async with await _connect(host, ssh_cfg, creds) as conn:
             result = await conn.run(
-                "docker ps --format '{\"name\":\"{{.Names}}\",\"image\":\"{{.Image}}\"}'",
+                'docker ps --format \'{"name":"{{.Names}}","image":"{{.Image}}"}\'',
                 check=False,
             )
         containers = []
@@ -86,10 +99,13 @@ async def discover_containers(host: dict, ssh_cfg: dict, creds: dict | None = No
                 continue
             try:
                 import json
+
                 obj = json.loads(line)
                 name = obj.get("name", "")
                 if name:
-                    containers.append({"id": name, "name": name, "image": obj.get("image", "")})
+                    containers.append(
+                        {"id": name, "name": name, "image": obj.get("image", "")}
+                    )
             except Exception:
                 pass
         return containers
@@ -97,7 +113,9 @@ async def discover_containers(host: dict, ssh_cfg: dict, creds: dict | None = No
         return []
 
 
-async def detect_docker_stacks(host: dict, ssh_cfg: dict, creds: dict | None = None) -> int:
+async def detect_docker_stacks(
+    host: dict, ssh_cfg: dict, creds: dict | None = None
+) -> int:
     """Return the number of Docker Compose stacks found on the host, or -1 on error."""
     try:
         async with await _connect(host, ssh_cfg, creds) as conn:
@@ -106,6 +124,7 @@ async def detect_docker_stacks(host: dict, ssh_cfg: dict, creds: dict | None = N
                 check=False,
             )
         import json
+
         stacks = json.loads(result.stdout.strip() or "[]")
         return len(stacks) if isinstance(stacks, list) else 0
     except Exception:
@@ -137,7 +156,11 @@ async def check_host_updates(
         )
 
     packages, reboot_required = pm.parse(result.stdout)
-    return {"packages": packages, "reboot_required": reboot_required, "package_manager": pm.name}
+    return {
+        "packages": packages,
+        "reboot_required": reboot_required,
+        "package_manager": pm.name,
+    }
 
 
 async def reboot_host(

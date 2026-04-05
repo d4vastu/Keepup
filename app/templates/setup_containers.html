@@ -200,6 +200,14 @@
         el.className = selected > 0 ? 'ct-count-active' : '';
       }
     }
+
+    // Sync hidden checkbox state with visual state before submission
+    document.querySelector('form').addEventListener('submit', function () {
+      document.querySelectorAll('.container-row').forEach(function (row) {
+        const isSelected = row.querySelector('.checkbox').classList.contains('checked');
+        row.querySelector('.hidden-input').checked = isSelected;
+      });
+    });
   </script>
 
 </body>

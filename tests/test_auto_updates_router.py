@@ -1,4 +1,5 @@
 """Tests for auto_updates_router module (GET/POST routes)."""
+
 from unittest.mock import AsyncMock, MagicMock
 
 import yaml
@@ -7,6 +8,7 @@ import yaml
 # ---------------------------------------------------------------------------
 # GET /admin/auto-updates
 # ---------------------------------------------------------------------------
+
 
 def test_auto_updates_page_returns_200(client):
     response = client.get("/admin/auto-updates")
@@ -21,6 +23,7 @@ def test_auto_updates_page_lists_hosts(client):
 # ---------------------------------------------------------------------------
 # POST /admin/auto-updates/hosts/{slug}
 # ---------------------------------------------------------------------------
+
 
 def test_save_host_auto_update_enabled(client, config_file):
     response = client.post(
@@ -52,8 +55,10 @@ def test_save_host_auto_update_with_reboot(client, config_file):
     raw = yaml.safe_load(config_file.read_text())
     host = next(h for h in raw["hosts"] if h["name"] == "Test Host")
     # auto_reboot should be stored (True when "on")
-    assert host.get("auto_update", {}).get("auto_reboot") is True or \
-           host.get("auto_update", {}).get("os_enabled") is True
+    assert (
+        host.get("auto_update", {}).get("auto_reboot") is True
+        or host.get("auto_update", {}).get("os_enabled") is True
+    )
 
 
 def test_save_host_auto_update_invalid_cron(client):
@@ -69,8 +74,10 @@ def test_save_host_auto_update_invalid_cron(client):
 # GET /admin/auto-updates/stacks
 # ---------------------------------------------------------------------------
 
+
 def test_auto_update_stacks_no_backends(client, monkeypatch):
     import app.auto_updates_router as aur
+
     monkeypatch.setattr(aur, "_backends", [])
     response = client.get("/admin/auto-updates/stacks")
     assert response.status_code == 200
@@ -83,10 +90,18 @@ def test_auto_update_stacks_with_backend(client, monkeypatch):
 
     mock_backend = MagicMock()
     mock_backend.BACKEND_KEY = "portainer"
-    mock_backend.get_stacks_with_update_status = AsyncMock(return_value=[
-        {"id": "10", "name": "sonarr", "endpoint_id": "1", "update_path": "portainer/10:1",
-         "update_status": "up_to_date", "images": []},
-    ])
+    mock_backend.get_stacks_with_update_status = AsyncMock(
+        return_value=[
+            {
+                "id": "10",
+                "name": "sonarr",
+                "endpoint_id": "1",
+                "update_path": "portainer/10:1",
+                "update_status": "up_to_date",
+                "images": [],
+            },
+        ]
+    )
     monkeypatch.setattr(aur, "_backends", [mock_backend])
 
     response = client.get("/admin/auto-updates/stacks")
@@ -99,7 +114,9 @@ def test_auto_update_stacks_backend_error(client, monkeypatch):
 
     mock_backend = MagicMock()
     mock_backend.BACKEND_KEY = "portainer"
-    mock_backend.get_stacks_with_update_status = AsyncMock(side_effect=Exception("API error"))
+    mock_backend.get_stacks_with_update_status = AsyncMock(
+        side_effect=Exception("API error")
+    )
     monkeypatch.setattr(aur, "_backends", [mock_backend])
 
     response = client.get("/admin/auto-updates/stacks")
@@ -109,6 +126,7 @@ def test_auto_update_stacks_backend_error(client, monkeypatch):
 # ---------------------------------------------------------------------------
 # POST /admin/auto-updates/stacks/{backend_key}/{ref}
 # ---------------------------------------------------------------------------
+
 
 def test_save_stack_auto_update_enabled(client):
     response = client.post(
