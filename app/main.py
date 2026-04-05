@@ -107,6 +107,27 @@ def _get_host(slug: str) -> dict:
 _jobs: dict[str, dict] = {}
 
 
+def _classify_log_line(line: str) -> str:
+    l = line.lower()
+    if any(k in l for k in ("error", "fail", "e:")):
+        return "log-line-red"
+    if any(k in l for k in ("warn", "reboot")):
+        return "log-line-yellow"
+    if any(line.startswith(p) for p in ("Get:", "Unpacking", "Setting up", "Processing")):
+        return "log-line-dim"
+    if any(k in l for k in ("upgraded", "installed", "done")):
+        return "log-line-ok"
+    return "log-line-white"
+
+
+def _format_log_lines(lines: list[str]) -> str:
+    import html as _html
+    parts = []
+    for line in lines:
+        cls = _classify_log_line(line)
+        parts.append(f'<div class="{cls}">{_html.escape(line)}</div>')
+    return "\n".join(parts)
+
 
 # ---------------------------------------------------------------------------
 # Background job runners
@@ -227,11 +248,14 @@ async def host_update(
             creds = {**creds, "sudo_password": effective_sudo}
 
         job_id = uuid.uuid4().hex[:8]
-        _jobs[job_id] = {"done": False, "status": "running", "error": None, "lines": []}
+        _jobs[job_id] = {
+            "done": False, "status": "running", "error": None, "lines": [],
+            "type": "os_upgrade", "label": host["name"], "sub": host.get("host", ""),
+        }
         background_tasks.add_task(_job_run_host_update, job_id, host, creds)
         return templates.TemplateResponse(
             "partials/job_poll.html",
-            {"request": request, "job_id": job_id},
+            {"request": request, "job_id": job_id, "job": _jobs[job_id]},
         )
     except Exception as exc:
         return templates.TemplateResponse(
@@ -264,11 +288,14 @@ async def host_restart(
             creds = {**creds, "sudo_password": effective_sudo}
 
         job_id = uuid.uuid4().hex[:8]
-        _jobs[job_id] = {"done": False, "status": "running", "error": None, "lines": []}
+        _jobs[job_id] = {
+            "done": False, "status": "running", "error": None, "lines": [],
+            "type": "os_restart", "label": host["name"], "sub": host.get("host", ""),
+        }
         background_tasks.add_task(_job_run_host_restart, job_id, host, creds)
         return templates.TemplateResponse(
             "partials/job_poll.html",
-            {"request": request, "job_id": job_id},
+            {"request": request, "job_id": job_id, "job": _jobs[job_id]},
         )
     except Exception as exc:
         return templates.TemplateResponse(
@@ -334,11 +361,15 @@ async def stack_update(
             {"request": request, "message": f"Backend {backend_key!r} not configured."},
         )
     job_id = uuid.uuid4().hex[:8]
-    _jobs[job_id] = {"done": False, "status": "running", "error": None, "lines": []}
+    stack_name = ref.rsplit("/", 1)[-1]
+    _jobs[job_id] = {
+        "done": False, "status": "running", "error": None, "lines": [],
+        "type": "container_redeploy", "label": stack_name, "sub": backend_key,
+    }
     background_tasks.add_task(_job_run_stack_update, job_id, backend_key, ref)
     return templates.TemplateResponse(
         "partials/job_poll.html",
-        {"request": request, "job_id": job_id},
+        {"request": request, "job_id": job_id, "job": _jobs[job_id]},
     )
 
 
@@ -355,6 +386,30 @@ async def job_status(request: Request, job_id: str) -> HTMLResponse:
         "partials/job_status.html",
         {"request": request, "job_id": job_id, "job": job},
     )
+
+
+@app.get("/api/jobs/{job_id}/modal", response_class=HTMLResponse)
+async def job_modal(request: Request, job_id: str) -> HTMLResponse:
+    job = _jobs.get(job_id)
+    if not job:
+        return HTMLResponse("")
+    return templates.TemplateResponse(
+        "partials/upgrade_modal.html",
+        {
+            "request": request,
+            "job_id": job_id,
+            "job": job,
+            "log_html": _format_log_lines(job.get("lines", [])),
+        },
+    )
+
+
+@app.get("/api/jobs/{job_id}/modal-body", response_class=HTMLResponse)
+async def job_modal_body(request: Request, job_id: str) -> HTMLResponse:
+    job = _jobs.get(job_id)
+    if not job:
+        return HTMLResponse("")
+    return HTMLResponse(_format_log_lines(job.get("lines", [])))
 
 
 # ---------------------------------------------------------------------------

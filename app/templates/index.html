@@ -23,6 +23,29 @@
     .ct-indent { display: flex; align-items: center; gap: 8px; }
     .ct-line { width: 10px; height: 0.5px; background: #2d3a4a; flex-shrink: 0; }
     .ct-name { font-size: 13px; color: #e6edf3; }
+    /* Upgrade modal */
+    .job-action-group { display: flex; align-items: center; gap: 8px; justify-content: flex-end; }
+    .details-link { font-size: 12px; color: #388bfd; cursor: pointer; background: none; border: none; padding: 0; text-decoration: none; }
+    .details-link:hover { text-decoration: underline; }
+    .b-spin { width: 8px; height: 8px; border-radius: 50%; border: 1.5px solid #388bfd; border-top-color: transparent; animation: spin 0.8s linear infinite; flex-shrink: 0; display: inline-block; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .modal-header { display: flex; align-items: center; justify-content: space-between; padding: 14px 18px; border-bottom: 0.5px solid #21262d; }
+    .modal-title { font-size: 14px; font-weight: 500; color: #e6edf3; display: flex; align-items: center; gap: 8px; }
+    .modal-sub { font-size: 11px; color: #484f58; margin-top: 2px; }
+    .modal-close { width: 28px; height: 28px; border-radius: 5px; border: 0.5px solid #30363d; background: transparent; color: #8b949e; cursor: pointer; display: flex; align-items: center; justify-content: center; }
+    .modal-close:hover { background: #0d1117; color: #e6edf3; }
+    .log-output { background: #0d1117; font-family: monospace; font-size: 12px; color: #8b949e; padding: 16px 18px; line-height: 1.7; max-height: 260px; overflow-y: auto; }
+    .modal-footer { display: flex; align-items: center; justify-content: space-between; padding: 12px 18px; border-top: 0.5px solid #21262d; }
+    .modal-status { font-size: 12px; display: flex; align-items: center; gap: 7px; }
+    .status-ok { color: #3fb950; }
+    .status-running { color: #388bfd; }
+    .modal-close-btn { font-size: 12px; font-weight: 500; padding: 6px 16px; border-radius: 6px; border: 0.5px solid #30363d; background: transparent; color: #8b949e; cursor: pointer; }
+    .modal-close-btn:hover { background: #0d1117; color: #e6edf3; }
+    .log-line-ok { color: #3fb950; }
+    .log-line-dim { color: #484f58; }
+    .log-line-white { color: #e6edf3; }
+    .log-line-yellow { color: #d29922; }
+    .log-line-red { color: #f85149; }
   </style>
 </head>
 <body class="min-h-full text-slate-200 font-sans">
@@ -269,6 +292,12 @@
     }
   });
   </script>
+
+  <!-- Upgrade / redeploy details modal -->
+  <div id="modal-container"
+       style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:200;align-items:center;justify-content:center;padding:20px;"
+       onclick="if(event.target===this){this.style.display='none'}">
+  </div>
 
 </body>
 </html>

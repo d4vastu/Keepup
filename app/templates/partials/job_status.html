@@ -1,18 +1,48 @@
 {% if job.done %}
   {% if job.status == "error" %}
-  <div class="text-xs text-red-400">
-    Failed: {{ job.error }}
+  <div class="job-action-group">
+    <span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[12px] font-medium bg-red-950/50 text-red-400 border border-red-900/50">
+      <span class="w-1.5 h-1.5 rounded-full bg-current flex-shrink-0"></span>
+      Failed
+    </span>
+    <button class="details-link"
+            hx-get="/api/jobs/{{ job_id }}/modal"
+            hx-target="#modal-container"
+            hx-swap="innerHTML"
+            onclick="document.getElementById('modal-container').style.display='flex'">
+      Show details
+    </button>
   </div>
   {% else %}
-  <div class="text-xs text-green-400 font-medium">Done</div>
-  {% if job.lines %}
-  <pre class="mt-1 text-xs text-slate-400 max-h-32 overflow-y-auto whitespace-pre-wrap bg-slate-900 rounded p-2">{{ job.lines | join('\n') }}</pre>
-  {% endif %}
+  <div class="job-action-group">
+    <span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[12px] font-medium bg-green-900/30 text-green-400 border border-green-800/40">
+      <span class="w-1.5 h-1.5 rounded-full bg-current flex-shrink-0"></span>
+      {% if job.type == "container_redeploy" %}Redeployed{% elif job.type == "os_restart" %}Rebooted{% else %}Upgraded{% endif %}
+    </span>
+    <button class="details-link"
+            hx-get="/api/jobs/{{ job_id }}/modal"
+            hx-target="#modal-container"
+            hx-swap="innerHTML"
+            onclick="document.getElementById('modal-container').style.display='flex'">
+      Show details
+    </button>
+  </div>
   {% endif %}
 {% else %}
 <div hx-get="/api/jobs/{{ job_id }}"
      hx-trigger="every 3s"
-     hx-swap="outerHTML">
-  <span class="text-xs text-blue-400 animate-pulse">Running...</span>
+     hx-swap="outerHTML"
+     class="job-action-group">
+  <span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[12px] font-medium bg-[#0c2045] text-[#388bfd] border border-[#1a3a6e]">
+    <span class="b-spin"></span>
+    {% if job.type == "container_redeploy" %}Redeploying…{% elif job.type == "os_restart" %}Rebooting…{% else %}Upgrading…{% endif %}
+  </span>
+  <button class="details-link"
+          hx-get="/api/jobs/{{ job_id }}/modal"
+          hx-target="#modal-container"
+          hx-swap="innerHTML"
+          onclick="document.getElementById('modal-container').style.display='flex'">
+    Show details
+  </button>
 </div>
 {% endif %}

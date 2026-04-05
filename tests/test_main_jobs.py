@@ -347,3 +347,161 @@ def test_job_status_error(client):
 
     response = client.get("/api/jobs/errjob")
     assert response.status_code == 200
+
+
+# ---------------------------------------------------------------------------
+# _classify_log_line and _format_log_lines
+# ---------------------------------------------------------------------------
+
+def test_classify_log_line_error():
+    from app.main import _classify_log_line
+    assert _classify_log_line("E: some error occurred") == "log-line-red"
+    assert _classify_log_line("Failed to fetch") == "log-line-red"
+    assert _classify_log_line("dpkg: error processing") == "log-line-red"
+
+
+def test_classify_log_line_warning():
+    from app.main import _classify_log_line
+    assert _classify_log_line("WARNING: something odd") == "log-line-yellow"
+    assert _classify_log_line("System reboot required") == "log-line-yellow"
+
+
+def test_classify_log_line_dim():
+    from app.main import _classify_log_line
+    assert _classify_log_line("Get:1 http://archive.ubuntu.com focal InRelease") == "log-line-dim"
+    assert _classify_log_line("Unpacking libssl1.1") == "log-line-dim"
+    assert _classify_log_line("Setting up libssl1.1") == "log-line-dim"
+    assert _classify_log_line("Processing triggers for man-db") == "log-line-dim"
+
+
+def test_classify_log_line_ok():
+    from app.main import _classify_log_line
+    assert _classify_log_line("5 upgraded, 0 newly installed") == "log-line-ok"
+    assert _classify_log_line("1 installed") == "log-line-ok"
+    assert _classify_log_line("done") == "log-line-ok"
+
+
+def test_classify_log_line_white():
+    from app.main import _classify_log_line
+    assert _classify_log_line("Reading package lists...") == "log-line-white"
+    assert _classify_log_line("Building dependency tree") == "log-line-white"
+
+
+def test_format_log_lines_produces_html():
+    from app.main import _format_log_lines
+    result = _format_log_lines(["5 upgraded", "E: some error", "Get:1 http://example.com"])
+    assert '<div class="log-line-ok">' in result
+    assert '<div class="log-line-red">' in result
+    assert '<div class="log-line-dim">' in result
+
+
+def test_format_log_lines_escapes_html():
+    from app.main import _format_log_lines
+    result = _format_log_lines(["<script>alert('xss')</script>"])
+    assert "<script>" not in result
+    assert "&lt;script&gt;" in result
+
+
+def test_format_log_lines_empty():
+    from app.main import _format_log_lines
+    assert _format_log_lines([]) == ""
+
+
+# ---------------------------------------------------------------------------
+# GET /api/jobs/{job_id}/modal
+# ---------------------------------------------------------------------------
+
+def test_job_modal_running(client):
+    import app.main as m
+    m._jobs["modaljob1"] = {
+        "done": False, "status": "running", "error": None, "lines": ["Installing..."],
+        "type": "os_upgrade", "label": "My Server", "sub": "10.0.0.1",
+    }
+    response = client.get("/api/jobs/modaljob1/modal")
+    assert response.status_code == 200
+    assert "My Server" in response.text
+    assert "Installing" in response.text
+
+
+def test_job_modal_done_success(client):
+    import app.main as m
+    m._jobs["modaljob2"] = {
+        "done": True, "status": "done", "error": None, "lines": ["5 upgraded"],
+        "type": "os_upgrade", "label": "My Server", "sub": "10.0.0.1",
+    }
+    response = client.get("/api/jobs/modaljob2/modal")
+    assert response.status_code == 200
+    assert "My Server" in response.text
+    assert "upgraded" in response.text.lower()
+
+
+def test_job_modal_done_error(client):
+    import app.main as m
+    m._jobs["modaljob3"] = {
+        "done": True, "status": "error", "error": "Connection refused", "lines": [],
+        "type": "os_upgrade", "label": "My Server", "sub": "10.0.0.1",
+    }
+    response = client.get("/api/jobs/modaljob3/modal")
+    assert response.status_code == 200
+    assert "Connection refused" in response.text
+
+
+def test_job_modal_container_redeploy(client):
+    import app.main as m
+    m._jobs["modaljob4"] = {
+        "done": False, "status": "running", "error": None, "lines": [],
+        "type": "container_redeploy", "label": "sonarr", "sub": "portainer",
+    }
+    response = client.get("/api/jobs/modaljob4/modal")
+    assert response.status_code == 200
+    assert "sonarr" in response.text
+
+
+def test_job_modal_os_restart(client):
+    import app.main as m
+    m._jobs["modaljob5"] = {
+        "done": True, "status": "done", "error": None, "lines": ["Reboot initiated"],
+        "type": "os_restart", "label": "My Server", "sub": "10.0.0.1",
+    }
+    response = client.get("/api/jobs/modaljob5/modal")
+    assert response.status_code == 200
+    assert "My Server" in response.text
+
+
+def test_job_modal_not_found(client):
+    response = client.get("/api/jobs/nonexistent/modal")
+    assert response.status_code == 200
+    assert response.text == ""
+
+
+# ---------------------------------------------------------------------------
+# GET /api/jobs/{job_id}/modal-body
+# ---------------------------------------------------------------------------
+
+def test_job_modal_body_returns_log_html(client):
+    import app.main as m
+    m._jobs["bodyjob1"] = {
+        "done": False, "status": "running", "error": None, "lines": ["5 upgraded", "E: error"],
+        "type": "os_upgrade", "label": "My Server", "sub": "10.0.0.1",
+    }
+    response = client.get("/api/jobs/bodyjob1/modal-body")
+    assert response.status_code == 200
+    assert "log-line-ok" in response.text
+    assert "log-line-red" in response.text
+
+
+def test_job_modal_body_empty_lines(client):
+    import app.main as m
+    m._jobs["bodyjob2"] = {
+        "done": False, "status": "running", "error": None, "lines": [],
+        "type": "os_upgrade", "label": "My Server", "sub": "10.0.0.1",
+    }
+    response = client.get("/api/jobs/bodyjob2/modal-body")
+    assert response.status_code == 200
+    assert response.text == ""
+
+
+def test_job_modal_body_not_found(client):
+    response = client.get("/api/jobs/nonexistent/modal-body")
+    assert response.status_code == 200
+    assert response.text == ""

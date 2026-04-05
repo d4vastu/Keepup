@@ -1,0 +1,73 @@
+{% set close_js %}document.getElementById('modal-container').style.display='none'{% endset %}
+
+{% if job.type == "os_upgrade" %}
+  {% set action_label = "Upgrade complete" if job.done else "Upgrading OS packages" %}
+  {% set running_label = "Upgrade in progress" %}
+{% elif job.type == "os_restart" %}
+  {% set action_label = "Reboot complete" if job.done else "Rebooting host" %}
+  {% set running_label = "Reboot in progress" %}
+{% else %}
+  {% set action_label = "Redeploy complete" if job.done else "Redeploying container" %}
+  {% set running_label = "Redeploy in progress" %}
+{% endif %}
+
+<div style="background:#161b22;border:0.5px solid #30363d;border-radius:10px;width:100%;max-width:580px;overflow:hidden" onclick="event.stopPropagation()">
+
+  <div class="modal-header">
+    <div>
+      <div class="modal-title">
+        {% if job.done and job.status != "error" %}
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+          <path d="M3 8l3.5 3.5L13 4" stroke="#3fb950" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        {% elif job.done and job.status == "error" %}
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+          <path d="M4 4l8 8M12 4l-8 8" stroke="#f85149" stroke-width="2" stroke-linecap="round"/>
+        </svg>
+        {% else %}
+        <span class="b-spin"></span>
+        {% endif %}
+        {{ action_label }}
+      </div>
+      <div class="modal-sub">{{ job.label }}{% if job.sub %} · {{ job.sub }}{% endif %}</div>
+    </div>
+    <button class="modal-close" onclick="{{ close_js }}">✕</button>
+  </div>
+
+  <div class="modal-body">
+    {% if job.done %}
+    <div class="log-output" id="modal-log-{{ job_id }}">{{ log_html | safe }}</div>
+    {% else %}
+    <div class="log-output"
+         id="modal-log-{{ job_id }}"
+         hx-get="/api/jobs/{{ job_id }}/modal-body"
+         hx-trigger="every 1s"
+         hx-swap="innerHTML">{{ log_html | safe }}</div>
+    {% endif %}
+  </div>
+
+  <div class="modal-footer">
+    {% if job.done and job.status == "error" %}
+    <div class="modal-status" style="color:#f85149">
+      <svg width="12" height="12" viewBox="0 0 16 16" fill="none">
+        <path d="M4 4l8 8M12 4l-8 8" stroke="#f85149" stroke-width="2" stroke-linecap="round"/>
+      </svg>
+      {{ job.error or "Failed" }}
+    </div>
+    {% elif job.done %}
+    <div class="modal-status status-ok">
+      <svg width="12" height="12" viewBox="0 0 16 16" fill="none">
+        <path d="M3 8l3.5 3.5L13 4" stroke="#3fb950" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+      Completed successfully
+    </div>
+    {% else %}
+    <div class="modal-status status-running">
+      <span class="b-spin"></span>
+      {{ running_label }}
+    </div>
+    {% endif %}
+    <button class="modal-close-btn" onclick="{{ close_js }}">Close</button>
+  </div>
+
+</div>
