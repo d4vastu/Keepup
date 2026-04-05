@@ -24,6 +24,7 @@ from .config_manager import (
     add_host,
     clear_ssl_config,
     delete_host,
+    get_available_ssh_keys,
     get_dockerhub_config,
     get_email_config,
     get_homeassistant_config,
@@ -47,6 +48,7 @@ from .config_manager import (
     update_host,
     update_ssh_config,
 )
+from .proxmox_client import ProxmoxClient
 from .credentials import (
     credential_status,
     delete_credentials,
@@ -238,6 +240,161 @@ async def admin_integrations_save_dockerhub(
     await reload_backends()
 
     return HTMLResponse('<span style="font-size:12px;color:#3fb950">&#10003; Docker Hub saved.</span>')
+
+
+# ---------------------------------------------------------------------------
+# Integrations — Proxmox host discovery / SSH setup
+# ---------------------------------------------------------------------------
+
+
+@router.post("/integrations/proxmox/discover", response_class=HTMLResponse)
+async def admin_proxmox_discover(request: Request) -> HTMLResponse:
+    cfg = get_proxmox_config()
+    creds = get_integration_credentials("proxmox")
+    url = cfg.get("url", "")
+    token_id = creds.get("token_id", "")
+    secret = creds.get("secret", "")
+    if not token_id:
+        api_user = creds.get("api_user", "")
+        api_token = creds.get("api_token", "")
+        token = f"{api_user}!{api_token}" if api_user else api_token
+    else:
+        token = f"{token_id}={secret}"
+    verify_ssl = cfg.get("verify_ssl", False)
+    if not url or not token:
+        return HTMLResponse(
+            '<span style="font-size:12px;color:#f85149">Proxmox not configured.</span>'
+        )
+    try:
+        client = ProxmoxClient(url=url, api_token=token, verify_ssl=verify_ssl)
+        resources = await client.discover_resources()
+        return templates.TemplateResponse(
+            "partials/admin_proxmox_discover.html",
+            {"request": request, "resources": resources},
+        )
+    except Exception as exc:
+        return HTMLResponse(
+            f'<span style="font-size:12px;color:#f85149">Discovery failed: {exc}</span>'
+        )
+
+
+@router.post("/integrations/proxmox/select-hosts", response_class=HTMLResponse)
+async def admin_proxmox_select_hosts(request: Request) -> HTMLResponse:
+    form = await request.form()
+    selected = form.getlist("selected_hosts")
+    hosts = []
+    for entry in selected:
+        parts = entry.split(":", 4)
+        if len(parts) >= 4:
+            hosts.append(
+                {
+                    "node": parts[0],
+                    "vmid": parts[1],
+                    "type": parts[2],
+                    "name": parts[3],
+                    "ip": parts[4] if len(parts) > 4 else "",
+                }
+            )
+    if not hosts:
+        return HTMLResponse(
+            '<span style="font-size:12px;color:#8b949e">No hosts selected.</span>'
+        )
+    return templates.TemplateResponse(
+        "partials/admin_proxmox_host_forms.html",
+        {"request": request, "hosts": hosts, "available_keys": get_available_ssh_keys()},
+    )
+
+
+@router.post("/integrations/proxmox/test-host", response_class=HTMLResponse)
+async def admin_proxmox_test_host(
+    request: Request,
+    host: str = Form(""),
+    user: str = Form(""),
+    port: str = Form("22"),
+    auth_method: str = Form("key"),
+    ssh_password: str = Form(""),
+    key_file: str = Form(""),
+) -> HTMLResponse:
+    host_addr = host.strip()
+    user_val = user.strip() or None
+    port_val = int(port) if port.strip().isdigit() else 22
+    key_path = f"/app/keys/{key_file}" if auth_method == "key" and key_file else None
+    if not host_addr or not user_val:
+        return HTMLResponse(
+            '<span style="font-size:12px;color:#f85149">IP and SSH user are required.</span>'
+        )
+    creds: dict = {}
+    if auth_method == "password":
+        creds = {"ssh_password": ssh_password}
+    elif key_path:
+        creds = {"key_path": key_path}
+    host_entry = {"host": host_addr, "user": user_val, "port": port_val}
+    try:
+        result = await verify_connection(host_entry, get_ssh_config(), creds)
+        if result.get("ok"):
+            return HTMLResponse(
+                '<span style="font-size:12px;color:#3fb950">&#10003; Connection successful.</span>'
+            )
+        return HTMLResponse(
+            f'<span style="font-size:12px;color:#f85149">Failed: {result.get("message", "unknown error")}</span>'
+        )
+    except Exception as exc:
+        return HTMLResponse(
+            f'<span style="font-size:12px;color:#f85149">Error: {exc}</span>'
+        )
+
+
+@router.post("/integrations/proxmox/add-host", response_class=HTMLResponse)
+async def admin_proxmox_add_host(
+    request: Request,
+    name: str = Form(""),
+    host: str = Form(""),
+    user: str = Form(""),
+    port: str = Form("22"),
+    auth_method: str = Form("key"),
+    ssh_password: str = Form(""),
+    key_file: str = Form(""),
+) -> HTMLResponse:
+    name = name.strip()
+    host_addr = host.strip()
+    user_val = user.strip() or None
+    port_val = int(port) if port.strip().isdigit() else 22
+    key_path = f"/app/keys/{key_file}" if auth_method == "key" and key_file else None
+    if not name or not host_addr or not user_val:
+        return HTMLResponse(
+            '<span style="font-size:12px;color:#f85149">Display name, IP, and SSH user are required.</span>'
+        )
+    if auth_method == "password" and not ssh_password.strip():
+        return HTMLResponse(
+            '<span style="font-size:12px;color:#f85149">Password is required for password auth.</span>'
+        )
+    if auth_method == "key" and not key_file:
+        return HTMLResponse(
+            '<span style="font-size:12px;color:#f85149">Select an SSH key file.</span>'
+        )
+    creds: dict = {}
+    if auth_method == "password":
+        creds = {"ssh_password": ssh_password}
+    elif key_path:
+        creds = {"key_path": key_path}
+    host_entry = {"host": host_addr, "user": user_val, "port": port_val}
+    try:
+        result = await verify_connection(host_entry, get_ssh_config(), creds)
+        if not result.get("ok"):
+            return HTMLResponse(
+                f'<span style="font-size:12px;color:#f85149">Connection failed: {result.get("message", "")}</span>'
+            )
+    except Exception as exc:
+        return HTMLResponse(
+            f'<span style="font-size:12px;color:#f85149">Connection error: {exc}</span>'
+        )
+    slug = add_host(name=name, host=host_addr, user=user_val, port=port_val, key_path=key_path)
+    if auth_method == "password" and ssh_password.strip():
+        save_credentials(slug, ssh_password=ssh_password.strip())
+    return HTMLResponse(
+        f'<span style="font-size:12px;color:#3fb950">&#10003; {name} added successfully. '
+        f'<a href="/admin/hosts" style="color:#388bfd;text-decoration:underline">Go to Hosts →</a></span>'
+    )
 
 
 @router.get("/connections", response_class=HTMLResponse)

@@ -196,7 +196,15 @@
           hx-post="/setup/connect/proxmox/save"
           hx-include="#proxmox-url,#proxmox-api-user,#proxmox-token-id,#proxmox-secret,#proxmox-ssl"
           hx-target="#proxmox-result">Save</button>
+        {% if integ.proxmox_configured %}
+        <button class="btn-test"
+          hx-post="/admin/integrations/proxmox/discover"
+          hx-target="#proxmox-discover-section"
+          hx-indicator="#proxmox-discover-section"
+          style="color:#388bfd;border-color:#1a3a6e;">Discover VMs &amp; LXCs</button>
+        {% endif %}
       </div>
+      <div id="proxmox-discover-section" style="margin-top:4px;"></div>
     </div>
   </div>
 </div>

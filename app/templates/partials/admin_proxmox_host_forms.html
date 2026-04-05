@@ -1,0 +1,75 @@
+{% for h in hosts %}
+<div style="background:#161b22;border:0.5px solid #21262d;border-radius:10px;overflow:hidden;margin-bottom:12px;" id="proxmox-host-card-{{ loop.index }}">
+  <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 14px;border-bottom:0.5px solid #21262d;">
+    <div style="font-size:12px;font-weight:500;color:#e6edf3;">
+      {{ h.name }}
+      <span style="font-size:11px;color:#484f58;font-weight:400;margin-left:6px;">
+        {{ 'VM' if h.type == 'qemu' else 'LXC' }} {{ h.vmid }} · {{ h.node }}
+      </span>
+    </div>
+    <span style="font-size:11px;color:#6e7681;">Use a non-root user with sudo permission.</span>
+  </div>
+  <div style="padding:12px 14px;">
+    <div id="proxmox-host-result-{{ loop.index }}" class="result-area"></div>
+    <div class="field-row" style="margin-bottom:10px;">
+      <div class="field">
+        <div class="field-label">DISPLAY NAME</div>
+        <input type="text" id="px-name-{{ loop.index }}" name="name" value="{{ h.name }}" class="field-input">
+      </div>
+      <div class="field">
+        <div class="field-label">IP ADDRESS</div>
+        <input type="text" id="px-host-{{ loop.index }}" name="host" value="{{ h.ip }}" placeholder="192.168.1.x" class="field-input">
+      </div>
+    </div>
+    <div class="field-row" style="margin-bottom:10px;">
+      <div class="field">
+        <div class="field-label">SSH USER</div>
+        <input type="text" id="px-user-{{ loop.index }}" name="user" placeholder="e.g. ubuntu" class="field-input">
+      </div>
+      <div class="field">
+        <div class="field-label">SSH PORT</div>
+        <input type="number" id="px-port-{{ loop.index }}" name="port" value="22" class="field-input">
+      </div>
+    </div>
+    <div class="field" style="margin-bottom:8px;">
+      <div class="field-label">CREDENTIALS</div>
+      <select id="px-auth-{{ loop.index }}" name="auth_method" class="field-input"
+        onchange="togglePxAuth({{ loop.index }}, this.value)">
+        <option value="key">SSH key</option>
+        <option value="password">Password</option>
+      </select>
+    </div>
+    <div id="px-key-section-{{ loop.index }}" class="field" style="margin-bottom:8px;">
+      <div class="field-label">KEY FILE</div>
+      <select id="px-keyfile-{{ loop.index }}" name="key_file" class="field-input">
+        <option value="">— select key —</option>
+        {% for k in available_keys %}
+        <option value="{{ k }}">{{ k }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div id="px-pass-section-{{ loop.index }}" class="field" style="margin-bottom:8px;display:none;">
+      <div class="field-label">PASSWORD</div>
+      <input type="password" id="px-pass-{{ loop.index }}" name="ssh_password" placeholder="Required for password auth" class="field-input">
+    </div>
+    <div id="px-test-result-{{ loop.index }}" class="result-area"></div>
+    <div class="btn-row">
+      <button class="btn-test"
+        hx-post="/admin/integrations/proxmox/test-host"
+        hx-include="#px-host-{{ loop.index }},#px-user-{{ loop.index }},#px-port-{{ loop.index }},#px-auth-{{ loop.index }},#px-keyfile-{{ loop.index }},#px-pass-{{ loop.index }}"
+        hx-target="#px-test-result-{{ loop.index }}">Test connection</button>
+      <button class="btn-save"
+        hx-post="/admin/integrations/proxmox/add-host"
+        hx-include="#px-name-{{ loop.index }},#px-host-{{ loop.index }},#px-user-{{ loop.index }},#px-port-{{ loop.index }},#px-auth-{{ loop.index }},#px-keyfile-{{ loop.index }},#px-pass-{{ loop.index }}"
+        hx-target="#proxmox-host-result-{{ loop.index }}">Add host →</button>
+    </div>
+  </div>
+</div>
+{% endfor %}
+
+<script>
+function togglePxAuth(idx, val) {
+  document.getElementById('px-key-section-' + idx).style.display = val === 'key' ? '' : 'none';
+  document.getElementById('px-pass-section-' + idx).style.display = val === 'password' ? '' : 'none';
+}
+</script>

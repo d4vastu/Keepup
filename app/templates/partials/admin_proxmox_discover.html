@@ -1,0 +1,59 @@
+{% set vms = resources | selectattr('type', 'equalto', 'qemu') | list %}
+{% set lxcs = resources | selectattr('type', 'equalto', 'lxc') | list %}
+
+{% if not resources %}
+<p style="font-size:12px;color:#8b949e;margin-top:10px;">No VMs or LXC containers found.</p>
+{% else %}
+<form hx-post="/admin/integrations/proxmox/select-hosts"
+      hx-target="#proxmox-discover-section"
+      style="margin-top:12px;">
+
+  {% if vms %}
+  <div style="margin-bottom:14px;">
+    <div style="font-size:11px;font-weight:600;color:#6e7681;letter-spacing:.05em;margin-bottom:6px;">VIRTUAL MACHINES (QEMU)</div>
+    <div style="font-size:11px;color:#484f58;margin-bottom:8px;">VMs require SSH for OS package monitoring.</div>
+    {% for r in vms %}
+    <label style="display:flex;align-items:center;gap:10px;padding:7px 10px;background:#0d1117;border:0.5px solid #21262d;border-radius:6px;cursor:pointer;margin-bottom:5px;">
+      <input type="checkbox" name="selected_hosts"
+        value="{{ r.node }}:{{ r.vmid }}:{{ r.type }}:{{ r.name }}:{{ r.ip or '' }}"
+        style="accent-color:#388bfd;width:13px;height:13px;flex-shrink:0;">
+      <div style="min-width:0;flex:1;">
+        <span style="font-size:12px;color:#e6edf3;font-weight:500;">{{ r.name }}</span>
+        <span style="font-size:11px;color:#484f58;margin-left:8px;">VM {{ r.vmid }} · {{ r.node }}{% if r.ip %} · {{ r.ip }}{% endif %}</span>
+      </div>
+      <span style="font-size:10px;padding:2px 7px;border-radius:10px;flex-shrink:0;
+        {% if r.status == 'running' %}background:#0f2b17;color:#3fb950;border:0.5px solid #1a4a25;
+        {% else %}background:#21262d;color:#484f58;{% endif %}">
+        {{ r.status }}
+      </span>
+    </label>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  {% if lxcs %}
+  <div style="margin-bottom:14px;">
+    <div style="font-size:11px;font-weight:600;color:#6e7681;letter-spacing:.05em;margin-bottom:6px;">LXC CONTAINERS</div>
+    <div style="font-size:11px;color:#484f58;margin-bottom:8px;">LXCs run directly on Proxmox and use SSH for monitoring.</div>
+    {% for r in lxcs %}
+    <label style="display:flex;align-items:center;gap:10px;padding:7px 10px;background:#0d1117;border:0.5px solid #21262d;border-radius:6px;cursor:pointer;margin-bottom:5px;">
+      <input type="checkbox" name="selected_hosts"
+        value="{{ r.node }}:{{ r.vmid }}:{{ r.type }}:{{ r.name }}:{{ r.ip or '' }}"
+        style="accent-color:#388bfd;width:13px;height:13px;flex-shrink:0;">
+      <div style="min-width:0;flex:1;">
+        <span style="font-size:12px;color:#e6edf3;font-weight:500;">{{ r.name }}</span>
+        <span style="font-size:11px;color:#484f58;margin-left:8px;">LXC {{ r.vmid }} · {{ r.node }}{% if r.ip %} · {{ r.ip }}{% endif %}</span>
+      </div>
+      <span style="font-size:10px;padding:2px 7px;border-radius:10px;flex-shrink:0;
+        {% if r.status == 'running' %}background:#0f2b17;color:#3fb950;border:0.5px solid #1a4a25;
+        {% else %}background:#21262d;color:#484f58;{% endif %}">
+        {{ r.status }}
+      </span>
+    </label>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  <button type="submit" class="btn-save" style="margin-top:4px;">Setup SSH for selected →</button>
+</form>
+{% endif %}
