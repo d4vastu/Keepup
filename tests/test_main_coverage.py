@@ -1,6 +1,4 @@
 """Targeted tests to cover remaining uncovered lines in app/main.py."""
-import asyncio
-from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
