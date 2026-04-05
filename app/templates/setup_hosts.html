@@ -36,32 +36,6 @@
 
     <div class="space-y-6">
 
-      <!-- Proxmox pending callout -->
-      {% if proxmox_pending %}
-      <div class="rounded-2xl border border-blue-500/30 bg-blue-900/15 px-5 py-4">
-        <div class="flex items-start gap-3">
-          <svg class="w-5 h-5 text-blue-400 mt-0.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-              d="M13 16h-1v-4h-1m1-4h.01M12 2a10 10 0 110 20A10 10 0 0112 2z"/>
-          </svg>
-          <div>
-            <p class="text-sm font-medium text-blue-300">{{ proxmox_pending|length }} Proxmox host{{ 's' if proxmox_pending|length != 1 else '' }} queued</p>
-            <p class="text-xs text-slate-400 mt-1">
-              Add SSH credentials below for each VM or LXC to enable OS package update monitoring.
-            </p>
-            <ul class="mt-2 space-y-1">
-              {% for h in proxmox_pending %}
-              <li class="text-xs text-slate-300">
-                <span class="font-medium">{{ h.name }}</span>
-                <span class="text-slate-500 ml-1">{{ h.node }} · {{ h.type }}</span>
-              </li>
-              {% endfor %}
-            </ul>
-          </div>
-        </div>
-      </div>
-      {% endif %}
-
       <!-- SSH section -->
       <div id="ssh-hosts-section">
         {% include 'partials/setup_ssh_section.html' %}

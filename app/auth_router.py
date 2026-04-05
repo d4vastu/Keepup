@@ -62,6 +62,17 @@ router = APIRouter()
 templates = make_templates()
 
 
+def _ssh_section_ctx(request: Request, **extra) -> dict:
+    """Build the context dict for partials/setup_ssh_section.html."""
+    return {
+        "request": request,
+        "hosts": get_hosts(),
+        "available_keys": get_available_ssh_keys(),
+        "proxmox_pending": request.session.get("setup_proxmox_pending", []),
+        **extra,
+    }
+
+
 def _timezone_groups() -> list[tuple[str, list[str]]]:
     groups: dict[str, list[str]] = {}
     for zone in sorted(available_timezones()):
@@ -734,13 +745,11 @@ async def setup_add_host(
     auto_update = enable_auto_update == "on"
 
     if not name or not host_addr:
-        return templates.TemplateResponse("partials/setup_ssh_section.html", {
-            "request": request,
-            "hosts": get_hosts(),
-            "available_keys": get_available_ssh_keys(),
-            "add_error": "Name and host/IP are required.",
-            "form": {"name": name, "host": host_addr, "user": user_val or "", "port": port or "", "auth_method": auth_method, "key_file": key_file},
-        })
+        return templates.TemplateResponse("partials/setup_ssh_section.html", _ssh_section_ctx(
+            request,
+            add_error="Name and host/IP are required.",
+            form={"name": name, "host": host_addr, "user": user_val or "", "port": port or "", "auth_method": auth_method, "key_file": key_file},
+        ))
 
     host_entry: dict = {"name": name, "host": host_addr}
     if user_val:
@@ -756,13 +765,11 @@ async def setup_add_host(
 
     result = await verify_connection(host_entry, get_ssh_config(), creds)
     if not result["ok"]:
-        return templates.TemplateResponse("partials/setup_ssh_section.html", {
-            "request": request,
-            "hosts": get_hosts(),
-            "available_keys": get_available_ssh_keys(),
-            "add_error": f"Could not connect: {result['message']}",
-            "form": {"name": name, "host": host_addr, "user": user_val or "", "port": port or "", "auth_method": auth_method, "key_file": key_file},
-        })
+        return templates.TemplateResponse("partials/setup_ssh_section.html", _ssh_section_ctx(
+            request,
+            add_error=f"Could not connect: {result['message']}",
+            form={"name": name, "host": host_addr, "user": user_val or "", "port": port or "", "auth_method": auth_method, "key_file": key_file},
+        ))
 
     # Connection succeeded — check for Docker before committing
     stack_count = await detect_docker_stacks(host_entry, get_ssh_config(), creds)
@@ -780,12 +787,10 @@ async def setup_add_host(
             "key_file": key_file,
             "auto_update": auto_update,
         }
-        return templates.TemplateResponse("partials/setup_ssh_section.html", {
-            "request": request,
-            "hosts": get_hosts(),
-            "available_keys": get_available_ssh_keys(),
-            "docker_prompt": {"name": name, "stack_label": label},
-        })
+        return templates.TemplateResponse("partials/setup_ssh_section.html", _ssh_section_ctx(
+            request,
+            docker_prompt={"name": name, "stack_label": label},
+        ))
 
     # No Docker — add host directly
     slug = add_host(name=name, host=host_addr, user=user_val, port=port_val, key_path=key_path)
@@ -794,12 +799,10 @@ async def setup_add_host(
     if auto_update:
         set_host_auto_update(slug, os_enabled=True, os_schedule="weekly", auto_reboot=False)
 
-    return templates.TemplateResponse("partials/setup_ssh_section.html", {
-        "request": request,
-        "hosts": get_hosts(),
-        "available_keys": get_available_ssh_keys(),
-        "add_success": f"{name} added successfully.",
-    })
+    return templates.TemplateResponse("partials/setup_ssh_section.html", _ssh_section_ctx(
+        request,
+        add_success=f"{name} added successfully.",
+    ))
 
 
 @router.post("/setup/hosts/confirm-add", response_class=HTMLResponse)
@@ -809,12 +812,10 @@ async def setup_confirm_add_host(
 ) -> HTMLResponse:
     pending = request.session.pop("pending_ssh_host", None)
     if not pending:
-        return templates.TemplateResponse("partials/setup_ssh_section.html", {
-            "request": request,
-            "hosts": get_hosts(),
-            "available_keys": get_available_ssh_keys(),
-            "add_error": "Session expired — please add the host again.",
-        })
+        return templates.TemplateResponse("partials/setup_ssh_section.html", _ssh_section_ctx(
+            request,
+            add_error="Session expired — please add the host again.",
+        ))
 
     name = pending["name"]
     host_addr = pending["host"]
@@ -835,23 +836,106 @@ async def setup_confirm_add_host(
     if auto_update:
         set_host_auto_update(slug, os_enabled=True, os_schedule="weekly", auto_reboot=False)
 
-    return templates.TemplateResponse("partials/setup_ssh_section.html", {
-        "request": request,
-        "hosts": get_hosts(),
-        "available_keys": get_available_ssh_keys(),
-        "add_success": f"{name} added{' with container monitoring' if docker_mode else ''} successfully.",
-    })
+    return templates.TemplateResponse("partials/setup_ssh_section.html", _ssh_section_ctx(
+        request,
+        add_success=f"{name} added{' with container monitoring' if docker_mode else ''} successfully.",
+    ))
 
 
 @router.post("/setup/hosts/{slug}/remove", response_class=HTMLResponse)
 async def setup_remove_host(request: Request, slug: str) -> HTMLResponse:
     delete_host(slug)
     delete_credentials(slug)
-    return templates.TemplateResponse("partials/setup_ssh_section.html", {
-        "request": request,
-        "hosts": get_hosts(),
-        "available_keys": get_available_ssh_keys(),
-    })
+    return templates.TemplateResponse("partials/setup_ssh_section.html", _ssh_section_ctx(request))
+
+
+@router.post("/setup/hosts/card-test", response_class=HTMLResponse)
+async def setup_card_test(
+    request: Request,
+    name: str = Form(""),
+    host: str = Form(""),
+    user: str = Form("root"),
+    port: str = Form("22"),
+    auth_method: str = Form("key"),
+    ssh_password: str = Form(""),
+    card_index: str = Form("1"),
+) -> HTMLResponse:
+    try:
+        idx = int(card_index)
+    except ValueError:
+        idx = 1
+    host_entry: dict = {"name": name.strip() or "test", "host": host.strip()}
+    if user.strip():
+        host_entry["user"] = user.strip()
+    if port.strip().isdigit():
+        host_entry["port"] = int(port)
+    creds: dict = {}
+    if auth_method == "password" and ssh_password.strip():
+        creds = {"ssh_password": ssh_password.strip()}
+    try:
+        result = await verify_connection(host_entry, get_ssh_config(), creds)
+        if result["ok"]:
+            return HTMLResponse(
+                f'<span class="w-1.5 h-1.5 rounded-full bg-green-400 flex-shrink-0" id="dot-{idx}"></span>'
+            )
+        return HTMLResponse(
+            f'<span class="w-1.5 h-1.5 rounded-full bg-red-400 flex-shrink-0" id="dot-{idx}" title="Failed"></span>'
+        )
+    except Exception:
+        return HTMLResponse(
+            f'<span class="w-1.5 h-1.5 rounded-full bg-red-400 flex-shrink-0" id="dot-{idx}" title="Error"></span>'
+        )
+
+
+@router.post("/setup/hosts/card-add", response_class=HTMLResponse)
+async def setup_card_add(
+    request: Request,
+    name: str = Form(""),
+    host: str = Form(""),
+    user: str = Form("root"),
+    port: str = Form("22"),
+    auth_method: str = Form("key"),
+    ssh_password: str = Form(""),
+    card_index: str = Form("1"),
+    node: str = Form(""),
+    host_type: str = Form(""),
+) -> HTMLResponse:
+    try:
+        idx = int(card_index)
+    except ValueError:
+        idx = 1
+    name = name.strip()
+    host_addr = host.strip()
+    if not name or not host_addr:
+        return templates.TemplateResponse(
+            "partials/setup_host_card_confirmed.html",
+            {
+                "request": request,
+                "card_index": idx,
+                "name": name or "(unnamed)",
+                "host_addr": host_addr,
+                "node": node,
+                "host_type": host_type,
+                "error": "Display name and IP address are required.",
+            },
+        )
+    user_val = user.strip() or None
+    port_val = int(port) if port.strip().isdigit() else None
+    slug = add_host(name=name, host=host_addr, user=user_val, port=port_val)
+    if auth_method == "password" and ssh_password.strip():
+        save_credentials(slug, ssh_password=ssh_password.strip())
+    return templates.TemplateResponse(
+        "partials/setup_host_card_confirmed.html",
+        {
+            "request": request,
+            "card_index": idx,
+            "name": name,
+            "host_addr": host_addr,
+            "node": node,
+            "host_type": host_type,
+            "error": None,
+        },
+    )
 
 
 @router.post("/setup/portainer/test", response_class=HTMLResponse)
