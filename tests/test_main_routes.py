@@ -14,32 +14,39 @@ def test_home_unauthenticated_returns_landing(anon_client):
     assert "keepup" in response.text.lower()
 
 
-def test_home_authenticated_redirects_to_dashboard(client):
-    """Authenticated / redirects to /dashboard."""
+def test_home_authenticated_redirects_to_home(client):
+    """Authenticated / redirects to /home."""
     response = client.get("/", follow_redirects=False)
     assert response.status_code in (302, 303)
-    assert response.headers["location"] == "/dashboard"
+    assert response.headers["location"] == "/home"
 
 
-def test_dashboard_returns_200(client):
-    response = client.get("/dashboard")
+def test_home_returns_200(client):
+    response = client.get("/home")
     assert response.status_code == 200
 
 
-def test_dashboard_lists_hosts(client):
-    response = client.get("/dashboard")
+def test_home_lists_hosts(client):
+    response = client.get("/home")
     assert "Test Host" in response.text
     assert "Custom User Host" in response.text
 
 
-def test_dashboard_has_admin_link(client):
-    response = client.get("/dashboard")
+def test_home_has_admin_link(client):
+    response = client.get("/home")
     assert "/admin" in response.text
+
+
+def test_dashboard_redirects_to_home(client):
+    """/dashboard now 301-redirects to /home."""
+    response = client.get("/dashboard", follow_redirects=False)
+    assert response.status_code == 301
+    assert response.headers["location"] == "/home"
 
 
 def test_unauthenticated_protected_route_redirects_to_login(anon_client):
     """Unauthenticated access to a protected route redirects to /login."""
-    response = anon_client.get("/dashboard", follow_redirects=False)
+    response = anon_client.get("/home", follow_redirects=False)
     assert response.status_code in (302, 303)
     assert "/login" in response.headers["location"]
 

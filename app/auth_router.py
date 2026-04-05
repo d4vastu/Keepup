@@ -637,7 +637,7 @@ async def login_submit(
     if remember_me == "on":
         request.session["remember_me"] = True
 
-    next_url = request.query_params.get("next", "/dashboard")
+    next_url = request.query_params.get("next", "/home")
     return RedirectResponse(next_url, status_code=303)
 
 
