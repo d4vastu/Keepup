@@ -7,10 +7,61 @@
   <link rel="manifest" href="/static/manifest.json" />
   <meta name="theme-color" content="#0d1117" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Connect your infrastructure — Keepup</title>
+  <title>Connect your infrastructure — Keepup Setup</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://unpkg.com/htmx.org@1.9.10"></script>
-  <style>body { background-color: #0d1117; }</style>
+  <style>
+    body { background-color: #0d1117; }
+    .icon-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 20px; }
+    .int-icon { background: #161b22; border: 0.5px solid #21262d; border-radius: 10px; padding: 14px 10px 10px; display: flex; flex-direction: column; align-items: center; gap: 7px; cursor: pointer; transition: border-color 0.15s; }
+    .int-icon:hover { border-color: #30363d; }
+    .int-icon.active { border-color: #388bfd; background: #0c1a2e; }
+    .int-icon.connected { border-color: #1a4a25; background: #0a1f10; }
+    .int-icon.connected.active { border-color: #3fb950; }
+    .int-logo { width: 34px; height: 34px; border-radius: 8px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+    .int-name { font-size: 11px; font-weight: 500; color: #8b949e; text-align: center; }
+    .int-icon.connected .int-name { color: #3fb950; }
+    .int-icon.active:not(.connected) .int-name { color: #388bfd; }
+    .int-bottom { display: flex; align-items: center; justify-content: space-between; width: 100%; margin-top: 2px; }
+    .int-count { font-size: 10px; font-weight: 500; padding: 2px 7px; border-radius: 10px; }
+    .count-green { background: #0f2b17; color: #3fb950; border: 0.5px solid #1a4a25; }
+    .count-gray { color: #484f58; font-size: 10px; }
+    .add-btn { font-size: 10px; font-weight: 500; padding: 3px 8px; border-radius: 5px; cursor: pointer; border: none; }
+    .add-btn-green { background: #1a4a25; color: #3fb950; }
+    .add-btn-gray { background: #21262d; color: #8b949e; }
+
+    .config-section { display: none; }
+    .config-card { background: #161b22; border: 0.5px solid #21262d; border-radius: 10px; overflow: hidden; margin-bottom: 12px; position: relative; }
+    .config-card-header { display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; border-bottom: 0.5px solid #21262d; }
+    .config-card-title { font-size: 13px; font-weight: 500; color: #e6edf3; display: flex; align-items: center; gap: 8px; }
+    .config-card-body { padding: 14px 16px; }
+
+    .field { display: flex; flex-direction: column; gap: 4px; margin-bottom: 10px; }
+    .field-label { font-size: 11px; color: #6e7681; letter-spacing: 0.04em; }
+    .field-input { background: #0d1117; border: 0.5px solid #30363d; border-radius: 6px; padding: 7px 10px; font-size: 12px; color: #e6edf3; font-family: monospace; width: 100%; outline: none; }
+    .field-input:focus { border-color: #388bfd; }
+    .field-hint { font-size: 11px; color: #484f58; margin-top: 3px; }
+    .field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+
+    .ha-notice { font-size: 12px; color: #484f58; background: #0c1a2e; border: 0.5px solid #1a3a6e; border-radius: 6px; padding: 10px 12px; margin-bottom: 10px; }
+
+    .btn-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+    .btn-test { font-size: 12px; font-weight: 500; padding: 6px 14px; border-radius: 6px; border: 0.5px solid #30363d; background: transparent; color: #8b949e; cursor: pointer; }
+    .btn-test:hover { background: #21262d; color: #e6edf3; }
+    .btn-save { font-size: 12px; font-weight: 500; padding: 6px 14px; border-radius: 6px; border: 0.5px solid #1a3a6e; background: #0c2045; color: #388bfd; cursor: pointer; }
+    .btn-save:hover { background: #0f2b5c; }
+
+    .delete-overlay { display: none; position: absolute; top: 0; right: 0; bottom: 0; width: 80px; background: linear-gradient(to right, transparent, rgba(248,81,73,0.12)); align-items: center; justify-content: flex-end; padding-right: 14px; pointer-events: none; }
+    .config-card:hover .delete-overlay { display: flex; }
+    .delete-btn { font-size: 11px; font-weight: 500; color: #f85149; background: #1a0808; border: 0.5px solid #4a1515; border-radius: 5px; padding: 4px 10px; cursor: pointer; pointer-events: all; }
+
+    .discover-btn { font-size: 12px; font-weight: 500; padding: 6px 14px; border-radius: 6px; border: 0.5px solid #2d4a3e; background: #0a1f10; color: #3fb950; cursor: pointer; margin-top: 8px; }
+    .discover-btn:hover { background: #0f2b17; }
+
+    .ssl-row { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+    .ssl-row input { accent-color: #388bfd; }
+    .ssl-row label { font-size: 12px; color: #8b949e; cursor: pointer; }
+  </style>
 </head>
 <body class="min-h-full text-slate-200 font-sans px-4 py-12">
 
@@ -18,7 +69,17 @@
 
     <!-- Header -->
     <div class="text-center mb-6">
-      <img src="/static/logo.svg" alt="Keepup" class="w-16 h-16 mx-auto mb-4 rounded-2xl" />
+      <svg width="56" height="56" viewBox="0 0 28 28" fill="none" class="mx-auto mb-4">
+        <rect width="28" height="28" rx="7" fill="#0f1923"/>
+        <rect x="7" y="13" width="14" height="3.5" rx="1" fill="#2d3a4a"/>
+        <rect x="7" y="17.5" width="14" height="3.5" rx="1" fill="#2d3a4a"/>
+        <rect x="7" y="22" width="14" height="3.5" rx="1" fill="#2d3a4a"/>
+        <path d="M14 12.5 L14 5" stroke="#3fb950" stroke-width="2.2" stroke-linecap="round"/>
+        <path d="M10.5 8.2 L14 4.5 L17.5 8.2" fill="none" stroke="#3fb950" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+        <circle cx="9" cy="14.75" r="1.1" fill="#3fb950"/>
+        <circle cx="9" cy="19.25" r="1.1" fill="#3fb950"/>
+        <circle cx="9" cy="23.75" r="1.1" fill="#253a2d"/>
+      </svg>
       <h1 class="text-2xl font-bold text-white">Connect your infrastructure</h1>
       <p class="text-sm text-slate-400 mt-1">Add integrations to monitor. All are optional — configure them later in Admin.</p>
     </div>
@@ -34,270 +95,456 @@
       </div>
     </div>
 
-    <div class="space-y-4">
+    <!-- Icon grid -->
+    <div class="icon-grid">
 
       <!-- Proxmox VE -->
-      <div id="proxmox-section">
-        {% include 'partials/setup_proxmox_section.html' %}
-      </div>
-
-      <!-- Proxmox Backup Server -->
-      <div class="bg-slate-800/60 border border-slate-700 rounded-2xl overflow-hidden">
-        <div class="flex items-center justify-between px-5 py-4 border-b border-slate-700">
-          <div>
-            <h2 class="text-sm font-semibold text-slate-200">Proxmox Backup Server <span class="text-xs font-normal text-slate-500 ml-1">optional</span></h2>
-            <p class="text-xs text-slate-500 mt-0.5">Monitor backup jobs and PBS version updates.</p>
-          </div>
-          {% if pbs_connected %}
-          <span class="flex items-center gap-1.5 text-xs text-green-400 font-medium flex-shrink-0 ml-4">
-            <span class="w-2 h-2 rounded-full bg-green-400"></span> Connected
-          </span>
+      <div class="int-icon {% if proxmox_connected %}connected{% endif %}" id="tile-proxmox" onclick="toggleConfig('proxmox')">
+        <div class="int-logo" style="background:#3d1f00">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+            <path d="M12 3L4 7.5V16.5L12 21L20 16.5V7.5L12 3Z" stroke="#ff6600" stroke-width="1.5" stroke-linejoin="round"/>
+            <path d="M12 3V21M4 7.5L20 16.5M20 7.5L4 16.5" stroke="#ff6600" stroke-width="1" opacity="0.5"/>
+          </svg>
+        </div>
+        <div class="int-name">Proxmox VE</div>
+        <div class="int-bottom">
+          {% if proxmox_connected %}
+          <span class="int-count count-green">connected</span>
+          <button class="add-btn add-btn-green" onclick="event.stopPropagation();toggleConfig('proxmox')">Edit</button>
+          {% else %}
+          <span class="int-count count-gray">optional</span>
+          <button class="add-btn add-btn-gray" onclick="event.stopPropagation();toggleConfig('proxmox')">Add</button>
           {% endif %}
         </div>
-        <div class="px-5 py-4 space-y-3">
-          <div id="pbs-result"></div>
-          <div>
-            <label class="block text-xs font-medium text-slate-400 mb-1">PBS URL</label>
-            <input type="url" id="pbs-url" name="pbs_url" value="{{ pbs_url or '' }}"
-              placeholder="https://192.168.1.11:8007"
-              class="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-blue-500 placeholder:text-slate-500">
-          </div>
-          <div>
-            <label class="block text-xs font-medium text-slate-400 mb-1">API token</label>
-            <input type="password" id="pbs-token" name="pbs_api_token" placeholder="user@pbs!tokenname=uuid"
-              class="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-blue-500 placeholder:text-slate-500">
-            <p class="text-xs text-slate-500 mt-1">In PBS: Configuration → Access Control → API Tokens.</p>
-          </div>
-          <label class="flex items-center gap-2 cursor-pointer select-none">
-            <input type="checkbox" id="pbs-ssl" name="pbs_verify_ssl" value="on" class="w-4 h-4 rounded accent-blue-500">
-            <span class="text-sm text-slate-300">Verify SSL certificate</span>
-          </label>
-          <div id="pbs-test-result"></div>
-          <div class="flex gap-2 items-center flex-wrap">
-            <button
-              hx-post="/setup/connect/pbs/test"
-              hx-include="#pbs-url,#pbs-token,#pbs-ssl"
-              hx-target="#pbs-test-result"
-              class="px-4 py-2 rounded-lg bg-slate-600 hover:bg-slate-500 text-sm font-medium text-slate-200 transition-colors">
-              Test connection
-            </button>
-            <button
-              hx-post="/setup/connect/pbs/save"
-              hx-include="#pbs-url,#pbs-token,#pbs-ssl"
-              hx-target="#pbs-result"
-              class="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-sm font-medium text-white transition-colors">
-              Save
-            </button>
-          </div>
+      </div>
+
+      <!-- PBS -->
+      <div class="int-icon {% if pbs_connected %}connected{% endif %}" id="tile-pbs" onclick="toggleConfig('pbs')">
+        <div class="int-logo" style="background:#3d1f00">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+            <rect x="3" y="6" width="18" height="12" rx="2" stroke="#ff6600" stroke-width="1.5"/>
+            <path d="M3 10h18M7 10v8" stroke="#ff6600" stroke-width="1"/>
+          </svg>
+        </div>
+        <div class="int-name">Backup Server</div>
+        <div class="int-bottom">
+          {% if pbs_connected %}
+          <span class="int-count count-green">connected</span>
+          <button class="add-btn add-btn-green" onclick="event.stopPropagation();toggleConfig('pbs')">Edit</button>
+          {% else %}
+          <span class="int-count count-gray">optional</span>
+          <button class="add-btn add-btn-gray" onclick="event.stopPropagation();toggleConfig('pbs')">Add</button>
+          {% endif %}
         </div>
       </div>
 
       <!-- OPNsense -->
-      <div class="bg-slate-800/60 border border-slate-700 rounded-2xl overflow-hidden">
-        <div class="flex items-center justify-between px-5 py-4 border-b border-slate-700">
-          <div>
-            <h2 class="text-sm font-semibold text-slate-200">OPNsense <span class="text-xs font-normal text-slate-500 ml-1">optional</span></h2>
-            <p class="text-xs text-slate-500 mt-0.5">Monitor firmware and package updates on your OPNsense firewall.</p>
-          </div>
-          {% if opnsense_connected %}
-          <span class="flex items-center gap-1.5 text-xs text-green-400 font-medium flex-shrink-0 ml-4">
-            <span class="w-2 h-2 rounded-full bg-green-400"></span> Connected
-          </span>
-          {% endif %}
+      <div class="int-icon {% if opnsense_connected %}connected{% endif %}" id="tile-opnsense" onclick="toggleConfig('opnsense')">
+        <div class="int-logo" style="background:#3d1500">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+            <path d="M12 3C7 3 3 7 3 12C3 17 7 21 12 21C17 21 21 17 21 12C21 7 17 3 12 3Z" stroke="#d94f00" stroke-width="1.5"/>
+            <path d="M12 7v5l3 3" stroke="#d94f00" stroke-width="1.5" stroke-linecap="round"/>
+          </svg>
         </div>
-        <div class="px-5 py-4 space-y-3">
-          <div id="opnsense-result"></div>
-          <div>
-            <label class="block text-xs font-medium text-slate-400 mb-1">OPNsense URL</label>
-            <input type="url" id="opn-url" name="opnsense_url" value="{{ opnsense_url or '' }}"
-              placeholder="https://192.168.1.1"
-              class="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-blue-500 placeholder:text-slate-500">
-          </div>
-          <div class="grid grid-cols-2 gap-3">
-            <div>
-              <label class="block text-xs font-medium text-slate-400 mb-1">API key</label>
-              <input type="text" id="opn-key" name="opnsense_api_key" placeholder="key"
-                class="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-blue-500 placeholder:text-slate-500">
-            </div>
-            <div>
-              <label class="block text-xs font-medium text-slate-400 mb-1">API secret</label>
-              <input type="password" id="opn-secret" name="opnsense_api_secret" placeholder="secret"
-                class="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-blue-500 placeholder:text-slate-500">
-            </div>
-          </div>
-          <p class="text-xs text-slate-500">In OPNsense: System → Access → Users → your user → API keys.</p>
-          <label class="flex items-center gap-2 cursor-pointer select-none">
-            <input type="checkbox" id="opn-ssl" name="opnsense_verify_ssl" value="on" class="w-4 h-4 rounded accent-blue-500">
-            <span class="text-sm text-slate-300">Verify SSL certificate</span>
-          </label>
-          <div id="opnsense-test-result"></div>
-          <div class="flex gap-2 items-center flex-wrap">
-            <button
-              hx-post="/setup/connect/opnsense/test"
-              hx-include="#opn-url,#opn-key,#opn-secret,#opn-ssl"
-              hx-target="#opnsense-test-result"
-              class="px-4 py-2 rounded-lg bg-slate-600 hover:bg-slate-500 text-sm font-medium text-slate-200 transition-colors">
-              Test connection
-            </button>
-            <button
-              hx-post="/setup/connect/opnsense/save"
-              hx-include="#opn-url,#opn-key,#opn-secret,#opn-ssl"
-              hx-target="#opnsense-result"
-              class="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-sm font-medium text-white transition-colors">
-              Save
-            </button>
-          </div>
+        <div class="int-name">OPNsense</div>
+        <div class="int-bottom">
+          {% if opnsense_connected %}
+          <span class="int-count count-green">connected</span>
+          <button class="add-btn add-btn-green" onclick="event.stopPropagation();toggleConfig('opnsense')">Edit</button>
+          {% else %}
+          <span class="int-count count-gray">optional</span>
+          <button class="add-btn add-btn-gray" onclick="event.stopPropagation();toggleConfig('opnsense')">Add</button>
+          {% endif %}
         </div>
       </div>
 
       <!-- pfSense -->
-      <div class="bg-slate-800/60 border border-slate-700 rounded-2xl overflow-hidden">
-        <div class="flex items-center justify-between px-5 py-4 border-b border-slate-700">
-          <div>
-            <h2 class="text-sm font-semibold text-slate-200">pfSense <span class="text-xs font-normal text-slate-500 ml-1">optional</span></h2>
-            <p class="text-xs text-slate-500 mt-0.5">Monitor firmware updates on your pfSense firewall. Requires pfSense 2.7+ or the pfSense API package.</p>
-          </div>
+      <div class="int-icon {% if pfsense_connected %}connected{% endif %}" id="tile-pfsense" onclick="toggleConfig('pfsense')">
+        <div class="int-logo" style="background:#0c1e3d">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+            <path d="M4 6h16M4 12h10M4 18h13" stroke="#2775ca" stroke-width="1.5" stroke-linecap="round"/>
+          </svg>
+        </div>
+        <div class="int-name">pfSense</div>
+        <div class="int-bottom">
           {% if pfsense_connected %}
-          <span class="flex items-center gap-1.5 text-xs text-green-400 font-medium flex-shrink-0 ml-4">
-            <span class="w-2 h-2 rounded-full bg-green-400"></span> Connected
-          </span>
+          <span class="int-count count-green">connected</span>
+          <button class="add-btn add-btn-green" onclick="event.stopPropagation();toggleConfig('pfsense')">Edit</button>
+          {% else %}
+          <span class="int-count count-gray">optional</span>
+          <button class="add-btn add-btn-gray" onclick="event.stopPropagation();toggleConfig('pfsense')">Add</button>
           {% endif %}
         </div>
-        <div class="px-5 py-4 space-y-3">
-          <div id="pfsense-result"></div>
-          <div>
-            <label class="block text-xs font-medium text-slate-400 mb-1">pfSense URL</label>
-            <input type="url" id="pf-url" name="pfsense_url" value="{{ pfsense_url or '' }}"
-              placeholder="https://192.168.1.1"
-              class="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-blue-500 placeholder:text-slate-500">
-          </div>
-          <div>
-            <label class="block text-xs font-medium text-slate-400 mb-1">API key</label>
-            <input type="password" id="pf-key" name="pfsense_api_key" placeholder="API key"
-              class="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-blue-500 placeholder:text-slate-500">
-          </div>
-          <label class="flex items-center gap-2 cursor-pointer select-none">
-            <input type="checkbox" id="pf-ssl" name="pfsense_verify_ssl" value="on" class="w-4 h-4 rounded accent-blue-500">
-            <span class="text-sm text-slate-300">Verify SSL certificate</span>
-          </label>
-          <div id="pfsense-test-result"></div>
-          <div class="flex gap-2 items-center flex-wrap">
-            <button
-              hx-post="/setup/connect/pfsense/test"
-              hx-include="#pf-url,#pf-key,#pf-ssl"
-              hx-target="#pfsense-test-result"
-              class="px-4 py-2 rounded-lg bg-slate-600 hover:bg-slate-500 text-sm font-medium text-slate-200 transition-colors">
-              Test connection
-            </button>
-            <button
-              hx-post="/setup/connect/pfsense/save"
-              hx-include="#pf-url,#pf-key,#pf-ssl"
-              hx-target="#pfsense-result"
-              class="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-sm font-medium text-white transition-colors">
-              Save
-            </button>
-          </div>
+      </div>
+
+      <!-- Home Assistant -->
+      <div class="int-icon {% if homeassistant_connected %}connected{% endif %}" id="tile-homeassistant" onclick="toggleConfig('homeassistant')">
+        <div class="int-logo" style="background:#0c2a3d">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+            <path d="M3 12L12 3L21 12V20a1 1 0 01-1 1H5a1 1 0 01-1-1V12z" stroke="#18bcf2" stroke-width="1.5" stroke-linejoin="round"/>
+            <rect x="9" y="14" width="6" height="7" rx="1" stroke="#18bcf2" stroke-width="1.2"/>
+          </svg>
+        </div>
+        <div class="int-name">Home Assistant</div>
+        <div class="int-bottom">
+          {% if homeassistant_connected %}
+          <span class="int-count count-green">connected</span>
+          <button class="add-btn add-btn-green" onclick="event.stopPropagation();toggleConfig('homeassistant')">Edit</button>
+          {% else %}
+          <span class="int-count count-gray">optional</span>
+          <button class="add-btn add-btn-gray" onclick="event.stopPropagation();toggleConfig('homeassistant')">Add</button>
+          {% endif %}
         </div>
       </div>
 
       <!-- Portainer -->
+      <div class="int-icon {% if portainer_connected %}connected{% endif %}" id="tile-portainer" onclick="toggleConfig('portainer')">
+        <div class="int-logo" style="background:#0c2637">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+            <rect x="4" y="4" width="7" height="7" rx="1" stroke="#13bef9" stroke-width="1.5"/>
+            <rect x="4" y="13" width="7" height="7" rx="1" stroke="#13bef9" stroke-width="1.5"/>
+            <rect x="13" y="4" width="7" height="7" rx="1" stroke="#13bef9" stroke-width="1.5"/>
+            <rect x="13" y="13" width="7" height="7" rx="1" stroke="#13bef9" stroke-width="1.2" stroke-dasharray="2 1"/>
+          </svg>
+        </div>
+        <div class="int-name">Portainer</div>
+        <div class="int-bottom">
+          {% if portainer_connected %}
+          <span class="int-count count-green">connected</span>
+          <button class="add-btn add-btn-green" onclick="event.stopPropagation();toggleConfig('portainer')">Edit</button>
+          {% else %}
+          <span class="int-count count-gray">optional</span>
+          <button class="add-btn add-btn-gray" onclick="event.stopPropagation();toggleConfig('portainer')">Add</button>
+          {% endif %}
+        </div>
+      </div>
+
+      <!-- Docker Hub -->
+      <div class="int-icon {% if dockerhub_connected %}connected{% endif %}" id="tile-dockerhub" onclick="toggleConfig('dockerhub')">
+        <div class="int-logo" style="background:#0c1e3d">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+            <path d="M3 12h3v3H3zM7 12h3v3H7zM11 12h3v3H11zM11 8h3v3H11zM15 8h3v3H15z" stroke="#1d63ed" stroke-width="1.2" stroke-linejoin="round"/>
+            <path d="M20 13c.5-1 .5-3-1-4" stroke="#1d63ed" stroke-width="1.2" stroke-linecap="round"/>
+            <path d="M2 15c1 2 4 3 7 3h5c3 0 4-1 4-1" stroke="#1d63ed" stroke-width="1.2" stroke-linecap="round"/>
+          </svg>
+        </div>
+        <div class="int-name">Docker Hub</div>
+        <div class="int-bottom">
+          {% if dockerhub_connected %}
+          <span class="int-count count-green">connected</span>
+          <button class="add-btn add-btn-green" onclick="event.stopPropagation();toggleConfig('dockerhub')">Edit</button>
+          {% else %}
+          <span class="int-count count-gray">optional</span>
+          <button class="add-btn add-btn-gray" onclick="event.stopPropagation();toggleConfig('dockerhub')">Add</button>
+          {% endif %}
+        </div>
+      </div>
+
+    </div><!-- /icon-grid -->
+
+    <!-- Config sections -->
+
+    <!-- Proxmox VE config -->
+    <div class="config-section" id="config-proxmox">
+      <div id="proxmox-section">
+        {% include 'partials/setup_proxmox_section.html' %}
+      </div>
+    </div>
+
+    <!-- PBS config -->
+    <div class="config-section" id="config-pbs">
+      <div class="config-card">
+        <div class="config-card-header">
+          <div class="config-card-title">
+            <div class="int-logo" style="background:#3d1f00;width:22px;height:22px;border-radius:5px;flex-shrink:0">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none"><rect x="3" y="6" width="18" height="12" rx="2" stroke="#ff6600" stroke-width="2"/><path d="M3 10h18" stroke="#ff6600" stroke-width="1.5"/></svg>
+            </div>
+            Proxmox Backup Server
+          </div>
+          {% if pbs_connected %}<span style="font-size:11px;color:#3fb950">● Connected</span>{% endif %}
+        </div>
+        <div class="config-card-body">
+          <div id="pbs-result"></div>
+          <div class="field">
+            <div class="field-label">PBS URL</div>
+            <input type="url" id="pbs-url" name="pbs_url" value="{{ pbs_url or '' }}"
+              placeholder="https://192.168.1.11:8007" class="field-input">
+          </div>
+          <div class="field">
+            <div class="field-label">API token</div>
+            <input type="password" id="pbs-token" name="pbs_api_token" placeholder="user@pbs!tokenname=uuid" class="field-input">
+            <div class="field-hint">PBS: Configuration → Access Control → API Tokens</div>
+          </div>
+          <div class="ssl-row">
+            <input type="checkbox" id="pbs-ssl" name="pbs_verify_ssl" value="on">
+            <label for="pbs-ssl">Verify SSL certificate</label>
+          </div>
+          <div id="pbs-test-result" style="font-size:12px;margin-bottom:6px"></div>
+          <div class="btn-row">
+            <button class="btn-test"
+              hx-post="/setup/connect/pbs/test"
+              hx-include="#pbs-url,#pbs-token,#pbs-ssl"
+              hx-target="#pbs-test-result">Test connection</button>
+            <button class="btn-save"
+              hx-post="/setup/connect/pbs/save"
+              hx-include="#pbs-url,#pbs-token,#pbs-ssl"
+              hx-target="#pbs-result">Save</button>
+          </div>
+        </div>
+        <div class="delete-overlay">
+          <button class="delete-btn"
+            hx-post="/setup/connect/pbs/clear"
+            hx-confirm="Remove PBS connection?"
+            hx-target="#config-pbs"
+            hx-swap="innerHTML">Delete</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- OPNsense config -->
+    <div class="config-section" id="config-opnsense">
+      <div class="config-card">
+        <div class="config-card-header">
+          <div class="config-card-title">
+            <div class="int-logo" style="background:#3d1500;width:22px;height:22px;border-radius:5px;flex-shrink:0">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none"><path d="M12 3C7 3 3 7 3 12s4 9 9 9 9-4 9-9-4-9-9-9z" stroke="#d94f00" stroke-width="2"/><path d="M12 7v5l3 3" stroke="#d94f00" stroke-width="1.5" stroke-linecap="round"/></svg>
+            </div>
+            OPNsense
+          </div>
+          {% if opnsense_connected %}<span style="font-size:11px;color:#3fb950">● Connected</span>{% endif %}
+        </div>
+        <div class="config-card-body">
+          <div id="opnsense-result"></div>
+          <div class="field">
+            <div class="field-label">OPNsense URL</div>
+            <input type="url" id="opn-url" name="opnsense_url" value="{{ opnsense_url or '' }}"
+              placeholder="https://192.168.1.1" class="field-input">
+          </div>
+          <div class="field-row">
+            <div class="field">
+              <div class="field-label">API key</div>
+              <input type="text" id="opn-key" name="opnsense_api_key" placeholder="key" class="field-input">
+            </div>
+            <div class="field">
+              <div class="field-label">API secret</div>
+              <input type="password" id="opn-secret" name="opnsense_api_secret" placeholder="secret" class="field-input">
+            </div>
+          </div>
+          <div class="field-hint" style="margin-bottom:8px">OPNsense: System → Access → Users → your user → API keys</div>
+          <div class="ssl-row">
+            <input type="checkbox" id="opn-ssl" name="opnsense_verify_ssl" value="on">
+            <label for="opn-ssl">Verify SSL certificate</label>
+          </div>
+          <div id="opnsense-test-result" style="font-size:12px;margin-bottom:6px"></div>
+          <div class="btn-row">
+            <button class="btn-test"
+              hx-post="/setup/connect/opnsense/test"
+              hx-include="#opn-url,#opn-key,#opn-secret,#opn-ssl"
+              hx-target="#opnsense-test-result">Test connection</button>
+            <button class="btn-save"
+              hx-post="/setup/connect/opnsense/save"
+              hx-include="#opn-url,#opn-key,#opn-secret,#opn-ssl"
+              hx-target="#opnsense-result">Save</button>
+          </div>
+        </div>
+        <div class="delete-overlay">
+          <button class="delete-btn"
+            hx-post="/setup/connect/opnsense/clear"
+            hx-confirm="Remove OPNsense connection?"
+            hx-target="#config-opnsense"
+            hx-swap="innerHTML">Delete</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- pfSense config -->
+    <div class="config-section" id="config-pfsense">
+      <div class="config-card">
+        <div class="config-card-header">
+          <div class="config-card-title">
+            <div class="int-logo" style="background:#0c1e3d;width:22px;height:22px;border-radius:5px;flex-shrink:0">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none"><path d="M4 6h16M4 12h10M4 18h13" stroke="#2775ca" stroke-width="2" stroke-linecap="round"/></svg>
+            </div>
+            pfSense
+          </div>
+          {% if pfsense_connected %}<span style="font-size:11px;color:#3fb950">● Connected</span>{% endif %}
+        </div>
+        <div class="config-card-body">
+          <div id="pfsense-result"></div>
+          <div class="field">
+            <div class="field-label">pfSense URL</div>
+            <input type="url" id="pf-url" name="pfsense_url" value="{{ pfsense_url or '' }}"
+              placeholder="https://192.168.1.1" class="field-input">
+          </div>
+          <div class="field">
+            <div class="field-label">API key</div>
+            <input type="password" id="pf-key" name="pfsense_api_key" placeholder="API key" class="field-input">
+          </div>
+          <div class="ssl-row">
+            <input type="checkbox" id="pf-ssl" name="pfsense_verify_ssl" value="on">
+            <label for="pf-ssl">Verify SSL certificate</label>
+          </div>
+          <div id="pfsense-test-result" style="font-size:12px;margin-bottom:6px"></div>
+          <div class="btn-row">
+            <button class="btn-test"
+              hx-post="/setup/connect/pfsense/test"
+              hx-include="#pf-url,#pf-key,#pf-ssl"
+              hx-target="#pfsense-test-result">Test connection</button>
+            <button class="btn-save"
+              hx-post="/setup/connect/pfsense/save"
+              hx-include="#pf-url,#pf-key,#pf-ssl"
+              hx-target="#pfsense-result">Save</button>
+          </div>
+        </div>
+        <div class="delete-overlay">
+          <button class="delete-btn"
+            hx-post="/setup/connect/pfsense/clear"
+            hx-confirm="Remove pfSense connection?"
+            hx-target="#config-pfsense"
+            hx-swap="innerHTML">Delete</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Home Assistant config -->
+    <div class="config-section" id="config-homeassistant">
+      <div class="config-card">
+        <div class="config-card-header">
+          <div class="config-card-title">
+            <div class="int-logo" style="background:#0c2a3d;width:22px;height:22px;border-radius:5px;flex-shrink:0">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none"><path d="M3 12L12 3L21 12V20a1 1 0 01-1 1H5a1 1 0 01-1-1V12z" stroke="#18bcf2" stroke-width="2" stroke-linejoin="round"/></svg>
+            </div>
+            Home Assistant
+          </div>
+          {% if homeassistant_connected %}<span style="font-size:11px;color:#3fb950">● Connected</span>{% endif %}
+        </div>
+        <div class="config-card-body">
+          <div class="ha-notice">
+            Home Assistant can be monitored for updates but cannot be auto-updated from keepup.
+            Updates must be applied from within Home Assistant.
+          </div>
+          <div id="ha-result"></div>
+          <div class="field">
+            <div class="field-label">Home Assistant URL</div>
+            <input type="url" id="ha-url" name="ha_url" value="{{ homeassistant_url or '' }}"
+              placeholder="http://homeassistant.local:8123" class="field-input">
+          </div>
+          <div class="field">
+            <div class="field-label">Long-lived access token</div>
+            <input type="password" id="ha-token" name="ha_token" placeholder="eyJ…" class="field-input">
+            <div class="field-hint">Home Assistant: Profile → Long-lived access tokens → Create token</div>
+          </div>
+          <div id="ha-test-result" style="font-size:12px;margin-bottom:6px"></div>
+          <div class="btn-row">
+            <button class="btn-test"
+              hx-post="/setup/connect/homeassistant/test"
+              hx-include="#ha-url,#ha-token"
+              hx-target="#ha-test-result">Test connection</button>
+            <button class="btn-save"
+              hx-post="/setup/connect/homeassistant/save"
+              hx-include="#ha-url,#ha-token"
+              hx-target="#ha-result">Save</button>
+          </div>
+        </div>
+        <div class="delete-overlay">
+          <button class="delete-btn"
+            hx-post="/setup/connect/homeassistant/clear"
+            hx-confirm="Remove Home Assistant connection?"
+            hx-target="#config-homeassistant"
+            hx-swap="innerHTML">Delete</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Portainer config -->
+    <div class="config-section" id="config-portainer">
       <div id="portainer-section">
         {% include 'partials/setup_portainer_section.html' %}
       </div>
+    </div>
 
-      <!-- Home Assistant -->
-      <div class="bg-slate-800/60 border border-slate-700 rounded-2xl overflow-hidden">
-        <div class="flex items-center justify-between px-5 py-4 border-b border-slate-700">
-          <div>
-            <h2 class="text-sm font-semibold text-slate-200">Home Assistant <span class="text-xs font-normal text-slate-500 ml-1">optional</span></h2>
-            <p class="text-xs text-slate-500 mt-0.5">Get notified when a Home Assistant update is available. Keepup cannot install HA updates automatically.</p>
+    <!-- Docker Hub config -->
+    <div class="config-section" id="config-dockerhub">
+      <div class="config-card">
+        <div class="config-card-header">
+          <div class="config-card-title">
+            <div class="int-logo" style="background:#0c1e3d;width:22px;height:22px;border-radius:5px;flex-shrink:0">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none"><path d="M3 12h3v3H3zM7 12h3v3H7zM11 12h3v3H11zM11 8h3v3H11zM15 8h3v3H15z" stroke="#1d63ed" stroke-width="1.5" stroke-linejoin="round"/></svg>
+            </div>
+            Docker Hub
           </div>
-          {% if homeassistant_connected %}
-          <span class="flex items-center gap-1.5 text-xs text-green-400 font-medium flex-shrink-0 ml-4">
-            <span class="w-2 h-2 rounded-full bg-green-400"></span> Connected
-          </span>
-          {% endif %}
+          {% if dockerhub_connected %}<span style="font-size:11px;color:#3fb950">● Connected</span>{% endif %}
         </div>
-        <div class="px-5 py-4 space-y-3">
-          <div id="ha-result"></div>
-          <div>
-            <label class="block text-xs font-medium text-slate-400 mb-1">Home Assistant URL</label>
-            <input type="url" id="ha-url" name="ha_url" value="{{ homeassistant_url or '' }}"
-              placeholder="http://homeassistant.local:8123"
-              class="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-blue-500 placeholder:text-slate-500">
-          </div>
-          <div>
-            <label class="block text-xs font-medium text-slate-400 mb-1">Long-lived access token</label>
-            <input type="password" id="ha-token" name="ha_token" placeholder="eyJ…"
-              class="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-blue-500 placeholder:text-slate-500">
-            <p class="text-xs text-slate-500 mt-1">In Home Assistant: Profile → Long-lived access tokens → Create token.</p>
-          </div>
-          <div id="ha-test-result"></div>
-          <div class="flex gap-2 items-center flex-wrap">
-            <button
-              hx-post="/setup/connect/homeassistant/test"
-              hx-include="#ha-url,#ha-token"
-              hx-target="#ha-test-result"
-              class="px-4 py-2 rounded-lg bg-slate-600 hover:bg-slate-500 text-sm font-medium text-slate-200 transition-colors">
-              Test connection
-            </button>
-            <button
-              hx-post="/setup/connect/homeassistant/save"
-              hx-include="#ha-url,#ha-token"
-              hx-target="#ha-result"
-              class="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-sm font-medium text-white transition-colors">
-              Save
-            </button>
-          </div>
-        </div>
-      </div>
-
-      <!-- DockerHub -->
-      <div class="bg-slate-800/60 border border-slate-700 rounded-2xl overflow-hidden">
-        <div class="flex items-center justify-between px-5 py-4 border-b border-slate-700">
-          <div>
-            <h2 class="text-sm font-semibold text-slate-200">Docker Hub <span class="text-xs font-normal text-slate-500 ml-1">optional</span></h2>
-            <p class="text-xs text-slate-500 mt-0.5">Authenticate to avoid rate limits and check private image updates.</p>
-          </div>
-          {% if dockerhub_connected %}
-          <span class="flex items-center gap-1.5 text-xs text-green-400 font-medium flex-shrink-0 ml-4">
-            <span class="w-2 h-2 rounded-full bg-green-400"></span> Saved
-          </span>
-          {% endif %}
-        </div>
-        <div class="px-5 py-4 space-y-3">
+        <div class="config-card-body">
           <div id="dockerhub-result"></div>
-          <form hx-post="/setup/dockerhub/save" hx-target="#dockerhub-result" class="space-y-3">
-            <div>
-              <label class="block text-xs font-medium text-slate-400 mb-1">Docker Hub username</label>
-              <input type="text" name="dockerhub_username" placeholder="myusername"
-                class="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-blue-500 placeholder:text-slate-500">
+          <form hx-post="/setup/dockerhub/save" hx-target="#dockerhub-result">
+            <div class="field">
+              <div class="field-label">Docker Hub username</div>
+              <input type="text" name="dockerhub_username" placeholder="myusername" class="field-input">
             </div>
-            <div>
-              <label class="block text-xs font-medium text-slate-400 mb-1">Access token</label>
-              <input type="password" name="dockerhub_token" placeholder="dckr_pat_…"
-                class="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-blue-500 placeholder:text-slate-500">
-              <p class="text-xs text-slate-500 mt-1">In Docker Hub: Account Settings → Security → New access token.</p>
+            <div class="field">
+              <div class="field-label">Access token</div>
+              <input type="password" name="dockerhub_token" placeholder="dckr_pat_…" class="field-input">
+              <div class="field-hint">Docker Hub: Account Settings → Security → New access token</div>
             </div>
-            <button type="submit"
-              class="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-sm font-medium text-white transition-colors">
-              Save
-            </button>
+            <div class="btn-row">
+              <button type="submit" class="btn-save">Save</button>
+            </div>
           </form>
         </div>
+        <div class="delete-overlay">
+          <button class="delete-btn"
+            hx-post="/setup/dockerhub/clear"
+            hx-confirm="Remove Docker Hub credentials?"
+            hx-target="#config-dockerhub"
+            hx-swap="innerHTML">Delete</button>
+        </div>
       </div>
-
-      <!-- Navigation -->
-      <div class="flex justify-between items-center pt-2">
-        <a href="/setup/hosts" class="text-sm text-slate-500 hover:text-slate-300">Skip — configure later</a>
-        <a href="/setup/hosts"
-          class="px-6 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-sm font-semibold text-white transition-colors">
-          Continue to SSH setup →
-        </a>
-      </div>
-
     </div>
+
+    <!-- Navigation -->
+    <div class="flex justify-between items-center pt-4">
+      <a href="/setup/hosts" class="text-sm text-slate-500 hover:text-slate-300">Skip — configure later</a>
+      <a href="/setup/hosts"
+        class="px-6 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-sm font-semibold text-white transition-colors">
+        Continue to SSH setup →
+      </a>
+    </div>
+
   </div>
+
+  <script>
+  function toggleConfig(id) {
+    const section = document.getElementById('config-' + id);
+    const tile = document.getElementById('tile-' + id);
+    const allSections = document.querySelectorAll('.config-section');
+    const allTiles = document.querySelectorAll('.int-icon');
+
+    const isOpen = section.style.display === 'block';
+
+    // Close all
+    allSections.forEach(s => s.style.display = 'none');
+    allTiles.forEach(t => t.classList.remove('active'));
+
+    // Open this one if it was closed
+    if (!isOpen) {
+      section.style.display = 'block';
+      tile.classList.add('active');
+      section.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+  }
+
+  // Auto-open config sections for already-connected integrations
+  document.addEventListener('DOMContentLoaded', function() {
+    {% if proxmox_connected %}toggleConfig('proxmox');{% endif %}
+    {% if pbs_connected %}toggleConfig('pbs');{% endif %}
+    {% if opnsense_connected %}toggleConfig('opnsense');{% endif %}
+    {% if pfsense_connected %}toggleConfig('pfsense');{% endif %}
+    {% if homeassistant_connected %}toggleConfig('homeassistant');{% endif %}
+    {% if portainer_connected %}toggleConfig('portainer');{% endif %}
+    {% if dockerhub_connected %}toggleConfig('dockerhub');{% endif %}
+  });
+  </script>
 
 </body>
 </html>
