@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+  <meta charset="UTF-8" />
+  <link rel="icon" type="image/svg+xml" href="/static/logo.svg" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Keepup</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>body { background-color: #0d1117; }</style>
+</head>
+<body class="min-h-full text-slate-200 font-sans flex flex-col">
+
+  <!-- Nav -->
+  <div class="flex items-center justify-between px-6 py-4 border-b border-[#21262d]">
+    <div class="flex items-center gap-2.5">
+      <img src="/static/logo.svg" alt="Keepup" class="w-7 h-7 rounded-lg flex-shrink-0" />
+      <span class="text-[15px] font-medium text-slate-100 tracking-tight">keepup</span>
+    </div>
+    <a href="/login"
+      class="text-[13px] font-medium px-4 py-1.5 rounded-md border border-[#30363d] text-slate-300 hover:bg-[#161b22] hover:text-slate-100 transition-colors">
+      Sign in
+    </a>
+  </div>
+
+  <!-- Hero -->
+  <div class="flex-1 flex flex-col items-center justify-center px-4 py-20 text-center">
+
+    <img src="/static/logo.svg" alt="Keepup" class="w-20 h-20 rounded-2xl mb-8 shadow-2xl" />
+
+    <h1 class="text-4xl sm:text-5xl font-bold text-white tracking-tight mb-4">
+      Keep your homelab<br class="hidden sm:block" /> up to date.
+    </h1>
+    <p class="text-[15px] text-slate-400 max-w-md mb-10 leading-relaxed">
+      Keepup monitors your self-hosted servers and containers, shows pending OS updates,
+      and lets you upgrade or redeploy with one click.
+    </p>
+
+    <a href="/login"
+      class="inline-flex items-center gap-2 px-6 py-3 rounded-xl bg-[#238636] hover:bg-[#2ea043] text-white font-semibold text-[14px] transition-colors shadow-lg">
+      Sign in to your dashboard
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M3 8h10M9 4l4 4-4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    </a>
+
+    <!-- Feature cards -->
+    <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 mt-16 w-full max-w-3xl text-left">
+
+      <div class="bg-[#161b22] border border-[#21262d] rounded-xl p-5">
+        <div class="w-8 h-8 rounded-lg bg-amber-900/40 border border-amber-800/50 flex items-center justify-center mb-3">
+          <span class="w-2.5 h-2.5 rounded-full bg-amber-400"></span>
+        </div>
+        <h3 class="text-[13px] font-semibold text-slate-100 mb-1">OS Updates</h3>
+        <p class="text-[12px] text-slate-500 leading-relaxed">
+          Checks apt, dnf, and other package managers across all your SSH hosts. See what's pending and upgrade in one click.
+        </p>
+      </div>
+
+      <div class="bg-[#161b22] border border-[#21262d] rounded-xl p-5">
+        <div class="w-8 h-8 rounded-lg bg-blue-900/40 border border-blue-800/50 flex items-center justify-center mb-3">
+          <span class="w-2.5 h-2.5 rounded-full bg-blue-400"></span>
+        </div>
+        <h3 class="text-[13px] font-semibold text-slate-100 mb-1">Container Updates</h3>
+        <p class="text-[12px] text-slate-500 leading-relaxed">
+          Tracks Docker Compose stacks via SSH or Portainer. Detects new image versions and redeploys with a single button.
+        </p>
+      </div>
+
+      <div class="bg-[#161b22] border border-[#21262d] rounded-xl p-5">
+        <div class="w-8 h-8 rounded-lg bg-green-900/40 border border-green-800/50 flex items-center justify-center mb-3">
+          <span class="w-2.5 h-2.5 rounded-full bg-green-400"></span>
+        </div>
+        <h3 class="text-[13px] font-semibold text-slate-100 mb-1">Notifications</h3>
+        <p class="text-[12px] text-slate-500 leading-relaxed">
+          Get notified when updates are available, upgrades complete, or a reboot is required. Configurable auto-update schedules.
+        </p>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- Footer -->
+  <div class="text-center py-6 text-[11px] text-slate-600 border-t border-[#21262d]">
+    <a href="https://github.com/d4vastu/keepup" class="hover:text-slate-400 transition-colors">github.com/d4vastu/keepup</a>
+  </div>
+
+</body>
+</html>

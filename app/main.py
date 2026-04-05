@@ -27,7 +27,7 @@ from .templates_env import make_templates
 # Auth middleware
 # ---------------------------------------------------------------------------
 
-_PUBLIC_PATHS = {"/login", "/logout", "/setup", "/setup/backup-key",
+_PUBLIC_PATHS = {"/", "/login", "/logout", "/setup", "/setup/backup-key",
                  "/setup/backup-key/confirm", "/forgot-password",
                  "/forgot-password/reset"}
 
@@ -157,6 +157,13 @@ async def _job_run_stack_update(job_id: str, backend_key: str, ref: str) -> None
 # ---------------------------------------------------------------------------
 
 @app.get("/", response_class=HTMLResponse)
+async def home(request: Request) -> HTMLResponse:
+    if request.session.get("authenticated"):
+        return RedirectResponse("/dashboard", status_code=302)
+    return templates.TemplateResponse("home.html", {"request": request})
+
+
+@app.get("/dashboard", response_class=HTMLResponse)
 async def dashboard(request: Request) -> HTMLResponse:
     hosts = get_hosts()
     backends = get_backends()
