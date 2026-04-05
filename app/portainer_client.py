@@ -80,7 +80,7 @@ class PortainerClient:
 
     async def _get_containers(self, endpoint_id: int) -> list[dict]:
         data = await self.get(
-            f"/api/endpoints/{endpoint_id}/docker/containers/json?all=false"
+            f"/api/endpoints/{endpoint_id}/docker/containers/json?all=1"
         )
         return data
 
@@ -121,10 +121,14 @@ class PortainerClient:
             stack_name = stack.get("Name", "unknown")
 
             containers = endpoint_containers.get(endpoint_id, [])
-            # Containers belonging to this stack via Compose label
+            # Containers belonging to this stack via Compose label.
+            # Docker Compose normalises project names to lowercase, but
+            # Portainer stack names can be mixed-case — compare case-insensitively.
+            stack_name_lower = stack_name.lower()
             stack_containers = [
                 c for c in containers
-                if c.get("Labels", {}).get("com.docker.compose.project") == stack_name
+                if c.get("Labels", {}).get("com.docker.compose.project", "").lower()
+                == stack_name_lower
             ]
 
             # Check each unique image in this stack
