@@ -1,12 +1,17 @@
+import re
 import time
 from collections import defaultdict
+from zoneinfo import available_timezones
 
+import httpx
+import pyotp
 from fastapi import APIRouter, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 
 from .auth import (
     admin_exists,
     create_admin,
+    enroll_mfa,
     get_totp_uri,
     mfa_enrolled,
     new_totp_secret,
@@ -18,11 +23,23 @@ from .config_manager import (
     add_host,
     delete_host,
     get_available_ssh_keys,
+    get_homeassistant_config,
     get_hosts,
+    get_opnsense_config,
+    get_pbs_config,
+    get_pfsense_config,
     get_portainer_config,
+    get_proxmox_config,
     get_ssh_config,
+    get_timezone,
     save_dockerhub_config,
+    save_homeassistant_config,
+    save_opnsense_config,
+    save_pbs_config,
+    save_pfsense_config,
     save_portainer_config,
+    save_proxmox_config,
+    save_timezone,
 )
 from .credentials import (
     delete_credentials,
@@ -30,12 +47,22 @@ from .credentials import (
     save_credentials,
     save_integration_credentials,
 )
+from .proxmox_client import ProxmoxClient
 from .ssh_client import detect_docker_stacks, verify_connection
 from .backend_loader import reload_backends
 from .templates_env import make_templates
 
 router = APIRouter()
 templates = make_templates()
+
+
+def _timezone_groups() -> list[tuple[str, list[str]]]:
+    groups: dict[str, list[str]] = {}
+    for zone in sorted(available_timezones()):
+        region = zone.split("/")[0]
+        groups.setdefault(region, []).append(zone)
+    return sorted(groups.items())
+
 
 # ---------------------------------------------------------------------------
 # Rate limiting (in-memory, resets on container restart)
@@ -70,36 +97,52 @@ def _client_ip(request: Request) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Setup
+# Setup — screen 1: welcome + timezone
 # ---------------------------------------------------------------------------
 
 @router.get("/setup", response_class=HTMLResponse)
-async def setup_page(request: Request) -> HTMLResponse:
+async def setup_welcome(request: Request) -> HTMLResponse:
     if admin_exists():
-        return RedirectResponse("/", status_code=302)
-    # Generate a fresh TOTP secret each time the page loads
-    secret = new_totp_secret()
-    request.session["setup_totp_secret"] = secret
-    return templates.TemplateResponse("setup.html", {
+        return RedirectResponse("/login", status_code=302)
+    return templates.TemplateResponse("setup_welcome.html", {
         "request": request,
-        "totp_uri": get_totp_uri(secret),
-        "totp_secret": secret,
+        "timezone_groups": _timezone_groups(),
+        "current_tz": get_timezone(),
     })
 
 
 @router.post("/setup", response_class=HTMLResponse)
-async def setup_submit(
+async def setup_welcome_submit(
+    request: Request,
+    timezone: str = Form("UTC"),
+) -> HTMLResponse:
+    if admin_exists():
+        return RedirectResponse("/login", status_code=302)
+    save_timezone(timezone)
+    return RedirectResponse("/setup/account", status_code=303)
+
+
+# ---------------------------------------------------------------------------
+# Setup — screen 2: account credentials
+# ---------------------------------------------------------------------------
+
+@router.get("/setup/account", response_class=HTMLResponse)
+async def setup_account(request: Request) -> HTMLResponse:
+    if admin_exists():
+        return RedirectResponse("/login", status_code=302)
+    return templates.TemplateResponse("setup_account.html", {"request": request})
+
+
+@router.post("/setup/account", response_class=HTMLResponse)
+async def setup_account_submit(
     request: Request,
     username: str = Form(""),
     password: str = Form(""),
     password_confirm: str = Form(""),
-    totp_code: str = Form(""),
-    enable_mfa: str = Form(""),
 ) -> HTMLResponse:
     if admin_exists():
-        return RedirectResponse("/", status_code=302)
+        return RedirectResponse("/login", status_code=302)
 
-    import re
     errors: list[str] = []
     username = username.strip()
 
@@ -113,52 +156,404 @@ async def setup_submit(
     if password != password_confirm:
         errors.append("Passwords do not match.")
 
-    totp_secret = None
-    if enable_mfa == "on":
-        session_secret = request.session.get("setup_totp_secret", "")
-        if not session_secret:
-            errors.append("Session expired — please refresh and try again.")
-        else:
-            import pyotp
-            if not pyotp.TOTP(session_secret).verify(totp_code.strip(), valid_window=1):
-                errors.append("Authenticator code is incorrect. Make sure your phone's time is synced and try again.")
-            else:
-                totp_secret = session_secret
-
     if errors:
-        secret = request.session.get("setup_totp_secret", new_totp_secret())
-        request.session["setup_totp_secret"] = secret
-        return templates.TemplateResponse("setup.html", {
+        return templates.TemplateResponse("setup_account.html", {
             "request": request,
-            "totp_uri": get_totp_uri(secret),
-            "totp_secret": secret,
             "errors": errors,
-            "enable_mfa_checked": enable_mfa == "on",
             "username_value": username,
         })
 
-    backup_key = create_admin(username=username, password=password, totp_secret=totp_secret)
-    request.session.pop("setup_totp_secret", None)
+    backup_key = create_admin(username=username, password=password, totp_secret=None)
+    request.session["setup_account_done"] = True
     request.session["setup_backup_key"] = backup_key
+    return RedirectResponse("/setup/security", status_code=303)
 
-    return RedirectResponse("/setup/backup-key", status_code=303)
+
+# ---------------------------------------------------------------------------
+# Setup — screen 3: two-factor authentication
+# ---------------------------------------------------------------------------
+
+@router.get("/setup/security", response_class=HTMLResponse)
+async def setup_security(request: Request) -> HTMLResponse:
+    if not request.session.get("setup_account_done"):
+        return RedirectResponse("/login", status_code=302)
+    secret = new_totp_secret()
+    request.session["setup_totp_secret"] = secret
+    return templates.TemplateResponse("setup_security.html", {
+        "request": request,
+        "totp_uri": get_totp_uri(secret),
+        "totp_secret": secret,
+    })
 
 
-@router.get("/setup/backup-key", response_class=HTMLResponse)
-async def setup_backup_key(request: Request) -> HTMLResponse:
+@router.post("/setup/security", response_class=HTMLResponse)
+async def setup_security_submit(
+    request: Request,
+    enable_mfa: str = Form(""),
+    totp_code: str = Form(""),
+) -> HTMLResponse:
+    if not request.session.get("setup_account_done"):
+        return RedirectResponse("/login", status_code=302)
+
+    if enable_mfa == "on":
+        session_secret = request.session.get("setup_totp_secret", "")
+        if not session_secret or not pyotp.TOTP(session_secret).verify(totp_code.strip(), valid_window=1):
+            secret = session_secret or new_totp_secret()
+            request.session["setup_totp_secret"] = secret
+            return templates.TemplateResponse("setup_security.html", {
+                "request": request,
+                "totp_uri": get_totp_uri(secret),
+                "totp_secret": secret,
+                "errors": ["Authenticator code is incorrect. Make sure your phone's time is synced and try again."],
+                "enable_mfa_checked": True,
+            })
+        enroll_mfa(session_secret)
+        request.session.pop("setup_totp_secret", None)
+
+    return RedirectResponse("/setup/recovery-code", status_code=303)
+
+
+# ---------------------------------------------------------------------------
+# Setup — screen 4: recovery code
+# ---------------------------------------------------------------------------
+
+@router.get("/setup/recovery-code", response_class=HTMLResponse)
+async def setup_recovery_code(request: Request) -> HTMLResponse:
     backup_key = request.session.get("setup_backup_key")
     if not backup_key:
         return RedirectResponse("/login", status_code=302)
-    return templates.TemplateResponse("setup_backup_key.html", {
+    return templates.TemplateResponse("setup_recovery.html", {
         "request": request,
         "backup_key": backup_key,
     })
 
 
-@router.post("/setup/backup-key/confirm", response_class=HTMLResponse)
-async def setup_backup_key_confirm(request: Request) -> HTMLResponse:
+@router.post("/setup/recovery-code/confirm", response_class=HTMLResponse)
+async def setup_recovery_code_confirm(request: Request) -> HTMLResponse:
     request.session.pop("setup_backup_key", None)
-    return RedirectResponse("/setup/hosts", status_code=303)
+    request.session.pop("setup_account_done", None)
+    return RedirectResponse("/setup/connect", status_code=303)
+
+
+# ---------------------------------------------------------------------------
+# Setup — screen 5: connect integrations
+# ---------------------------------------------------------------------------
+
+@router.get("/setup/connect", response_class=HTMLResponse)
+async def setup_connect(request: Request) -> HTMLResponse:
+    if not admin_exists():
+        return RedirectResponse("/setup", status_code=302)
+
+    px_cfg = get_proxmox_config()
+    px_creds = get_integration_credentials("proxmox")
+    pbs_cfg = get_pbs_config()
+    pbs_creds = get_integration_credentials("proxmox_backup")
+    opn_cfg = get_opnsense_config()
+    opn_creds = get_integration_credentials("opnsense")
+    pf_cfg = get_pfsense_config()
+    pf_creds = get_integration_credentials("pfsense")
+    ha_cfg = get_homeassistant_config()
+    ha_creds = get_integration_credentials("homeassistant")
+    port_cfg = get_portainer_config()
+    port_creds = get_integration_credentials("portainer")
+    dh_cfg = get_integration_credentials("dockerhub")
+
+    return templates.TemplateResponse("setup_connect.html", {
+        "request": request,
+        "proxmox_url": px_cfg.get("url", ""),
+        "proxmox_connected": bool(px_cfg.get("url") and px_creds.get("api_token")),
+        "pbs_url": pbs_cfg.get("url", ""),
+        "pbs_connected": bool(pbs_cfg.get("url") and pbs_creds.get("api_token")),
+        "opnsense_url": opn_cfg.get("url", ""),
+        "opnsense_connected": bool(opn_cfg.get("url") and opn_creds.get("api_key")),
+        "pfsense_url": pf_cfg.get("url", ""),
+        "pfsense_connected": bool(pf_cfg.get("url") and pf_creds.get("api_key")),
+        "homeassistant_url": ha_cfg.get("url", ""),
+        "homeassistant_connected": bool(ha_cfg.get("url") and ha_creds.get("token")),
+        "portainer_url": port_cfg.get("url", ""),
+        "portainer_connected": bool(port_cfg.get("url") and port_creds.get("api_key")),
+        "dockerhub_connected": bool(dh_cfg.get("token")),
+    })
+
+
+# --- Proxmox ---
+
+@router.post("/setup/connect/proxmox/test", response_class=HTMLResponse)
+async def setup_test_proxmox(
+    request: Request,
+    proxmox_url: str = Form(""),
+    proxmox_api_token: str = Form(""),
+    proxmox_verify_ssl: str = Form(""),
+) -> HTMLResponse:
+    url = proxmox_url.strip().rstrip("/")
+    token = proxmox_api_token.strip()
+    verify_ssl = proxmox_verify_ssl == "on"
+    if not url or not token:
+        return HTMLResponse('<span class="text-amber-400 text-sm">Enter a URL and API token first.</span>')
+    try:
+        client = ProxmoxClient(url=url, api_token=token, verify_ssl=verify_ssl)
+        version = await client.get_version()
+        ver = version.get("version", "")
+        return HTMLResponse(
+            f'<span class="text-green-400 text-sm">&#10003; Connected — Proxmox VE {ver}. Click Save to continue.</span>'
+        )
+    except Exception as exc:
+        msg = str(exc)
+        if "401" in msg or "403" in msg:
+            hint = "Invalid API token."
+        elif "connect" in msg.lower() or "Name or service" in msg:
+            hint = "Can&#39;t reach that address — check the URL."
+        elif "SSL" in msg or "certificate" in msg.lower():
+            hint = "SSL error — try disabling SSL verification."
+        else:
+            hint = msg[:120]
+        return HTMLResponse(f'<span class="text-red-400 text-sm">&#10007; {hint}</span>')
+
+
+@router.post("/setup/connect/proxmox/save", response_class=HTMLResponse)
+async def setup_save_proxmox(
+    request: Request,
+    proxmox_url: str = Form(""),
+    proxmox_api_token: str = Form(""),
+    proxmox_verify_ssl: str = Form(""),
+) -> HTMLResponse:
+    url = proxmox_url.strip().rstrip("/")
+    token = proxmox_api_token.strip()
+    verify_ssl = proxmox_verify_ssl == "on"
+    save_proxmox_config(url=url, verify_ssl=verify_ssl)
+    if token:
+        save_integration_credentials("proxmox", api_token=token)
+    return templates.TemplateResponse("partials/setup_proxmox_section.html", {
+        "request": request,
+        "proxmox_url": url,
+        "proxmox_connected": True,
+        "proxmox_saved": True,
+    })
+
+
+@router.post("/setup/connect/proxmox/discover", response_class=HTMLResponse)
+async def setup_proxmox_discover(request: Request) -> HTMLResponse:
+    cfg = get_proxmox_config()
+    creds = get_integration_credentials("proxmox")
+    url = cfg.get("url", "")
+    token = creds.get("api_token", "")
+    verify_ssl = cfg.get("verify_ssl", False)
+    if not url or not token:
+        return HTMLResponse('<p class="text-sm text-red-400">Proxmox not configured.</p>')
+    try:
+        client = ProxmoxClient(url=url, api_token=token, verify_ssl=verify_ssl)
+        resources = await client.discover_resources()
+        return templates.TemplateResponse("partials/setup_proxmox_section.html", {
+            "request": request,
+            "proxmox_url": url,
+            "proxmox_connected": True,
+            "proxmox_resources": resources,
+        })
+    except Exception as exc:
+        return HTMLResponse(f'<p class="text-sm text-red-400">Discovery failed: {exc}</p>')
+
+
+@router.post("/setup/connect/proxmox/select-hosts", response_class=HTMLResponse)
+async def setup_proxmox_select_hosts(request: Request) -> HTMLResponse:
+    form = await request.form()
+    selected = form.getlist("selected_hosts")  # list of "node:vmid:name:type" strings
+    pending = []
+    for entry in selected:
+        parts = entry.split(":", 3)
+        if len(parts) == 4:
+            pending.append({"node": parts[0], "vmid": parts[1], "name": parts[3], "type": parts[2]})
+    request.session["setup_proxmox_pending"] = pending
+    count = len(pending)
+    label = f"{count} host{'s' if count != 1 else ''}"
+    return HTMLResponse(
+        f'<p class="text-sm text-green-400">&#10003; {label} queued for SSH setup in the next step.</p>'
+    )
+
+
+# --- Proxmox Backup Server ---
+
+@router.post("/setup/connect/pbs/test", response_class=HTMLResponse)
+async def setup_test_pbs(
+    request: Request,
+    pbs_url: str = Form(""),
+    pbs_api_token: str = Form(""),
+    pbs_verify_ssl: str = Form(""),
+) -> HTMLResponse:
+    url = pbs_url.strip().rstrip("/")
+    token = pbs_api_token.strip()
+    verify_ssl = pbs_verify_ssl == "on"
+    if not url or not token:
+        return HTMLResponse('<span class="text-amber-400 text-sm">Enter a URL and API token first.</span>')
+    try:
+        async with httpx.AsyncClient(verify=verify_ssl, timeout=10) as c:
+            resp = await c.get(
+                f"{url}/api2/json/version",
+                headers={"Authorization": f"PBSAPIToken={token}"},
+            )
+            resp.raise_for_status()
+            ver = resp.json().get("data", {}).get("version", "")
+        return HTMLResponse(
+            f'<span class="text-green-400 text-sm">&#10003; Connected — Proxmox Backup Server {ver}. Click Save to continue.</span>'
+        )
+    except Exception as exc:
+        msg = str(exc)
+        hint = "Invalid API token." if ("401" in msg or "403" in msg) else msg[:120]
+        return HTMLResponse(f'<span class="text-red-400 text-sm">&#10007; {hint}</span>')
+
+
+@router.post("/setup/connect/pbs/save", response_class=HTMLResponse)
+async def setup_save_pbs(
+    request: Request,
+    pbs_url: str = Form(""),
+    pbs_api_token: str = Form(""),
+    pbs_verify_ssl: str = Form(""),
+) -> HTMLResponse:
+    url = pbs_url.strip().rstrip("/")
+    token = pbs_api_token.strip()
+    verify_ssl = pbs_verify_ssl == "on"
+    save_pbs_config(url=url, verify_ssl=verify_ssl)
+    if token:
+        save_integration_credentials("proxmox_backup", api_token=token)
+    return HTMLResponse('<p class="text-sm text-green-400">&#10003; Proxmox Backup Server saved.</p>')
+
+
+# --- OPNsense ---
+
+@router.post("/setup/connect/opnsense/test", response_class=HTMLResponse)
+async def setup_test_opnsense(
+    request: Request,
+    opnsense_url: str = Form(""),
+    opnsense_api_key: str = Form(""),
+    opnsense_api_secret: str = Form(""),
+    opnsense_verify_ssl: str = Form(""),
+) -> HTMLResponse:
+    url = opnsense_url.strip().rstrip("/")
+    key = opnsense_api_key.strip()
+    secret = opnsense_api_secret.strip()
+    verify_ssl = opnsense_verify_ssl == "on"
+    if not url or not key or not secret:
+        return HTMLResponse('<span class="text-amber-400 text-sm">Enter URL, API key, and API secret first.</span>')
+    try:
+        async with httpx.AsyncClient(verify=verify_ssl, timeout=10) as c:
+            resp = await c.get(
+                f"{url}/api/core/firmware/info",
+                auth=(key, secret),
+            )
+            resp.raise_for_status()
+        return HTMLResponse('<span class="text-green-400 text-sm">&#10003; Connected. Click Save to continue.</span>')
+    except Exception as exc:
+        msg = str(exc)
+        hint = "Invalid API key or secret." if ("401" in msg or "403" in msg) else msg[:120]
+        return HTMLResponse(f'<span class="text-red-400 text-sm">&#10007; {hint}</span>')
+
+
+@router.post("/setup/connect/opnsense/save", response_class=HTMLResponse)
+async def setup_save_opnsense(
+    request: Request,
+    opnsense_url: str = Form(""),
+    opnsense_api_key: str = Form(""),
+    opnsense_api_secret: str = Form(""),
+    opnsense_verify_ssl: str = Form(""),
+) -> HTMLResponse:
+    url = opnsense_url.strip().rstrip("/")
+    key = opnsense_api_key.strip()
+    secret = opnsense_api_secret.strip()
+    verify_ssl = opnsense_verify_ssl == "on"
+    save_opnsense_config(url=url, verify_ssl=verify_ssl)
+    if key and secret:
+        save_integration_credentials("opnsense", api_key=key, api_secret=secret)
+    return HTMLResponse('<p class="text-sm text-green-400">&#10003; OPNsense saved.</p>')
+
+
+# --- pfSense ---
+
+@router.post("/setup/connect/pfsense/test", response_class=HTMLResponse)
+async def setup_test_pfsense(
+    request: Request,
+    pfsense_url: str = Form(""),
+    pfsense_api_key: str = Form(""),
+    pfsense_verify_ssl: str = Form(""),
+) -> HTMLResponse:
+    url = pfsense_url.strip().rstrip("/")
+    key = pfsense_api_key.strip()
+    verify_ssl = pfsense_verify_ssl == "on"
+    if not url or not key:
+        return HTMLResponse('<span class="text-amber-400 text-sm">Enter a URL and API key first.</span>')
+    try:
+        async with httpx.AsyncClient(verify=verify_ssl, timeout=10) as c:
+            resp = await c.get(
+                f"{url}/api/v1/system/version",
+                headers={"Authorization": key},
+            )
+            resp.raise_for_status()
+        return HTMLResponse('<span class="text-green-400 text-sm">&#10003; Connected. Click Save to continue.</span>')
+    except Exception as exc:
+        msg = str(exc)
+        hint = "Invalid API key." if ("401" in msg or "403" in msg) else msg[:120]
+        return HTMLResponse(f'<span class="text-red-400 text-sm">&#10007; {hint}</span>')
+
+
+@router.post("/setup/connect/pfsense/save", response_class=HTMLResponse)
+async def setup_save_pfsense(
+    request: Request,
+    pfsense_url: str = Form(""),
+    pfsense_api_key: str = Form(""),
+    pfsense_verify_ssl: str = Form(""),
+) -> HTMLResponse:
+    url = pfsense_url.strip().rstrip("/")
+    key = pfsense_api_key.strip()
+    verify_ssl = pfsense_verify_ssl == "on"
+    save_pfsense_config(url=url, verify_ssl=verify_ssl)
+    if key:
+        save_integration_credentials("pfsense", api_key=key)
+    return HTMLResponse('<p class="text-sm text-green-400">&#10003; pfSense saved.</p>')
+
+
+# --- Home Assistant ---
+
+@router.post("/setup/connect/homeassistant/test", response_class=HTMLResponse)
+async def setup_test_homeassistant(
+    request: Request,
+    ha_url: str = Form(""),
+    ha_token: str = Form(""),
+) -> HTMLResponse:
+    url = ha_url.strip().rstrip("/")
+    token = ha_token.strip()
+    if not url or not token:
+        return HTMLResponse('<span class="text-amber-400 text-sm">Enter a URL and access token first.</span>')
+    try:
+        async with httpx.AsyncClient(verify=False, timeout=10) as c:
+            resp = await c.get(
+                f"{url}/api/",
+                headers={"Authorization": f"Bearer {token}"},
+            )
+            resp.raise_for_status()
+            ver = resp.json().get("version", "")
+        msg = f"Connected — Home Assistant {ver}." if ver else "Connected."
+        return HTMLResponse(
+            f'<span class="text-green-400 text-sm">&#10003; {msg} Click Save to continue.</span>'
+        )
+    except Exception as exc:
+        msg = str(exc)
+        hint = "Invalid access token." if ("401" in msg or "403" in msg) else msg[:120]
+        return HTMLResponse(f'<span class="text-red-400 text-sm">&#10007; {hint}</span>')
+
+
+@router.post("/setup/connect/homeassistant/save", response_class=HTMLResponse)
+async def setup_save_homeassistant(
+    request: Request,
+    ha_url: str = Form(""),
+    ha_token: str = Form(""),
+) -> HTMLResponse:
+    url = ha_url.strip().rstrip("/")
+    token = ha_token.strip()
+    save_homeassistant_config(url=url)
+    if token:
+        save_integration_credentials("homeassistant", token=token)
+    return HTMLResponse(
+        '<p class="text-sm text-green-400">&#10003; Home Assistant saved. '
+        '<span class="text-slate-400">Note: Keepup can alert you to updates but cannot install them automatically.</span></p>'
+    )
 
 
 # ---------------------------------------------------------------------------

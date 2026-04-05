@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+  <meta charset="UTF-8" />
+  <link rel="icon" type="image/svg+xml" href="/static/favicon.svg" />
+  <link rel="apple-touch-icon" href="/static/icon-192.svg" />
+  <link rel="manifest" href="/static/manifest.json" />
+  <meta name="theme-color" content="#0d1117" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Secure your account — Keepup</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+  <style>body { background-color: #0d1117; }</style>
+</head>
+<body class="min-h-full text-slate-200 font-sans flex items-center justify-center px-4 py-12">
+
+  <div class="w-full max-w-lg">
+
+    <!-- Header -->
+    <div class="text-center mb-6">
+      <img src="/static/logo.svg" alt="Keepup" class="w-16 h-16 mx-auto mb-4 rounded-2xl" />
+      <h1 class="text-2xl font-bold text-white">Secure your account</h1>
+      <p class="text-sm text-slate-400 mt-1">Two-factor authentication adds a second layer of protection.</p>
+    </div>
+
+    <!-- Progress -->
+    <div class="mb-8">
+      <div class="flex justify-between items-center mb-2">
+        <span class="text-xs font-medium text-slate-300">Two-factor authentication</span>
+        <span class="text-xs text-slate-500">Step 3 of 8</span>
+      </div>
+      <div class="w-full bg-slate-700 rounded-full h-0.5">
+        <div class="bg-blue-600 h-0.5 rounded-full" style="width: 37%"></div>
+      </div>
+    </div>
+
+    {% if errors %}
+    <div class="mb-6 px-4 py-3 rounded-lg bg-red-900/30 border border-red-700/50 text-sm text-red-300 space-y-1">
+      {% for e in errors %}<p>{{ e }}</p>{% endfor %}
+    </div>
+    {% endif %}
+
+    <form method="post" action="/setup/security" class="space-y-5">
+
+      <div class="bg-slate-800/60 border border-slate-700 rounded-2xl p-5 space-y-4">
+
+        <!-- Toggle -->
+        <div class="flex items-start justify-between">
+          <div>
+            <p class="text-sm font-semibold text-slate-200">Enable 2FA</p>
+            <p class="text-xs text-slate-500 mt-0.5">Optional — you can set this up later in Admin → Account.</p>
+          </div>
+          <label class="flex items-center gap-2 cursor-pointer select-none flex-shrink-0 ml-4">
+            <input type="checkbox" name="enable_mfa" value="on" id="mfa-toggle"
+              {% if enable_mfa_checked %}checked{% endif %}
+              onchange="toggleMfa(this.checked)"
+              class="w-4 h-4 rounded accent-blue-500">
+            <span class="text-sm text-slate-300">Enable</span>
+          </label>
+        </div>
+
+        <!-- 2FA setup (shown when enabled) -->
+        <div id="mfa-section" class="{% if not enable_mfa_checked %}hidden{% endif %} space-y-4 border-t border-slate-700 pt-4">
+
+          <div class="bg-slate-900/50 rounded-xl p-4 space-y-3">
+            <p class="text-xs text-slate-400">
+              Install <strong class="text-slate-300">Google Authenticator</strong>, <strong class="text-slate-300">Authy</strong>,
+              or any TOTP app on your phone, then scan the QR code below.
+            </p>
+
+            <div class="flex justify-center py-2">
+              <div id="qrcode" class="rounded-lg overflow-hidden"></div>
+            </div>
+
+            <p class="text-xs text-slate-500 text-center">Can't scan? Enter this code manually:</p>
+            <p class="text-xs font-mono text-slate-300 text-center tracking-widest bg-slate-800 rounded px-3 py-2 break-all">
+              {{ totp_secret }}
+            </p>
+          </div>
+
+          <div>
+            <label class="block text-xs font-medium text-slate-400 mb-1">
+              Enter the 6-digit code from your app to confirm
+            </label>
+            <input type="text" name="totp_code" inputmode="numeric" autocomplete="one-time-code"
+              maxlength="6" placeholder="000000"
+              class="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2.5 text-sm text-slate-200 font-mono tracking-widest text-center focus:outline-none focus:border-blue-500 placeholder:tracking-normal">
+          </div>
+        </div>
+
+      </div>
+
+      <button type="submit"
+        class="w-full py-3 rounded-xl bg-blue-600 hover:bg-blue-500 text-sm font-semibold text-white transition-colors">
+        Continue →
+      </button>
+
+    </form>
+  </div>
+
+  <script>
+    const totpUri = {{ totp_uri | tojson }};
+
+    function toggleMfa(enabled) {
+      document.getElementById('mfa-section').classList.toggle('hidden', !enabled);
+    }
+
+    window.addEventListener('load', function() {
+      new QRCode(document.getElementById('qrcode'), {
+        text: totpUri,
+        width: 180,
+        height: 180,
+        colorDark: '#1e293b',
+        colorLight: '#f8fafc',
+      });
+    });
+  </script>
+
+</body>
+</html>

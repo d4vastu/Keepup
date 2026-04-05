@@ -20,7 +20,7 @@ def _create_admin(username="alice", password="password123"):
 
 
 # ---------------------------------------------------------------------------
-# GET /setup
+# GET /setup  (screen 1 — welcome + timezone)
 # ---------------------------------------------------------------------------
 
 def test_setup_page_no_admin_returns_200(auth_client):
@@ -28,30 +28,69 @@ def test_setup_page_no_admin_returns_200(auth_client):
     assert response.status_code == 200
 
 
-def test_setup_page_with_admin_redirects(auth_client, data_dir):
+def test_setup_page_with_admin_redirects_to_login(auth_client, data_dir):
     _create_admin()
     response = auth_client.get("/setup", follow_redirects=False)
     assert response.status_code == 302
-    assert response.headers["location"] == "/"
+    assert response.headers["location"] == "/login"
+
+
+def test_setup_welcome_shows_timezone_select(auth_client):
+    response = auth_client.get("/setup")
+    assert response.status_code == 200
+    assert 'name="timezone"' in response.text
 
 
 # ---------------------------------------------------------------------------
-# POST /setup
+# POST /setup  (saves timezone, redirects to account)
 # ---------------------------------------------------------------------------
 
-def test_setup_submit_valid_redirects_to_backup_key(auth_client):
-    response = auth_client.post("/setup", data={
+def test_setup_welcome_submit_redirects_to_account(auth_client):
+    response = auth_client.post("/setup", data={"timezone": "America/New_York"}, follow_redirects=False)
+    assert response.status_code == 303
+    assert response.headers["location"] == "/setup/account"
+
+
+def test_setup_welcome_submit_with_admin_redirects_to_login(auth_client, data_dir):
+    _create_admin()
+    response = auth_client.post("/setup", data={"timezone": "UTC"}, follow_redirects=False)
+    assert response.status_code == 302
+    assert response.headers["location"] == "/login"
+
+
+# ---------------------------------------------------------------------------
+# GET /setup/account  (screen 2 — credentials)
+# ---------------------------------------------------------------------------
+
+def test_setup_account_page_no_admin_returns_200(auth_client):
+    response = auth_client.get("/setup/account", follow_redirects=False)
+    assert response.status_code == 200
+
+
+def test_setup_account_page_with_admin_redirects_to_login(auth_client, data_dir):
+    _create_admin()
+    response = auth_client.get("/setup/account", follow_redirects=False)
+    assert response.status_code == 302
+    assert response.headers["location"] == "/login"
+
+
+# ---------------------------------------------------------------------------
+# POST /setup/account  (creates admin, redirects to security)
+# ---------------------------------------------------------------------------
+
+def test_setup_account_valid_redirects_to_security(auth_client):
+    response = auth_client.post("/setup/account", data={
         "username": "alice",
         "password": "password123",
         "password_confirm": "password123",
     }, follow_redirects=False)
     assert response.status_code == 303
-    assert "/setup/backup-key" in response.headers["location"]
+    assert "/setup/security" in response.headers["location"]
 
 
-def test_setup_submit_creates_admin(auth_client, data_dir):
+def test_setup_account_creates_admin(auth_client, data_dir):
     from app.auth import admin_exists
-    auth_client.post("/setup", data={
+    auth_client.post("/setup/account", data={
         "username": "alice",
         "password": "password123",
         "password_confirm": "password123",
@@ -59,9 +98,9 @@ def test_setup_submit_creates_admin(auth_client, data_dir):
     assert admin_exists() is True
 
 
-def test_setup_submit_stores_username(auth_client, data_dir):
+def test_setup_account_stores_username(auth_client, data_dir):
     from app.auth import get_admin_username
-    auth_client.post("/setup", data={
+    auth_client.post("/setup/account", data={
         "username": "alice",
         "password": "password123",
         "password_confirm": "password123",
@@ -69,8 +108,8 @@ def test_setup_submit_stores_username(auth_client, data_dir):
     assert get_admin_username() == "alice"
 
 
-def test_setup_submit_short_username_shows_error(auth_client):
-    response = auth_client.post("/setup", data={
+def test_setup_account_short_username_shows_error(auth_client):
+    response = auth_client.post("/setup/account", data={
         "username": "a",
         "password": "password123",
         "password_confirm": "password123",
@@ -79,8 +118,8 @@ def test_setup_submit_short_username_shows_error(auth_client):
     assert "at least 2" in response.text.lower()
 
 
-def test_setup_submit_invalid_username_chars_shows_error(auth_client):
-    response = auth_client.post("/setup", data={
+def test_setup_account_invalid_username_chars_shows_error(auth_client):
+    response = auth_client.post("/setup/account", data={
         "username": "alice@bad",
         "password": "password123",
         "password_confirm": "password123",
@@ -89,8 +128,8 @@ def test_setup_submit_invalid_username_chars_shows_error(auth_client):
     assert "letters" in response.text.lower() or "only contain" in response.text.lower()
 
 
-def test_setup_submit_short_password_shows_error(auth_client):
-    response = auth_client.post("/setup", data={
+def test_setup_account_short_password_shows_error(auth_client):
+    response = auth_client.post("/setup/account", data={
         "username": "alice",
         "password": "short",
         "password_confirm": "short",
@@ -99,8 +138,8 @@ def test_setup_submit_short_password_shows_error(auth_client):
     assert "8 characters" in response.text.lower()
 
 
-def test_setup_submit_mismatched_passwords_shows_error(auth_client):
-    response = auth_client.post("/setup", data={
+def test_setup_account_mismatched_passwords_shows_error(auth_client):
+    response = auth_client.post("/setup/account", data={
         "username": "alice",
         "password": "password123",
         "password_confirm": "different456",
@@ -109,14 +148,241 @@ def test_setup_submit_mismatched_passwords_shows_error(auth_client):
     assert "do not match" in response.text.lower()
 
 
-def test_setup_submit_preserves_username_on_error(auth_client):
-    response = auth_client.post("/setup", data={
+def test_setup_account_preserves_username_on_error(auth_client):
+    response = auth_client.post("/setup/account", data={
         "username": "alice",
         "password": "short",
         "password_confirm": "short",
     })
     assert response.status_code == 200
     assert "alice" in response.text
+
+
+def test_setup_account_with_admin_redirects_to_login(auth_client, data_dir):
+    _create_admin()
+    response = auth_client.post("/setup/account", data={
+        "username": "bob",
+        "password": "password123",
+        "password_confirm": "password123",
+    }, follow_redirects=False)
+    assert response.status_code == 302
+    assert response.headers["location"] == "/login"
+
+
+# ---------------------------------------------------------------------------
+# GET /setup/security  (screen 3 — 2FA)
+# ---------------------------------------------------------------------------
+
+def test_setup_security_without_session_flag_redirects(auth_client, data_dir):
+    _create_admin()
+    response = auth_client.get("/setup/security", follow_redirects=False)
+    assert response.status_code == 302
+    assert response.headers["location"] == "/login"
+
+
+def test_setup_security_with_session_flag_returns_200(auth_client):
+    auth_client.post("/setup/account", data={
+        "username": "alice",
+        "password": "password123",
+        "password_confirm": "password123",
+    }, follow_redirects=False)
+    response = auth_client.get("/setup/security", follow_redirects=False)
+    assert response.status_code == 200
+
+
+def test_setup_security_skip_mfa_redirects_to_recovery(auth_client):
+    auth_client.post("/setup/account", data={
+        "username": "alice",
+        "password": "password123",
+        "password_confirm": "password123",
+    }, follow_redirects=False)
+    response = auth_client.post("/setup/security", data={}, follow_redirects=False)
+    assert response.status_code == 303
+    assert "/setup/recovery-code" in response.headers["location"]
+
+
+def test_setup_security_wrong_totp_code_shows_error(auth_client):
+    auth_client.post("/setup/account", data={
+        "username": "alice",
+        "password": "password123",
+        "password_confirm": "password123",
+    }, follow_redirects=False)
+    response = auth_client.post("/setup/security", data={
+        "enable_mfa": "on",
+        "totp_code": "000000",
+    })
+    assert response.status_code == 200
+    assert "incorrect" in response.text.lower()
+
+
+# ---------------------------------------------------------------------------
+# GET /setup/recovery-code  (screen 4)
+# ---------------------------------------------------------------------------
+
+def test_setup_recovery_code_without_session_key_redirects(auth_client, data_dir):
+    _create_admin()
+    response = auth_client.get("/setup/recovery-code", follow_redirects=False)
+    assert response.status_code == 302
+    assert response.headers["location"] == "/login"
+
+
+def test_setup_recovery_code_with_session_key_returns_200(auth_client):
+    auth_client.post("/setup/account", data={
+        "username": "alice",
+        "password": "password123",
+        "password_confirm": "password123",
+    }, follow_redirects=False)
+    response = auth_client.get("/setup/recovery-code", follow_redirects=False)
+    assert response.status_code == 200
+    assert "recovery" in response.text.lower() or "backup" in response.text.lower()
+
+
+def test_setup_recovery_code_confirm_redirects_to_connect(auth_client):
+    auth_client.post("/setup/account", data={
+        "username": "alice",
+        "password": "password123",
+        "password_confirm": "password123",
+    }, follow_redirects=False)
+    response = auth_client.post("/setup/recovery-code/confirm", follow_redirects=False)
+    assert response.status_code == 303
+    assert "/setup/connect" in response.headers["location"]
+
+
+# ---------------------------------------------------------------------------
+# GET /setup/connect  (screen 5 — integrations)
+# ---------------------------------------------------------------------------
+
+def test_setup_connect_no_admin_redirects(auth_client):
+    response = auth_client.get("/setup/connect", follow_redirects=False)
+    assert response.status_code == 302
+
+
+def test_setup_connect_with_admin_returns_200(auth_client, data_dir):
+    _create_admin()
+    response = auth_client.get("/setup/connect", follow_redirects=False)
+    assert response.status_code == 200
+
+
+def test_setup_connect_shows_all_integrations(auth_client, data_dir):
+    _create_admin()
+    response = auth_client.get("/setup/connect")
+    assert response.status_code == 200
+    assert "Proxmox" in response.text
+    assert "OPNsense" in response.text
+    assert "Portainer" in response.text
+    assert "Home Assistant" in response.text
+
+
+# ---------------------------------------------------------------------------
+# POST /setup/connect/proxmox/test
+# ---------------------------------------------------------------------------
+
+def test_setup_proxmox_test_missing_fields(auth_client, data_dir):
+    _create_admin()
+    response = auth_client.post("/setup/connect/proxmox/test", data={
+        "proxmox_url": "",
+        "proxmox_api_token": "",
+    })
+    assert response.status_code == 200
+    assert "enter" in response.text.lower()
+
+
+def test_setup_proxmox_test_connection_failure(auth_client, data_dir):
+    _create_admin()
+    response = auth_client.post("/setup/connect/proxmox/test", data={
+        "proxmox_url": "https://192.0.2.1:8006",
+        "proxmox_api_token": "user@pam!token=uuid",
+    })
+    assert response.status_code == 200
+    assert "✗" in response.text or "&#10007;" in response.text or "error" in response.text.lower() or "can" in response.text.lower()
+
+
+# ---------------------------------------------------------------------------
+# POST /setup/connect/opnsense/test
+# ---------------------------------------------------------------------------
+
+def test_setup_opnsense_test_missing_fields(auth_client, data_dir):
+    _create_admin()
+    response = auth_client.post("/setup/connect/opnsense/test", data={
+        "opnsense_url": "",
+        "opnsense_api_key": "",
+        "opnsense_api_secret": "",
+    })
+    assert response.status_code == 200
+    assert "enter" in response.text.lower()
+
+
+# ---------------------------------------------------------------------------
+# POST /setup/connect/homeassistant/test
+# ---------------------------------------------------------------------------
+
+def test_setup_homeassistant_test_missing_fields(auth_client, data_dir):
+    _create_admin()
+    response = auth_client.post("/setup/connect/homeassistant/test", data={
+        "ha_url": "",
+        "ha_token": "",
+    })
+    assert response.status_code == 200
+    assert "enter" in response.text.lower()
+
+
+# ---------------------------------------------------------------------------
+# POST /setup/connect/{integration}/save
+# ---------------------------------------------------------------------------
+
+def test_setup_save_proxmox(auth_client, data_dir):
+    _create_admin()
+    response = auth_client.post("/setup/connect/proxmox/save", data={
+        "proxmox_url": "https://192.168.1.10:8006",
+        "proxmox_api_token": "user@pam!token=abc123",
+        "proxmox_verify_ssl": "",
+    })
+    assert response.status_code == 200
+    assert "saved" in response.text.lower() or "connected" in response.text.lower()
+
+
+def test_setup_save_opnsense(auth_client, data_dir):
+    _create_admin()
+    response = auth_client.post("/setup/connect/opnsense/save", data={
+        "opnsense_url": "https://192.168.1.1",
+        "opnsense_api_key": "mykey",
+        "opnsense_api_secret": "mysecret",
+        "opnsense_verify_ssl": "",
+    })
+    assert response.status_code == 200
+    assert "saved" in response.text.lower()
+
+
+def test_setup_save_homeassistant(auth_client, data_dir):
+    _create_admin()
+    response = auth_client.post("/setup/connect/homeassistant/save", data={
+        "ha_url": "http://homeassistant.local:8123",
+        "ha_token": "eyJtoken",
+    })
+    assert response.status_code == 200
+    assert "saved" in response.text.lower()
+
+
+def test_setup_save_pbs(auth_client, data_dir):
+    _create_admin()
+    response = auth_client.post("/setup/connect/pbs/save", data={
+        "pbs_url": "https://192.168.1.11:8007",
+        "pbs_api_token": "user@pbs!token=abc",
+        "pbs_verify_ssl": "",
+    })
+    assert response.status_code == 200
+    assert "saved" in response.text.lower()
+
+
+def test_setup_save_pfsense(auth_client, data_dir):
+    _create_admin()
+    response = auth_client.post("/setup/connect/pfsense/save", data={
+        "pfsense_url": "https://192.168.1.1",
+        "pfsense_api_key": "mykey",
+        "pfsense_verify_ssl": "",
+    })
+    assert response.status_code == 200
+    assert "saved" in response.text.lower()
 
 
 # ---------------------------------------------------------------------------

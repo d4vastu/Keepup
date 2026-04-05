@@ -184,6 +184,71 @@ def save_dockerhub_config(username: str) -> None:
     save_config(config)
 
 
+def get_proxmox_config() -> dict:
+    return load_config().get("proxmox", {})
+
+
+def save_proxmox_config(url: str, verify_ssl: bool) -> None:
+    config = load_config()
+    if url:
+        config["proxmox"] = {"url": url.rstrip("/"), "verify_ssl": verify_ssl}
+    else:
+        config.pop("proxmox", None)
+    save_config(config)
+
+
+def get_pbs_config() -> dict:
+    return load_config().get("proxmox_backup", {})
+
+
+def save_pbs_config(url: str, verify_ssl: bool) -> None:
+    config = load_config()
+    if url:
+        config["proxmox_backup"] = {"url": url.rstrip("/"), "verify_ssl": verify_ssl}
+    else:
+        config.pop("proxmox_backup", None)
+    save_config(config)
+
+
+def get_opnsense_config() -> dict:
+    return load_config().get("opnsense", {})
+
+
+def save_opnsense_config(url: str, verify_ssl: bool) -> None:
+    config = load_config()
+    if url:
+        config["opnsense"] = {"url": url.rstrip("/"), "verify_ssl": verify_ssl}
+    else:
+        config.pop("opnsense", None)
+    save_config(config)
+
+
+def get_pfsense_config() -> dict:
+    return load_config().get("pfsense", {})
+
+
+def save_pfsense_config(url: str, verify_ssl: bool) -> None:
+    config = load_config()
+    if url:
+        config["pfsense"] = {"url": url.rstrip("/"), "verify_ssl": verify_ssl}
+    else:
+        config.pop("pfsense", None)
+    save_config(config)
+
+
+def get_homeassistant_config() -> dict:
+    return load_config().get("homeassistant", {})
+
+
+def save_homeassistant_config(url: str) -> None:
+    config = load_config()
+    if url:
+        config["homeassistant"] = {"url": url.rstrip("/")}
+    else:
+        config.pop("homeassistant", None)
+    save_config(config)
+
+
 # ---------------------------------------------------------------------------
 # Auto-update settings
 # ---------------------------------------------------------------------------
@@ -241,7 +306,8 @@ def get_available_ssh_keys() -> list[str]:
 def reset_config() -> None:
     """Remove all user-configured data (factory reset). Preserves the config file itself."""
     config = load_config()
-    for key in ("hosts", "portainer", "dockerhub", "stack_auto_update"):
+    for key in ("hosts", "portainer", "dockerhub", "stack_auto_update",
+                "proxmox", "proxmox_backup", "opnsense", "pfsense", "homeassistant"):
         config.pop(key, None)
     save_config(config)
 
