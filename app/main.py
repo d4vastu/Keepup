@@ -1,5 +1,6 @@
 import asyncio
 import os
+import time
 import uuid
 from pathlib import Path
 
@@ -22,6 +23,55 @@ from .credentials import get_credentials, save_sudo_password
 from .ssh_client import _needs_sudo, check_host_updates, reboot_host, run_host_update_buffered
 from .__version__ import APP_VERSION
 from .templates_env import make_templates
+
+# ---------------------------------------------------------------------------
+# GitHub version check (cached 1 hour)
+# ---------------------------------------------------------------------------
+
+_version_cache: dict = {"ts": 0.0, "latest": None, "url": None}
+_GITHUB_REPO = "d4vastu/Keepup"
+_VERSION_CACHE_TTL = 3600
+
+
+async def _fetch_latest_version() -> tuple[str | None, str | None]:
+    """Return (latest_tag, release_url) or (None, None) on failure."""
+    try:
+        import httpx
+        async with httpx.AsyncClient(timeout=5) as c:
+            resp = await c.get(
+                f"https://api.github.com/repos/{_GITHUB_REPO}/releases/latest",
+                headers={"Accept": "application/vnd.github+json"},
+            )
+            if resp.status_code != 200:
+                return None, None
+            data = resp.json()
+            tag = data.get("tag_name", "").lstrip("v")
+            url = data.get("html_url", "")
+            return tag or None, url or None
+    except Exception:
+        return None, None
+
+
+async def _get_latest_version() -> tuple[str | None, str | None]:
+    """Return cached (latest_version, release_url); refresh if stale."""
+    now = time.time()
+    if now - _version_cache["ts"] > _VERSION_CACHE_TTL:
+        tag, url = await _fetch_latest_version()
+        _version_cache.update({"ts": now, "latest": tag, "url": url})
+    return _version_cache["latest"], _version_cache["url"]
+
+
+def _newer_version(latest: str | None) -> bool:
+    """True if latest tag is strictly newer than APP_VERSION."""
+    if not latest:
+        return False
+    try:
+        def _parts(v: str) -> tuple:
+            return tuple(int(x) for x in v.split("."))
+        return _parts(latest) > _parts(APP_VERSION)
+    except Exception:
+        return False
+
 
 # ---------------------------------------------------------------------------
 # Auth middleware
@@ -191,9 +241,18 @@ async def main_home(request: Request) -> HTMLResponse:
         any(b.BACKEND_KEY == "portainer" for b in backends)
         or any(h.get("docker_mode") for h in hosts)
     )
+    latest_tag, latest_url = await _get_latest_version()
+    show_update = _newer_version(latest_tag)
     return templates.TemplateResponse(
         "index.html",
-        {"request": request, "hosts": hosts, "docker_configured": docker_configured, "app_version": APP_VERSION},
+        {
+            "request": request,
+            "hosts": hosts,
+            "docker_configured": docker_configured,
+            "app_version": APP_VERSION,
+            "latest_version": latest_tag if show_update else None,
+            "latest_release_url": latest_url if show_update else None,
+        },
     )
 
 

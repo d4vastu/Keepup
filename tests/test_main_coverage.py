@@ -155,3 +155,69 @@ def test_docker_check_gather_exception_returns_error_partial(client, monkeypatch
     response = client.get("/api/docker/check")
     assert response.status_code == 200
     assert "gather exploded" in response.text or "error" in response.text.lower()
+
+
+# ---------------------------------------------------------------------------
+# _newer_version and _fetch_latest_version helpers
+# ---------------------------------------------------------------------------
+
+def test_newer_version_returns_true_when_latest_is_higher():
+    import app.main as m
+    assert m._newer_version("99.0.0") is True
+
+
+def test_newer_version_returns_false_when_same():
+    import app.main as m
+    assert m._newer_version(m.APP_VERSION) is False
+
+
+def test_newer_version_returns_false_on_none():
+    import app.main as m
+    assert m._newer_version(None) is False
+
+
+def test_newer_version_returns_false_on_bad_input():
+    import app.main as m
+    assert m._newer_version("not-a-version") is False
+
+
+@pytest.mark.asyncio
+async def test_fetch_latest_version_success(monkeypatch):
+    import app.main as m
+    resp = MagicMock()
+    resp.status_code = 200
+    resp.json.return_value = {"tag_name": "v1.2.3", "html_url": "https://github.com/example"}
+    mock_client = AsyncMock()
+    mock_client.get = AsyncMock(return_value=resp)
+    ctx = MagicMock()
+    ctx.__aenter__ = AsyncMock(return_value=mock_client)
+    ctx.__aexit__ = AsyncMock(return_value=None)
+    with patch("httpx.AsyncClient", return_value=ctx):
+        tag, url = await m._fetch_latest_version()
+    assert tag == "1.2.3"
+    assert "github.com" in url
+
+
+@pytest.mark.asyncio
+async def test_fetch_latest_version_http_error(monkeypatch):
+    import app.main as m
+    resp = MagicMock()
+    resp.status_code = 403
+    mock_client = AsyncMock()
+    mock_client.get = AsyncMock(return_value=resp)
+    ctx = MagicMock()
+    ctx.__aenter__ = AsyncMock(return_value=mock_client)
+    ctx.__aexit__ = AsyncMock(return_value=None)
+    with patch("httpx.AsyncClient", return_value=ctx):
+        tag, url = await m._fetch_latest_version()
+    assert tag is None
+    assert url is None
+
+
+@pytest.mark.asyncio
+async def test_fetch_latest_version_exception(monkeypatch):
+    import app.main as m
+    with patch("httpx.AsyncClient", side_effect=Exception("network down")):
+        tag, url = await m._fetch_latest_version()
+    assert tag is None
+    assert url is None
