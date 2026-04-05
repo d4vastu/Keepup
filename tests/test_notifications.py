@@ -111,8 +111,8 @@ def test_notifications_read_marks_read(client):
     assert "notif-badge" in response.text
 
 
-def test_notification_panel_has_history_link(client):
-    response = client.get("/api/notifications/panel")
+def test_auto_updates_page_has_history_link(client):
+    response = client.get("/admin/auto-updates")
     assert response.status_code == 200
     assert "/admin/auto-updates/history" in response.text
 
