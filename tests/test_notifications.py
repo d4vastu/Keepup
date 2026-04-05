@@ -201,3 +201,28 @@ def test_admin_connections_includes_pushover(client):
     response = client.get("/admin/connections")
     assert response.status_code == 200
     assert "Pushover" in response.text
+
+
+# ---------------------------------------------------------------------------
+# Branch coverage for notifications.py
+# ---------------------------------------------------------------------------
+
+def test_load_returns_empty_on_corrupt_json(data_dir, monkeypatch):
+    """_load() silently returns [] when JSON is corrupt (lines 20-21)."""
+    import app.notifications as n
+    notif_path = data_dir / "notifications.json"
+    notif_path.write_text("NOT VALID JSON{{")
+    monkeypatch.setattr(n, "_NOTIF_PATH", notif_path)
+    assert n._load() == []
+
+
+def test_notify_pushover_ensure_future_exception_is_swallowed(data_dir, monkeypatch):
+    """If asyncio.ensure_future raises, notify() swallows it (lines 47-48)."""
+    import app.notifications as n
+    monkeypatch.setattr(n, "_NOTIF_PATH", data_dir / "notifications.json")
+
+    with patch("asyncio.ensure_future", side_effect=RuntimeError("no event loop")):
+        n.notify("title", "msg")  # must not raise
+
+    # Notification was still saved
+    assert n.get_unread_count() == 1
