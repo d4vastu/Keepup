@@ -31,11 +31,11 @@
           {% for r in proxmox_resources %}
           <label class="flex items-center gap-3 px-3 py-2 rounded-lg bg-slate-700/50 cursor-pointer hover:bg-slate-700 transition-colors">
             <input type="checkbox" name="selected_hosts"
-              value="{{ r.node }}:{{ r.vmid }}:{{ r.type }}:{{ r.name }}"
+              value="{{ r.node }}:{{ r.vmid }}:{{ r.type }}:{{ r.name }}:{{ r.ip or '' }}"
               class="w-4 h-4 rounded accent-blue-500 flex-shrink-0">
             <div class="min-w-0">
               <span class="text-sm text-slate-200 font-medium">{{ r.name }}</span>
-              <span class="text-xs text-slate-500 ml-2">{{ r.type | upper }} {{ r.vmid }} · {{ r.node }}</span>
+              <span class="text-xs text-slate-500 ml-2">{{ r.type | upper }} {{ r.vmid }} · {{ r.node }}{% if r.ip %} · {{ r.ip }}{% endif %}</span>
             </div>
             <span class="ml-auto text-xs px-2 py-0.5 rounded-full flex-shrink-0
               {% if r.status == 'running' %}bg-green-900/40 text-green-400

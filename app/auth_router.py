@@ -467,13 +467,19 @@ async def setup_proxmox_discover(request: Request) -> HTMLResponse:
 @router.post("/setup/connect/proxmox/select-hosts", response_class=HTMLResponse)
 async def setup_proxmox_select_hosts(request: Request) -> HTMLResponse:
     form = await request.form()
-    selected = form.getlist("selected_hosts")  # list of "node:vmid:name:type" strings
+    selected = form.getlist("selected_hosts")  # list of "node:vmid:type:name:ip" strings
     pending = []
     for entry in selected:
-        parts = entry.split(":", 3)
-        if len(parts) == 4:
+        parts = entry.split(":", 4)
+        if len(parts) >= 4:
             pending.append(
-                {"node": parts[0], "vmid": parts[1], "name": parts[3], "type": parts[2]}
+                {
+                    "node": parts[0],
+                    "vmid": parts[1],
+                    "type": parts[2],
+                    "name": parts[3],
+                    "ip": parts[4] if len(parts) > 4 else "",
+                }
             )
     request.session["setup_proxmox_pending"] = pending
     count = len(pending)
