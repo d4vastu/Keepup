@@ -1,6 +1,8 @@
 import asyncio
 import os
+from datetime import datetime, timezone
 
+import httpx
 import pyotp
 from fastapi import APIRouter, Form, Request
 from fastapi.responses import HTMLResponse
@@ -126,14 +128,6 @@ async def admin_ssh_page(request: Request) -> HTMLResponse:
 # ---------------------------------------------------------------------------
 # Hosts — CRUD
 # ---------------------------------------------------------------------------
-
-@router.get("/hosts", response_class=HTMLResponse)
-async def admin_hosts(request: Request) -> HTMLResponse:
-    return templates.TemplateResponse(
-        "partials/admin_hosts.html",
-        {"request": request, "hosts": _hosts_with_status()},
-    )
-
 
 @router.post("/hosts", response_class=HTMLResponse)
 async def admin_add_host(
@@ -485,8 +479,6 @@ async def admin_save_pushover(
 
 @router.get("/about", response_class=HTMLResponse)
 async def admin_about(request: Request) -> HTMLResponse:
-    import httpx
-    from datetime import datetime, timezone
     from .__version__ import APP_VERSION
 
     releases = []

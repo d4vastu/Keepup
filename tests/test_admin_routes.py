@@ -35,7 +35,7 @@ def test_admin_connections_shows_portainer_configured(client, data_dir, config_f
 
 
 # ---------------------------------------------------------------------------
-# GET /admin/hosts
+# GET /admin/hosts, /admin/ssh, /admin/https, /admin/account, /admin/about
 # ---------------------------------------------------------------------------
 
 def test_get_hosts_partial_returns_200(client):
@@ -47,6 +47,45 @@ def test_get_hosts_partial_lists_hosts(client):
     response = client.get("/admin/hosts")
     assert "Test Host" in response.text
     assert "192.168.1.10" in response.text
+
+
+def test_admin_ssh_page_returns_200(client):
+    response = client.get("/admin/ssh")
+    assert response.status_code == 200
+
+
+def test_admin_https_page_returns_200(client):
+    response = client.get("/admin/https")
+    assert response.status_code == 200
+
+
+def test_admin_about_page_returns_200(client):
+    from unittest.mock import AsyncMock, MagicMock, patch
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = [
+        {"tag_name": "v0.11.0", "html_url": "https://github.com/d4vastu/Keepup/releases/tag/v0.11.0",
+         "published_at": "2026-04-01T00:00:00Z"},
+    ]
+    mock_client = AsyncMock()
+    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_client.__aexit__ = AsyncMock(return_value=False)
+    mock_client.get = AsyncMock(return_value=mock_resp)
+    with patch("app.admin.httpx.AsyncClient", return_value=mock_client):
+        response = client.get("/admin/about")
+    assert response.status_code == 200
+    assert "v0.11.0" in response.text
+
+
+def test_admin_about_page_handles_github_error(client):
+    from unittest.mock import AsyncMock, patch
+    mock_client = AsyncMock()
+    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_client.__aexit__ = AsyncMock(return_value=False)
+    mock_client.get = AsyncMock(side_effect=Exception("no network"))
+    with patch("app.admin.httpx.AsyncClient", return_value=mock_client):
+        response = client.get("/admin/about")
+    assert response.status_code == 200
 
 
 # ---------------------------------------------------------------------------
