@@ -46,6 +46,15 @@ def data_dir(tmp_path, monkeypatch):
     monkeypatch.setattr(auth, "_DATA_DIR", d)
     monkeypatch.setattr(auth, "_SESSION_SECRET_FILE", d / ".session_secret")
 
+    # Patch notifications and auto_update_log data paths
+    import app.notifications as notifs
+    monkeypatch.setattr(notifs, "_DATA_DIR", d)
+    monkeypatch.setattr(notifs, "_NOTIF_PATH", d / "notifications.json")
+
+    import app.auto_update_log as aul
+    monkeypatch.setattr(aul, "_DATA_DIR", d)
+    monkeypatch.setattr(aul, "_LOG_PATH", d / "auto_update_log.json")
+
     return d
 
 

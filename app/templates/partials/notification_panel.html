@@ -1,5 +1,5 @@
 <div class="flex items-center justify-between px-4 py-3 border-b border-slate-700">
-  <span class="text-sm font-semibold text-slate-200">Auto-Update History</span>
+  <span class="text-sm font-semibold text-slate-200">Notifications</span>
   <button
     hx-post="/api/notifications/read"
     hx-target="#notif-badge"
@@ -11,43 +11,38 @@
 </div>
 
 {% if not entries %}
-<p class="text-sm text-slate-500 px-4 py-6 text-center">No auto-updates have run yet.</p>
+<p class="text-sm text-slate-500 px-4 py-6 text-center">No notifications — all clear.</p>
 {% else %}
 <ul class="divide-y divide-slate-700/50 max-h-96 overflow-y-auto">
   {% for e in entries %}
   <li class="px-4 py-3 flex gap-3">
-    <!-- Status dot -->
-    <div class="flex-shrink-0 mt-0.5">
-      {% if e.status == "success" %}
-      <span class="block w-2 h-2 rounded-full bg-green-400 mt-1"></span>
+    <!-- Level indicator -->
+    <div class="flex-shrink-0 mt-1">
+      {% if e.level == "error" %}
+      <span class="block w-2 h-2 rounded-full bg-red-500"></span>
+      {% elif e.level == "warning" %}
+      <span class="block w-2 h-2 rounded-full bg-amber-400"></span>
       {% else %}
-      <span class="block w-2 h-2 rounded-full bg-red-500 mt-1"></span>
+      <span class="block w-2 h-2 rounded-full bg-blue-400"></span>
       {% endif %}
     </div>
     <div class="flex-1 min-w-0">
       <div class="flex items-center gap-2">
-        <span class="text-xs font-medium text-slate-300 truncate">{{ e.target_name }}</span>
-        <span class="text-xs px-1.5 py-0.5 rounded {% if e.type == 'os' %}bg-slate-700 text-slate-400{% else %}bg-blue-900/40 text-blue-400{% endif %}">
-          {{ "OS" if e.type == "os" else "Docker" }}
-        </span>
-        {% if not e.read and e.status == "error" %}
-        <span class="text-xs px-1 py-0.5 rounded bg-red-900/40 text-red-400">new</span>
+        <span class="text-xs font-medium text-slate-300 truncate">{{ e.title }}</span>
+        {% if not e.read %}
+        <span class="text-xs px-1 py-0.5 rounded bg-red-900/40 text-red-400 flex-shrink-0">new</span>
         {% endif %}
       </div>
-      <p class="text-xs text-slate-500 mt-0.5">{{ e.ran_at[:16] | replace("T", " ") }} UTC</p>
-      {% if e.status == "error" and e.lines %}
-      <p class="text-xs text-red-400 mt-1 truncate">{{ e.lines[0] }}</p>
-      {% elif e.lines %}
-      <p class="text-xs text-slate-500 mt-1 truncate">{{ e.lines[-1] }}</p>
-      {% endif %}
+      <p class="text-xs text-slate-400 mt-0.5 line-clamp-2">{{ e.message }}</p>
+      <p class="text-xs text-slate-600 mt-0.5">{{ e.created_at[:16] | replace("T", " ") }} UTC</p>
     </div>
   </li>
   {% endfor %}
 </ul>
 {% endif %}
 
-<div class="px-4 py-2 border-t border-slate-700">
-  <a href="/admin/auto-updates" class="text-xs text-blue-400 hover:text-blue-300 transition-colors">
-    Manage auto-updates →
+<div class="px-4 py-2 border-t border-slate-700 flex items-center justify-between">
+  <a href="/admin/auto-updates/history" class="text-xs text-blue-400 hover:text-blue-300 transition-colors">
+    View auto-update history →
   </a>
 </div>

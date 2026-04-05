@@ -5,6 +5,7 @@ from apscheduler.triggers.cron import CronTrigger
 
 from .auto_update_log import append_log
 from .config_manager import get_all_stack_auto_updates, get_hosts, get_ssh_config
+from .notifications import notify
 from .credentials import get_credentials
 from .ssh_client import _needs_sudo, check_host_updates, reboot_host, run_host_update_buffered
 
@@ -54,6 +55,10 @@ async def _run_os_update(slug: str) -> None:
     if _needs_sudo(host, ssh_cfg) and not creds.get("sudo_password"):
         append_log("os", slug, host["name"], "error",
                    ["Auto-update skipped: sudo password not stored. Save it via Admin → Hosts → Credentials."])
+        notify(
+            f"Auto-update skipped: {host['name']}",
+            "sudo password not stored. Save it via Admin → Hosts → Credentials.",
+        )
         return
 
     try:
@@ -69,6 +74,7 @@ async def _run_os_update(slug: str) -> None:
     except Exception as exc:
         logger.exception("Auto OS update failed for %s", slug)
         append_log("os", slug, host["name"], "error", [str(exc)])
+        notify(f"Auto OS update failed: {host['name']}", str(exc))
 
 
 async def _run_stack_update(update_path: str, stack_name: str) -> None:
@@ -77,6 +83,10 @@ async def _run_stack_update(update_path: str, stack_name: str) -> None:
     if len(parts) != 2:
         append_log("docker", update_path, stack_name, "error",
                    [f"Invalid update_path format: {update_path!r}"])
+        notify(
+            f"Auto stack update failed: {stack_name}",
+            f"Invalid update_path format: {update_path!r}",
+        )
         return
 
     backend_key, ref = parts
@@ -84,6 +94,10 @@ async def _run_stack_update(update_path: str, stack_name: str) -> None:
     if backend is None:
         append_log("docker", update_path, stack_name, "error",
                    [f"Backend {backend_key!r} is not configured or not running."])
+        notify(
+            f"Auto stack update failed: {stack_name}",
+            f"Backend {backend_key!r} is not configured or not running.",
+        )
         return
 
     try:
@@ -93,6 +107,7 @@ async def _run_stack_update(update_path: str, stack_name: str) -> None:
     except Exception as exc:
         logger.exception("Auto stack update failed for %s", update_path)
         append_log("docker", update_path, stack_name, "error", [str(exc)])
+        notify(f"Auto stack update failed: {stack_name}", str(exc))
 
 
 # ---------------------------------------------------------------------------

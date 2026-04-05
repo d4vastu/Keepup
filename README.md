@@ -374,7 +374,7 @@ hosts:
 
   - name: "Media Server"
     host: 192.168.1.20
-    user: dmadmin
+    user: sysadmin
     port: 22
     docker_mode: all_and_new
 

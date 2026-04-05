@@ -151,6 +151,16 @@ def save_portainer_config(url: str, verify_ssl: bool) -> None:
     save_config(config)
 
 
+def get_pushover_config() -> dict:
+    return load_config().get("pushover", {})
+
+
+def save_pushover_config(enabled: bool) -> None:
+    cfg = load_config()
+    cfg["pushover"] = {"enabled": enabled}
+    save_config(cfg)
+
+
 def get_dockerhub_config() -> dict:
     return load_config().get("dockerhub", {})
 

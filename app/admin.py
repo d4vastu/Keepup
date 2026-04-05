@@ -27,11 +27,13 @@ from .config_manager import (
     get_dockerhub_config,
     get_hosts,
     get_portainer_config,
+    get_pushover_config,
     get_ssl_config,
     get_ssh_config,
     reset_config,
     save_dockerhub_config,
     save_portainer_config,
+    save_pushover_config,
     save_ssl_config,
     set_docker_monitoring,
     update_host,
@@ -47,6 +49,7 @@ from .credentials import (
     wipe_credential_store,
 )
 from .ssh_client import verify_connection
+from .auto_update_log import get_recent
 from .log_buffer import get_log_lines
 
 router = APIRouter(prefix="/admin")
@@ -59,6 +62,8 @@ def _connection_status() -> dict:
     port_creds = get_integration_credentials("portainer")
     dh_cfg = get_dockerhub_config()
     dh_creds = get_integration_credentials("dockerhub")
+    pushover_cfg = get_pushover_config()
+    pushover_creds = get_integration_credentials("pushover")
 
     return {
         "portainer_url": port_cfg.get("url", ""),
@@ -67,6 +72,9 @@ def _connection_status() -> dict:
         "portainer_env_only": False,
         "dockerhub_user": dh_cfg.get("username", ""),
         "dockerhub_token_set": bool(dh_creds.get("token")),
+        "pushover_token_set": bool(pushover_creds.get("api_token")),
+        "pushover_user_set": bool(pushover_creds.get("user_key")),
+        "pushover_enabled": pushover_cfg.get("enabled", False),
     }
 
 
@@ -417,6 +425,59 @@ async def admin_save_dockerhub(
     return templates.TemplateResponse(
         "partials/admin_connections.html",
         {"request": request, "conn": _connection_status(), "dockerhub_saved": True},
+    )
+
+
+# ---------------------------------------------------------------------------
+# Connections — Pushover
+# ---------------------------------------------------------------------------
+
+@router.post("/connections/pushover/test", response_class=HTMLResponse)
+async def admin_test_pushover(request: Request) -> HTMLResponse:
+    from .pushover import send_pushover
+    success = await send_pushover("Test", "Update Dashboard test notification")
+    if success:
+        return HTMLResponse(
+            '<span class="text-green-400 text-sm">&#10003; Test notification sent successfully.</span>'
+        )
+    return HTMLResponse(
+        '<span class="text-red-400 text-sm">&#10007; Failed — check your API token and user key.</span>'
+    )
+
+
+@router.post("/connections/pushover", response_class=HTMLResponse)
+async def admin_save_pushover(
+    request: Request,
+    pushover_api_token: str = Form(""),
+    pushover_user_key: str = Form(""),
+    pushover_enabled: str = Form(""),
+) -> HTMLResponse:
+    token = pushover_api_token.strip()
+    user_key = pushover_user_key.strip()
+    enabled = pushover_enabled == "on"
+
+    save_pushover_config(enabled=enabled)
+    if token:
+        save_integration_credentials("pushover", api_token=token)
+    if user_key:
+        save_integration_credentials("pushover", user_key=user_key)
+
+    return templates.TemplateResponse(
+        "partials/admin_connections.html",
+        {"request": request, "conn": _connection_status(), "pushover_saved": True},
+    )
+
+
+# ---------------------------------------------------------------------------
+# Auto-update history
+# ---------------------------------------------------------------------------
+
+@router.get("/auto-updates/history", response_class=HTMLResponse)
+async def admin_auto_update_history(request: Request) -> HTMLResponse:
+    entries = get_recent(100)
+    return templates.TemplateResponse(
+        "admin_auto_update_history.html",
+        {"request": request, "entries": entries},
     )
 
 
