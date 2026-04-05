@@ -70,6 +70,33 @@ async def verify_connection(host: dict, ssh_cfg: dict, creds: dict | None = None
         return {"ok": False, "message": str(exc)}
 
 
+async def discover_containers(host: dict, ssh_cfg: dict, creds: dict | None = None) -> list[dict]:
+    """Return list of running containers as [{"id": name, "name": name, "image": image}, ...].
+    Returns empty list on error or if Docker not available."""
+    try:
+        async with await _connect(host, ssh_cfg, creds) as conn:
+            result = await conn.run(
+                "docker ps --format '{\"name\":\"{{.Names}}\",\"image\":\"{{.Image}}\"}'",
+                check=False,
+            )
+        containers = []
+        for line in result.stdout.strip().splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                import json
+                obj = json.loads(line)
+                name = obj.get("name", "")
+                if name:
+                    containers.append({"id": name, "name": name, "image": obj.get("image", "")})
+            except Exception:
+                pass
+        return containers
+    except Exception:
+        return []
+
+
 async def detect_docker_stacks(host: dict, ssh_cfg: dict, creds: dict | None = None) -> int:
     """Return the number of Docker Compose stacks found on the host, or -1 on error."""
     try:
