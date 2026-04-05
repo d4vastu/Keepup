@@ -44,7 +44,7 @@ services:
     image: ghcr.io/d4vastu/update-dashboard:latest
     container_name: update-dashboard
     ports:
-      - "8765:8000"
+      - "8765:8765"
     volumes:
       - ./config:/app/config    # config.yml — host list and SSH defaults
       - ./data:/app/data        # encrypted credentials and session secret
@@ -262,7 +262,7 @@ dashboard.example.com {
 If binding directly on `0.0.0.0` is undesirable, restrict to loopback in the compose file:
 ```yaml
 ports:
-  - "127.0.0.1:8765:8000"
+  - "127.0.0.1:8765:8765"
 ```
 
 ---

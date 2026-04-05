@@ -3,13 +3,13 @@ services:
     image: ghcr.io/d4vastu/update-dashboard:latest
     container_name: update-dashboard
     ports:
-      - "8765:8000"
+      - "8765:8765"
     volumes:
       - ./config:/app/config    # config.yml — host list and SSH defaults
       - ./data:/app/data        # encrypted credentials and session secret
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/login', timeout=5)"]
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8765/login', timeout=5)"]
       interval: 30s
       timeout: 10s
       retries: 3

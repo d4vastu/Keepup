@@ -12,9 +12,9 @@ SSL_KEY="$DATA_DIR/ssl/key.pem"
 
 if [ -f "$SSL_CERT" ] && [ -f "$SSL_KEY" ]; then
     echo "SSL certificates found — starting with HTTPS"
-    exec uvicorn app.main:app --host 0.0.0.0 --port 8000 \
+    exec uvicorn app.main:app --host 0.0.0.0 --port 8765 \
         --ssl-certfile "$SSL_CERT" \
         --ssl-keyfile "$SSL_KEY"
 else
-    exec uvicorn app.main:app --host 0.0.0.0 --port 8000
+    exec uvicorn app.main:app --host 0.0.0.0 --port 8765
 fi
