@@ -934,12 +934,22 @@ async def setup_add_host(
     key_path = f"/app/keys/{key_file}" if auth_method == "key" and key_file else None
     auto_update = enable_auto_update == "on"
 
+    missing = []
     if not name or not host_addr:
+        missing.append("name and host/IP")
+    if not user_val:
+        missing.append("SSH user")
+    if auth_method == "password" and not ssh_password.strip():
+        missing.append("password")
+    elif auth_method == "key" and not key_file:
+        missing.append("SSH key file")
+
+    if missing:
         return templates.TemplateResponse(
             "partials/setup_ssh_section.html",
             _ssh_section_ctx(
                 request,
-                add_error="Name and host/IP are required.",
+                add_error=f"Required: {', '.join(missing)}.",
                 form={
                     "name": name,
                     "host": host_addr,
@@ -1157,6 +1167,34 @@ async def setup_card_add(
         )
     user_val = user.strip() or None
     port_val = int(port) if port.strip().isdigit() else None
+
+    if not user_val:
+        return templates.TemplateResponse(
+            "partials/setup_host_card_confirmed.html",
+            {
+                "request": request,
+                "card_index": idx,
+                "name": name,
+                "host_addr": host_addr,
+                "node": node,
+                "host_type": host_type,
+                "error": "SSH user is required.",
+            },
+        )
+    if auth_method == "password" and not ssh_password.strip():
+        return templates.TemplateResponse(
+            "partials/setup_host_card_confirmed.html",
+            {
+                "request": request,
+                "card_index": idx,
+                "name": name,
+                "host_addr": host_addr,
+                "node": node,
+                "host_type": host_type,
+                "error": "Password is required when using password auth.",
+            },
+        )
+
     slug = add_host(name=name, host=host_addr, user=user_val, port=port_val)
     if auth_method == "password" and ssh_password.strip():
         save_credentials(slug, ssh_password=ssh_password.strip())

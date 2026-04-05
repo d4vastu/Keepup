@@ -89,6 +89,7 @@ def test_setup_add_host_connection_fails_shows_error(
             data={
                 "name": "My Server",
                 "host": "192.168.1.10",
+                "user": "ubuntu",
                 "auth_method": "password",
                 "ssh_password": "pass",
             },
@@ -115,6 +116,7 @@ def test_setup_add_host_connection_succeeds_no_docker_adds_host(
             data={
                 "name": "My Server",
                 "host": "192.168.1.10",
+                "user": "ubuntu",
                 "auth_method": "password",
                 "ssh_password": "pass",
             },
@@ -142,6 +144,7 @@ def test_setup_add_host_docker_detected_shows_prompt(
             data={
                 "name": "Docker Host",
                 "host": "192.168.1.20",
+                "user": "ubuntu",
                 "auth_method": "password",
                 "ssh_password": "pass",
             },
@@ -169,6 +172,7 @@ def _add_host_via_session(
             data={
                 "name": name,
                 "host": host,
+                "user": "ubuntu",
                 "auth_method": "password",
                 "ssh_password": ssh_password,
                 "enable_auto_update": "on" if enable_auto_update else "",
@@ -238,6 +242,7 @@ def test_setup_add_host_auto_update_saved(setup_client, data_dir, config_file):
             data={
                 "name": "Auto Server",
                 "host": "192.168.1.99",
+                "user": "ubuntu",
                 "auth_method": "password",
                 "ssh_password": "pass",
                 "enable_auto_update": "on",

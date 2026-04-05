@@ -43,6 +43,13 @@
           <input type="hidden" name="card_index" value="{{ loop.index }}">
           <input type="hidden" name="node" value="{{ host.node }}">
           <input type="hidden" name="host_type" value="{{ host.type }}">
+          <!-- sudo warning -->
+          <div class="flex gap-2 rounded-lg bg-amber-900/20 border border-amber-700/40 px-3 py-2">
+            <svg class="w-3.5 h-3.5 text-amber-400 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v4m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/>
+            </svg>
+            <p class="text-xs text-amber-300">Use a non-root user with <strong>sudo</strong> permission.</p>
+          </div>
           <div class="grid grid-cols-2 gap-3">
             <div>
               <label class="block text-xs text-slate-500 mb-1">Display name</label>
@@ -50,16 +57,16 @@
                 class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-slate-400 font-mono focus:outline-none focus:border-blue-500">
             </div>
             <div>
-              <label class="block text-xs text-slate-500 mb-1">IP address</label>
-              <input type="text" name="host" value="{{ host.ip or '' }}" placeholder="192.168.x.x"
+              <label class="block text-xs text-slate-500 mb-1">IP address <span class="text-red-400">*</span></label>
+              <input type="text" name="host" value="{{ host.ip or '' }}" placeholder="192.168.x.x" required
                 class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-slate-200 font-mono focus:outline-none focus:border-blue-500 placeholder:text-slate-600">
             </div>
           </div>
           <div class="grid grid-cols-2 gap-3">
             <div>
-              <label class="block text-xs text-slate-500 mb-1">SSH user</label>
-              <input type="text" name="user" value="root"
-                class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-slate-200 font-mono focus:outline-none focus:border-blue-500">
+              <label class="block text-xs text-slate-500 mb-1">SSH user <span class="text-red-400">*</span></label>
+              <input type="text" name="user" value="" placeholder="e.g. ubuntu" required
+                class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-slate-200 font-mono focus:outline-none focus:border-blue-500 placeholder:text-slate-600">
             </div>
             <div>
               <label class="block text-xs text-slate-500 mb-1">SSH port</label>
@@ -68,14 +75,14 @@
             </div>
           </div>
           <div>
-            <label class="block text-xs text-slate-500 mb-1">Credentials</label>
+            <label class="block text-xs text-slate-500 mb-1">Credentials <span class="text-red-400">*</span></label>
             <div class="flex gap-2">
               <select name="auth_method"
                 class="bg-slate-800 border border-slate-700 rounded-lg px-2 py-1.5 text-xs text-slate-400 focus:outline-none focus:border-blue-500 shrink-0">
                 <option value="key">SSH key</option>
                 <option value="password">Password</option>
               </select>
-              <input type="password" name="ssh_password" placeholder="Password (or blank for key auth)"
+              <input type="password" name="ssh_password" placeholder="Required for password auth"
                 class="flex-1 bg-slate-800 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-slate-400 font-mono focus:outline-none focus:border-blue-500 placeholder:text-slate-600">
             </div>
           </div>
@@ -178,14 +185,22 @@
             hx-swap="outerHTML"
             class="mt-3 space-y-3 bg-slate-900/40 rounded-xl p-4">
 
+        <!-- sudo warning -->
+        <div class="flex gap-2.5 rounded-lg bg-amber-900/20 border border-amber-700/40 px-3 py-2.5">
+          <svg class="w-4 h-4 text-amber-400 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v4m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/>
+          </svg>
+          <p class="text-xs text-amber-300">Use a non-root user with <strong>sudo</strong> permission. Using <code class="bg-amber-900/40 px-1 rounded">root</code> directly is not recommended.</p>
+        </div>
+
         <div class="grid grid-cols-2 gap-3">
           <div>
-            <label class="block text-xs font-medium text-slate-400 mb-1">Display name</label>
+            <label class="block text-xs font-medium text-slate-400 mb-1">Display name <span class="text-red-400">*</span></label>
             <input type="text" name="name" value="{{ form.name if form else '' }}" placeholder="Home Server" required
               class="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-blue-500 placeholder:text-slate-500">
           </div>
           <div>
-            <label class="block text-xs font-medium text-slate-400 mb-1">Host / IP address</label>
+            <label class="block text-xs font-medium text-slate-400 mb-1">Host / IP address <span class="text-red-400">*</span></label>
             <input type="text" name="host" value="{{ form.host if form else '' }}" placeholder="192.168.1.10" required
               class="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-blue-500 placeholder:text-slate-500">
           </div>
@@ -193,8 +208,8 @@
 
         <div class="grid grid-cols-2 gap-3">
           <div>
-            <label class="block text-xs font-medium text-slate-400 mb-1">SSH user</label>
-            <input type="text" name="user" value="{{ form.user if form else '' }}" placeholder="ubuntu"
+            <label class="block text-xs font-medium text-slate-400 mb-1">SSH user <span class="text-red-400">*</span></label>
+            <input type="text" name="user" value="{{ form.user if form else '' }}" placeholder="ubuntu" required
               class="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-blue-500 placeholder:text-slate-500">
           </div>
           <div>
@@ -205,7 +220,7 @@
         </div>
 
         <div>
-          <label class="block text-xs font-medium text-slate-400 mb-2">Authentication</label>
+          <label class="block text-xs font-medium text-slate-400 mb-2">Authentication <span class="text-red-400">*</span></label>
           <div class="space-y-2">
             <label class="flex items-center gap-2 cursor-pointer">
               <input type="radio" name="auth_method" value="password"
@@ -215,7 +230,7 @@
               <span class="text-sm text-slate-300">Password</span>
             </label>
             <div id="pw-auth" class="{% if form and form.auth_method == 'key' %}hidden{% endif %} ml-6">
-              <input type="password" name="ssh_password" placeholder="SSH password"
+              <input type="password" name="ssh_password" placeholder="SSH password" required
                 class="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-blue-500 placeholder:text-slate-500">
             </div>
 
@@ -226,7 +241,7 @@
                 class="accent-blue-500">
               <span class="text-sm text-slate-300">SSH key file</span>
             </label>
-            <div id="key-auth" class="{% if not form or form.auth_method != 'key' %}hidden{% endif %} ml-6">
+            <div id="key-auth" class="{% if not form or form.auth_method != 'key' %}hidden{% endif %} ml-6 space-y-2">
               {% if available_keys %}
               <select name="key_file"
                 class="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-blue-500">
@@ -239,6 +254,20 @@
               <p class="text-xs text-slate-500">No key files found in <code class="text-slate-400">/app/keys/</code>. Mount your keys volume or use password auth.</p>
               <input type="hidden" name="key_file" value="">
               {% endif %}
+              <!-- Key setup instructions -->
+              <details class="group">
+                <summary class="cursor-pointer text-xs text-blue-400 hover:text-blue-300 list-none flex items-center gap-1 select-none">
+                  <svg class="w-3 h-3 group-open:rotate-90 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+                  How to set up SSH key auth
+                </summary>
+                <div class="mt-2 rounded-lg bg-slate-950/60 border border-slate-700 p-3 space-y-3">
+                  <p class="text-xs text-slate-400"><strong class="text-slate-300">Step 1</strong> — Generate a key pair on the machine running Keepup (one-time):</p>
+                  <pre class="text-xs font-mono text-green-400 bg-black/40 rounded px-3 py-2 overflow-x-auto select-all">ssh-keygen -t ed25519 -f /app/keys/id_ed25519 -N ""</pre>
+                  <p class="text-xs text-slate-400"><strong class="text-slate-300">Step 2</strong> — Authorize the key on the remote host (run this from any machine that already has SSH access):</p>
+                  <pre class="text-xs font-mono text-green-400 bg-black/40 rounded px-3 py-2 overflow-x-auto select-all">ssh-copy-id -i /app/keys/id_ed25519.pub USER@HOST</pre>
+                  <p class="text-xs text-slate-500">Replace <code class="text-slate-400">USER</code> and <code class="text-slate-400">HOST</code> with the SSH user and IP above. Then mount <code class="text-slate-400">./keys:/app/keys:ro</code> in your <code class="text-slate-400">docker-compose.yml</code> and reload this page — the key will appear in the dropdown.</p>
+                </div>
+              </details>
             </div>
           </div>
         </div>
