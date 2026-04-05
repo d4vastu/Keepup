@@ -1,5 +1,16 @@
 <div hx-get="/api/jobs/{{ job_id }}"
      hx-trigger="every 3s"
-     hx-swap="outerHTML">
-  <span class="text-xs text-blue-400 animate-pulse">Running...</span>
+     hx-swap="outerHTML"
+     class="job-action-group">
+  <span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[12px] font-medium bg-[#0c2045] text-[#388bfd] border border-[#1a3a6e]">
+    <span class="b-spin"></span>
+    {% if job.type == "container_redeploy" %}Redeploying…{% elif job.type == "os_restart" %}Rebooting…{% else %}Upgrading…{% endif %}
+  </span>
+  <button class="details-link"
+          hx-get="/api/jobs/{{ job_id }}/modal"
+          hx-target="#modal-container"
+          hx-swap="innerHTML"
+          onclick="document.getElementById('modal-container').style.display='flex'">
+    Show details
+  </button>
 </div>
