@@ -71,9 +71,10 @@ class ProxmoxClient:
         import asyncio
 
         async with self._client() as c:
-            # cluster/resources?type=vm returns both qemu and lxc in one call
-            # and requires only VM.Audit on /vms — no per-node path permissions needed.
-            r = await c.get("/api2/json/cluster/resources", params={"type": "vm"})
+            # cluster/resources without a type filter returns everything; we then
+            # select only qemu and lxc.  Passing type=vm omits LXC on some Proxmox
+            # versions because LXC is its own category in the cluster resource tree.
+            r = await c.get("/api2/json/cluster/resources")
             r.raise_for_status()
 
             resources: list[dict] = []
