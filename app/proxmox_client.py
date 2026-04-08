@@ -71,28 +71,59 @@ class ProxmoxClient:
         import asyncio
 
         async with self._client() as c:
-            # cluster/resources without a type filter returns everything; we then
-            # select only qemu and lxc.  Passing type=vm omits LXC on some Proxmox
-            # versions because LXC is its own category in the cluster resource tree.
-            r = await c.get("/api2/json/cluster/resources")
-            r.raise_for_status()
+            # Use a dict keyed by (type, node, vmid) to deduplicate across sources.
+            seen: dict[tuple, dict] = {}
 
-            resources: list[dict] = []
-            for item in r.json().get("data", []):
-                rtype = item.get("type")
-                if rtype not in ("qemu", "lxc"):
-                    continue
-                vmid = item.get("vmid")
-                resources.append(
-                    {
+            # Phase 1: cluster/resources — single call, but token permissions may
+            # exclude LXC containers depending on how the token was scoped.
+            try:
+                r = await c.get("/api2/json/cluster/resources")
+                r.raise_for_status()
+                for item in r.json().get("data", []):
+                    rtype = item.get("type")
+                    if rtype not in ("qemu", "lxc"):
+                        continue
+                    vmid = item.get("vmid")
+                    node = item.get("node", "")
+                    seen[(rtype, node, vmid)] = {
                         "type": rtype,
-                        "node": item.get("node", ""),
+                        "node": node,
                         "vmid": vmid,
                         "name": item.get("name", f"{rtype}-{vmid}"),
                         "status": item.get("status", "unknown"),
                         "ip": "",
                     }
-                )
+            except Exception:
+                pass
+
+            # Phase 2: per-node LXC endpoint — supplements phase 1 when the token
+            # has node-level but not cluster-level LXC visibility.
+            try:
+                nodes_r = await c.get("/api2/json/nodes")
+                nodes_r.raise_for_status()
+                for node in nodes_r.json().get("data", []):
+                    node_name = node["node"]
+                    try:
+                        lxc_r = await c.get(f"/api2/json/nodes/{node_name}/lxc")
+                        lxc_r.raise_for_status()
+                        for ct in lxc_r.json().get("data", []):
+                            vmid = ct["vmid"]
+                            key = ("lxc", node_name, vmid)
+                            if key not in seen:
+                                seen[key] = {
+                                    "type": "lxc",
+                                    "node": node_name,
+                                    "vmid": vmid,
+                                    "name": ct.get("name", f"lxc-{vmid}"),
+                                    "status": ct.get("status", "unknown"),
+                                    "ip": "",
+                                }
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+
+            resources = list(seen.values())
 
             # Fetch IPs concurrently
             async def _fill_ip(resource: dict) -> None:
