@@ -190,21 +190,39 @@
       <div style="border-top:0.5px solid #21262d;margin:10px 0 12px;"></div>
       <div class="field-label" style="margin-bottom:6px;">SSH ACCESS FOR LXC UPDATES</div>
       <div class="field-hint" style="margin-bottom:8px;">Used to run <code style="background:#0d1117;padding:1px 4px;border-radius:3px;">pct exec</code> on the Proxmox host for LXC package checks. Requires SSH access to the Proxmox node.</div>
-      <div class="field-row">
+      <div class="field-row" style="margin-bottom:10px;">
         <div class="field">
           <div class="field-label">SSH USER</div>
           <input type="text" id="proxmox-ssh-user" name="proxmox_ssh_user" value="{{ integ.proxmox_ssh_user or 'root' }}" class="field-input">
         </div>
         <div class="field">
-          <div class="field-label">SSH KEY</div>
-          <select id="proxmox-ssh-key" name="proxmox_ssh_key" class="field-input">
-            <option value="">— select key —</option>
-            {% for k in available_keys %}
-            <option value="{{ k }}" {% if integ.proxmox_ssh_key == k %}selected{% endif %}>{{ k }}</option>
-            {% endfor %}
+          <div class="field-label">AUTH METHOD</div>
+          <select id="proxmox-ssh-auth" name="proxmox_ssh_auth" class="field-input"
+            onchange="togglePxSshAuth(this.value)">
+            <option value="key" {% if not integ.proxmox_ssh_password_set %}selected{% endif %}>SSH key</option>
+            <option value="password" {% if integ.proxmox_ssh_password_set %}selected{% endif %}>Password</option>
           </select>
         </div>
       </div>
+      <div id="proxmox-ssh-key-row" class="field" {% if integ.proxmox_ssh_password_set %}style="display:none"{% endif %}>
+        <div class="field-label">SSH KEY</div>
+        <select id="proxmox-ssh-key" name="proxmox_ssh_key" class="field-input">
+          <option value="">— select key —</option>
+          {% for k in available_keys %}
+          <option value="{{ k }}" {% if integ.proxmox_ssh_key == k %}selected{% endif %}>{{ k }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div id="proxmox-ssh-pass-row" class="field" {% if not integ.proxmox_ssh_password_set %}style="display:none"{% endif %}>
+        <div class="field-label">PASSWORD{% if integ.proxmox_ssh_password_set %} <span style="color:#3fb950">(saved)</span>{% endif %}</div>
+        <input type="password" id="proxmox-ssh-pass" name="proxmox_ssh_password" placeholder="{% if integ.proxmox_ssh_password_set %}Leave blank to keep{% else %}SSH password{% endif %}" class="field-input">
+      </div>
+      <script>
+      function togglePxSshAuth(val) {
+        document.getElementById('proxmox-ssh-key-row').style.display = val === 'key' ? '' : 'none';
+        document.getElementById('proxmox-ssh-pass-row').style.display = val === 'password' ? '' : 'none';
+      }
+      </script>
       {% endif %}
       <div id="proxmox-test-result" class="result-area"></div>
       <div class="btn-row">
@@ -214,7 +232,7 @@
           hx-target="#proxmox-test-result">Test API</button>
         <button class="btn-save"
           hx-post="/setup/connect/proxmox/save"
-          hx-include="#proxmox-url,#proxmox-api-user,#proxmox-token-id,#proxmox-secret,#proxmox-ssl,#proxmox-ssh-user,#proxmox-ssh-key"
+          hx-include="#proxmox-url,#proxmox-api-user,#proxmox-token-id,#proxmox-secret,#proxmox-ssl,#proxmox-ssh-user,#proxmox-ssh-auth,#proxmox-ssh-key,#proxmox-ssh-pass"
           hx-target="#proxmox-result">Save</button>
         {% if integ.proxmox_configured %}
         <button class="btn-test"

@@ -402,7 +402,9 @@ async def setup_save_proxmox(
     proxmox_secret: str = Form(""),
     proxmox_verify_ssl: str = Form(""),
     proxmox_ssh_user: str = Form(""),
+    proxmox_ssh_auth: str = Form("key"),
     proxmox_ssh_key: str = Form(""),
+    proxmox_ssh_password: str = Form(""),
 ) -> HTMLResponse:
     url = proxmox_url.strip().rstrip("/")
     api_user = proxmox_api_user.strip()
@@ -410,17 +412,26 @@ async def setup_save_proxmox(
     secret = proxmox_secret.strip()
     verify_ssl = proxmox_verify_ssl == "on"
     ssh_user = proxmox_ssh_user.strip()
-    ssh_key = proxmox_ssh_key.strip()
+    ssh_key = proxmox_ssh_key.strip() if proxmox_ssh_auth == "key" else ""
+    ssh_password = proxmox_ssh_password.strip() if proxmox_ssh_auth == "password" else ""
     save_proxmox_config(url=url, verify_ssl=verify_ssl)
-    if api_user or token_id or secret or ssh_user or ssh_key:
-        save_integration_credentials(
-            "proxmox",
-            api_user=api_user or None,
-            token_id=token_id or None,
-            secret=secret or None,
-            ssh_user=ssh_user or None,
-            ssh_key=ssh_key or None,
-        )
+    cred_kwargs: dict = {}
+    if api_user:
+        cred_kwargs["api_user"] = api_user
+    if token_id:
+        cred_kwargs["token_id"] = token_id
+    if secret:
+        cred_kwargs["secret"] = secret
+    if ssh_user:
+        cred_kwargs["ssh_user"] = ssh_user
+    if ssh_key:
+        cred_kwargs["ssh_key"] = ssh_key
+        cred_kwargs["ssh_password"] = None  # clear password when switching to key
+    if ssh_password:
+        cred_kwargs["ssh_password"] = ssh_password
+        cred_kwargs["ssh_key"] = None  # clear key when switching to password
+    if cred_kwargs:
+        save_integration_credentials("proxmox", **cred_kwargs)
     _queue_integration_host(request, "proxmox", "Proxmox VE", url)
     return templates.TemplateResponse(
         "partials/setup_proxmox_section.html",

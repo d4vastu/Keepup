@@ -374,6 +374,7 @@ async def host_check(request: Request, slug: str) -> HTMLResponse:
             px_creds = _get_int_creds("proxmox")
             ssh_user = px_creds.get("ssh_user", "root")
             ssh_key = px_creds.get("ssh_key", "")
+            ssh_password = px_creds.get("ssh_password", "")
             px_cfg = get_proxmox_config()
             proxmox_url = px_cfg.get("url", "")
             import urllib.parse
@@ -382,6 +383,8 @@ async def host_check(request: Request, slug: str) -> HTMLResponse:
             ssh_creds: dict = {"user": ssh_user}
             if ssh_key_path:
                 ssh_creds["key_path"] = ssh_key_path
+            elif ssh_password:
+                ssh_creds["ssh_password"] = ssh_password
             client = await _proxmox_client_from_config()
             packages = await client.get_lxc_updates(
                 proxmox_node, proxmox_vmid, px_host, get_ssh_config(), ssh_creds

@@ -115,6 +115,7 @@ def _integration_status() -> dict:
         "proxmox_verify_ssl": px_cfg.get("verify_ssl", False),
         "proxmox_ssh_user": px_creds.get("ssh_user", ""),
         "proxmox_ssh_key": px_creds.get("ssh_key", ""),
+        "proxmox_ssh_password_set": bool(px_creds.get("ssh_password")),
         "pbs_url": pbs_cfg.get("url", ""),
         "pbs_api_user": pbs_creds.get("api_user", ""),
         "pbs_token_id": pbs_creds.get("token_id", ""),
