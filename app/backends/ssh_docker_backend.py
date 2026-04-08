@@ -7,7 +7,10 @@ Compose stacks. Requires Docker Compose v2 (docker compose subcommand).
 
 import asyncio
 import json
+import logging
 from urllib.parse import quote, unquote
+
+log = logging.getLogger(__name__)
 
 from ..ssh_client import _connect
 from ..registry_client import check_image_update, extract_local_digest
@@ -68,8 +71,12 @@ class SSHDockerBackend:
         tasks = [self._stacks_for_host(h, ssh_cfg, dockerhub_creds) for h in hosts]
         results = await asyncio.gather(*tasks, return_exceptions=True)
         all_stacks = []
-        for r in results:
-            if isinstance(r, list):
+        for host, r in zip(hosts, results):
+            if isinstance(r, Exception):
+                log.warning(
+                    "Docker SSH: skipping %s — %s", host.get("host", host["slug"]), r
+                )
+            elif isinstance(r, list):
                 all_stacks.extend(r)
         return sorted(all_stacks, key=lambda s: (s["endpoint_name"], s["name"]))
 
@@ -79,6 +86,8 @@ class SSHDockerBackend:
         if host is None:
             raise ValueError(f"No Docker-enabled host with slug {slug!r}")
 
+        h = host.get("host", slug)
+        log.info("Docker SSH: updating %s on %s", project_name, h)
         ssh_cfg = get_ssh_config()
         creds = get_credentials(slug)
         async with await _connect(host, ssh_cfg, creds) as conn:
@@ -86,10 +95,17 @@ class SSHDockerBackend:
             args = f"-f {config_file}" if config_file else f"-p {project_name}"
             pull = await conn.run(f"docker compose {args} pull 2>&1", check=False)
             if pull.returncode != 0:
+                log.error(
+                    "Docker SSH: pull failed for %s on %s", project_name, h
+                )
                 raise RuntimeError(f"docker compose pull failed:\n{pull.stdout}")
             up = await conn.run(f"docker compose {args} up -d 2>&1", check=False)
             if up.returncode != 0:
+                log.error(
+                    "Docker SSH: up -d failed for %s on %s", project_name, h
+                )
                 raise RuntimeError(f"docker compose up -d failed:\n{up.stdout}")
+        log.info("Docker SSH: %s on %s — update complete", project_name, h)
 
     # ------------------------------------------------------------------
     # Internals
@@ -102,6 +118,7 @@ class SSHDockerBackend:
         dockerhub_creds: dict | None,
     ) -> list[dict]:
         slug = host["slug"]
+        h = host.get("host", slug)
         docker_mode = host.get("docker_mode", "all")
         allowed_stacks: set[str] | None = None
         if docker_mode == "selected":
@@ -138,6 +155,7 @@ class SSHDockerBackend:
                         "_config_file": config_file,
                     }
                 )
+        log.info("Docker SSH: checking %s — %d stack(s) found", h, len(stacks))
         return stacks
 
     async def _check_images(

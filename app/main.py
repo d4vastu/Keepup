@@ -211,13 +211,16 @@ def _format_log_lines(lines: list[str]) -> str:
 
 
 async def _job_run_host_update(job_id: str, host: dict, creds: dict) -> None:
+    name = host.get("name", host.get("host", "unknown"))
     try:
         lines = await run_host_update_buffered(host, get_ssh_config(), creds)
         _jobs[job_id]["lines"] = lines
         _jobs[job_id]["status"] = "done"
+        log.info("OS upgrade complete on %s", name)
     except Exception as exc:
         _jobs[job_id]["status"] = "error"
         _jobs[job_id]["error"] = str(exc)
+        log.error("OS upgrade failed on %s: %s", name, exc)
     finally:
         _jobs[job_id]["done"] = True
 
@@ -369,10 +372,15 @@ async def _proxmox_client_from_config():
 async def host_check(request: Request, slug: str) -> HTMLResponse:
     try:
         host = _get_host(slug)
+        host_name = host.get("name", slug)
         proxmox_node = host.get("proxmox_node")
         proxmox_vmid = host.get("proxmox_vmid")
         if proxmox_node and proxmox_vmid is not None:
             # LXC container — use pct exec via SSH to the Proxmox host
+            log.info(
+                "Checking %s (%s) via pct exec (%s/%s)",
+                host_name, slug, proxmox_node, proxmox_vmid,
+            )
             from .credentials import get_integration_credentials as _get_int_creds
             px_creds = _get_int_creds("proxmox")
             ssh_user = px_creds.get("ssh_user", "root")
@@ -392,6 +400,10 @@ async def host_check(request: Request, slug: str) -> HTMLResponse:
             packages = await client.get_lxc_updates(
                 proxmox_node, proxmox_vmid, px_host, get_ssh_config(), ssh_creds
             )
+            log.info(
+                "Check complete: %s (%s) — %d update(s) via pct exec",
+                host_name, slug, len(packages),
+            )
             return templates.TemplateResponse(
                 "partials/host_status.html",
                 {
@@ -405,9 +417,17 @@ async def host_check(request: Request, slug: str) -> HTMLResponse:
                 },
             )
         if proxmox_node:
+            log.info(
+                "Checking %s (%s) via Proxmox API (node %s)",
+                host_name, slug, proxmox_node,
+            )
             client = await _proxmox_client_from_config()
             packages = await client.get_node_updates(proxmox_node)
             proxmox_url = get_proxmox_config().get("url", "")
+            log.info(
+                "Check complete: %s (%s) — %d update(s) via Proxmox API",
+                host_name, slug, len(packages),
+            )
             return templates.TemplateResponse(
                 "partials/host_status.html",
                 {
@@ -420,8 +440,13 @@ async def host_check(request: Request, slug: str) -> HTMLResponse:
                     "proxmox_url": proxmox_url,
                 },
             )
+        log.info("Checking %s (%s) via SSH", host_name, slug)
         creds = get_credentials(slug)
         result = await check_host_updates(host, get_ssh_config(), creds)
+        log.info(
+            "Check complete: %s (%s) — %d update(s) via SSH",
+            host_name, slug, len(result["packages"]),
+        )
         return templates.TemplateResponse(
             "partials/host_status.html",
             {
@@ -450,6 +475,8 @@ async def host_update(
 ) -> HTMLResponse:
     try:
         host = _get_host(slug)
+        host_name = host.get("name", slug)
+        log.info("Running OS upgrade on %s (%s)", host_name, slug)
         creds = get_credentials(slug)
 
         if _needs_sudo(host, get_ssh_config()):
@@ -558,6 +585,13 @@ async def docker_check(request: Request) -> HTMLResponse:
         for r in results:
             if isinstance(r, list):
                 stacks.extend(r)
+        updates_available = sum(
+            1 for s in stacks if s.get("update_status") in ("update_available", "mixed")
+        )
+        log.info(
+            "Container check: found %d stack(s) with updates (of %d total)",
+            updates_available, len(stacks),
+        )
         # Check for new image updates and fire notifications (deduplicated)
         try:
             from .update_notifier import check_and_notify

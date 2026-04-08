@@ -1,4 +1,8 @@
+import logging
+
 from ..portainer_client import PortainerClient
+
+log = logging.getLogger(__name__)
 
 
 class PortainerBackend:
@@ -22,8 +26,16 @@ class PortainerBackend:
             s["endpoint_id"] = str(s["endpoint_id"])
             s["update_path"] = f"{self.BACKEND_KEY}/{ref}"
             enriched.append(s)
+        updates_found = sum(
+            1 for s in enriched if s.get("update_status") in ("update_available", "mixed")
+        )
+        if updates_found:
+            log.warning(
+                "Portainer backend: %d stack(s) with updates found", updates_found
+            )
         return enriched
 
     async def update_stack(self, ref: str) -> None:
+        log.info("Portainer backend: triggering update for ref %s", ref)
         stack_id_str, endpoint_id_str = ref.split(":", 1)
         await self._client.update_stack(int(stack_id_str), int(endpoint_id_str))

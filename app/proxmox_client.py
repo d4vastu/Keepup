@@ -5,7 +5,11 @@ Used during setup to verify credentials and discover VMs and LXC containers.
 API token format: user@realm!tokenname=uuid-value
 """
 
+import logging
+
 import httpx
+
+log = logging.getLogger(__name__)
 
 
 class ProxmoxClient:
@@ -23,6 +27,7 @@ class ProxmoxClient:
         )
 
     async def get_version(self) -> dict:
+        log.info("Proxmox: testing API at %s", self.base)
         async with self._client() as c:
             resp = await c.get("/api2/json/version")
             resp.raise_for_status()
@@ -78,6 +83,8 @@ class ProxmoxClient:
         """
         from .ssh_client import _connect, _run
 
+        log.info("Proxmox: pct exec on %s/%s via %s", node, vmid, ssh_host)
+
         if not ssh_creds.get("key_path") and not ssh_creds.get("ssh_password"):
             raise RuntimeError(
                 "No SSH credentials configured for Proxmox host. "
@@ -107,14 +114,21 @@ class ProxmoxClient:
                 if "upgradable from:" in line:
                     old_ver = line.split("upgradable from:")[-1].strip().rstrip("]")
                 packages.append({"name": pkg_name, "current": old_ver, "available": new_ver})
+
+        n = len(packages)
+        if n:
+            log.info("Proxmox: %s/%s — %d update(s) available", node, vmid, n)
+        else:
+            log.info("Proxmox: %s/%s — up to date", node, vmid)
         return packages
 
     async def get_node_updates(self, node: str) -> list[dict]:
         """Return available apt packages for a Proxmox node via the apt API."""
+        log.info("Proxmox: checking node %s for apt updates", node)
         async with self._client() as c:
             r = await c.get(f"/api2/json/nodes/{node}/apt/update")
             r.raise_for_status()
-            return [
+            packages = [
                 {
                     "name": item.get("Package", ""),
                     "current": item.get("OldVersion", ""),
@@ -122,6 +136,12 @@ class ProxmoxClient:
                 }
                 for item in r.json().get("data", [])
             ]
+        n = len(packages)
+        if n:
+            log.info("Proxmox: node %s — %d update(s)", node, n)
+        else:
+            log.info("Proxmox: node %s — up to date", node)
+        return packages
 
     async def get_nodes(self) -> list[str]:
         """Return names of all online nodes."""
@@ -206,4 +226,7 @@ class ProxmoxClient:
 
             await asyncio.gather(*[_fill_ip(r) for r in resources])
 
+        n_vms = sum(1 for r in resources if r["type"] == "qemu")
+        n_lxcs = sum(1 for r in resources if r["type"] == "lxc")
+        log.info("Proxmox: discovered %d VMs and %d LXCs", n_vms, n_lxcs)
         return sorted(resources, key=lambda r: (r["node"], r["vmid"]))

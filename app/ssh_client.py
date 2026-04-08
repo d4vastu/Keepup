@@ -1,8 +1,11 @@
 import asyncio
+import logging
 
 import asyncssh
 
 from .package_managers import DETECT_CMD, get_package_manager
+
+log = logging.getLogger(__name__)
 
 
 def _needs_sudo(host: dict, ssh_cfg: dict) -> bool:
@@ -68,16 +71,20 @@ async def verify_connection(
     host: dict, ssh_cfg: dict, creds: dict | None = None
 ) -> dict:
     """Returns {"ok": bool, "message": str}."""
+    h = host["host"]
+    user = host.get("user") or ssh_cfg.get("default_user", "root")
+    log.info("SSH: testing connection to %s as %s", h, user)
     try:
         async with await _connect(host, ssh_cfg, creds) as conn:
             result = await conn.run("echo ok", check=False)
         if result.stdout.strip() == "ok":
+            log.info("SSH: %s connected", h)
             return {"ok": True, "message": "Connected successfully."}
-        return {
-            "ok": False,
-            "message": "Connected but command returned unexpected output.",
-        }
+        msg = "Connected but command returned unexpected output."
+        log.warning("SSH: %s failed — %s", h, msg)
+        return {"ok": False, "message": msg}
     except Exception as exc:
+        log.warning("SSH: %s failed — %s", h, exc)
         return {"ok": False, "message": str(exc)}
 
 
@@ -142,6 +149,8 @@ async def check_host_updates(
         "package_manager": str,
       }
     """
+    h = host["host"]
+    log.info("SSH: checking %s for OS updates", h)
     creds = creds or {}
     use_sudo = _needs_sudo(host, ssh_cfg)
     sudo_password = creds.get("sudo_password")
@@ -156,6 +165,11 @@ async def check_host_updates(
         )
 
     packages, reboot_required = pm.parse(result.stdout)
+    n = len(packages)
+    if n:
+        log.info("SSH: %s — %d update(s) available", h, n)
+    else:
+        log.info("SSH: %s — up to date", h)
     return {
         "packages": packages,
         "reboot_required": reboot_required,
@@ -185,6 +199,8 @@ async def run_host_update_buffered(
     host: dict, ssh_cfg: dict, creds: dict | None = None
 ) -> list[str]:
     """Detects the package manager, runs the appropriate upgrade command, returns all output lines."""
+    h = host["host"]
+    log.info("SSH: running upgrade on %s", h)
     creds = creds or {}
     use_sudo = _needs_sudo(host, ssh_cfg)
     sudo_password = creds.get("sudo_password")
@@ -201,6 +217,10 @@ async def run_host_update_buffered(
         )
 
     lines = result.stdout.splitlines()
-    if result.returncode != 0 and result.stderr:
-        lines += result.stderr.splitlines()
+    if result.returncode != 0:
+        if result.stderr:
+            lines += result.stderr.splitlines()
+        log.error("SSH: upgrade failed on %s (exit %s)", h, result.returncode)
+    else:
+        log.info("SSH: upgrade complete on %s", h)
     return lines

@@ -9,8 +9,13 @@ Handles:
 """
 
 import asyncio
+import logging
+
 import httpx
+
 from .registry_client import extract_local_digest, check_image_update
+
+log = logging.getLogger(__name__)
 
 
 class PortainerClient:
@@ -47,7 +52,9 @@ class PortainerClient:
         data = await self.get("/api/endpoints")
         # Docker environments: 1 = local, 2 = agent, 4 = edge agent
         # Skip Kubernetes (5, 6) and Azure ACI (3)
-        return [e for e in data if e.get("Type") in (1, 2, 4)]
+        endpoints = [e for e in data if e.get("Type") in (1, 2, 4)]
+        log.info("Portainer: found %d endpoint(s)", len(endpoints))
+        return endpoints
 
     # ------------------------------------------------------------------
     # Stacks
@@ -64,6 +71,8 @@ class PortainerClient:
         """Pull latest images and redeploy the stack."""
         # Fetch current stack definition
         stack = await self.get(f"/api/stacks/{stack_id}")
+        stack_name = stack.get("Name", str(stack_id))
+        log.info("Portainer: updating stack %s on endpoint %s", stack_name, endpoint_id)
         compose_content = await self.get_stack_file(stack_id)
 
         payload = {
@@ -72,9 +81,11 @@ class PortainerClient:
             "prune": False,
             "pullImage": True,
         }
-        return await self.put(
+        result = await self.put(
             f"/api/stacks/{stack_id}?endpointId={endpoint_id}", json=payload
         )
+        log.info("Portainer: stack %s update complete", stack_name)
+        return result
 
     # ------------------------------------------------------------------
     # Image update checking
@@ -107,6 +118,11 @@ class PortainerClient:
         endpoint_map = {e["Id"]: e["Name"] for e in endpoints}
 
         stacks = await self.get_stacks()
+        log.info(
+            "Portainer: checking %d stacks across %d endpoints",
+            len(stacks),
+            len(endpoints),
+        )
 
         # Build endpoint -> containers mapping (one API call per endpoint)
         endpoint_containers: dict[int, list[dict]] = {}
@@ -152,7 +168,10 @@ class PortainerClient:
                     status = await check_image_update(
                         img_name, local_digest, dockerhub_creds
                     )
-                except Exception:
+                except Exception as exc:
+                    log.warning(
+                        "Portainer: image check failed for %s — %s", img_name, exc
+                    )
                     status = "unknown"
 
                 return {"name": img_name, "status": status}
@@ -171,6 +190,12 @@ class PortainerClient:
                 rollup = "up_to_date"
             else:
                 rollup = "unknown"
+
+            if rollup in ("update_available", "mixed"):
+                endpoint_name = endpoint_map.get(endpoint_id, f"env-{endpoint_id}")
+                log.info(
+                    "Portainer: %s on %s — update available", stack_name, endpoint_name
+                )
 
             results.append(
                 {
