@@ -66,6 +66,68 @@ class ProxmoxClient:
             pass
         return ""
 
+    async def get_lxc_updates(
+        self, node: str, vmid: int, ssh_host: str, ssh_cfg: dict, ssh_creds: dict
+    ) -> list[dict]:
+        """
+        Return available apt packages for an LXC container by running
+        `pct exec {vmid} -- apt list -qq --upgradable` via SSH on the Proxmox host.
+
+        ssh_host: IP/hostname of the Proxmox node
+        ssh_cfg / ssh_creds: same format as ssh_client helpers
+        """
+        from .ssh_client import _connect, _run
+
+        host_entry = {
+            "host": ssh_host,
+            "user": ssh_creds.get("user", "root"),
+            "port": ssh_creds.get("port", 22),
+        }
+        cmd = f"pct exec {vmid} -- apt list -qq --upgradable 2>/dev/null"
+        async with await _connect(host_entry, ssh_cfg, ssh_creds) as conn:
+            result = await _run(conn, cmd)
+
+        packages = []
+        for line in result.stdout.splitlines():
+            line = line.strip()
+            if not line or line.startswith("Listing"):
+                continue
+            # Format: package/suite version arch [upgradable from: oldversion]
+            parts = line.split()
+            if len(parts) >= 2:
+                pkg_name = parts[0].split("/")[0]
+                new_ver = parts[1]
+                old_ver = ""
+                if "upgradable from:" in line:
+                    old_ver = line.split("upgradable from:")[-1].strip().rstrip("]")
+                packages.append({"name": pkg_name, "current": old_ver, "available": new_ver})
+        return packages
+
+    async def get_node_updates(self, node: str) -> list[dict]:
+        """Return available apt packages for a Proxmox node via the apt API."""
+        async with self._client() as c:
+            r = await c.get(f"/api2/json/nodes/{node}/apt/update")
+            r.raise_for_status()
+            return [
+                {
+                    "name": item.get("Package", ""),
+                    "current": item.get("OldVersion", ""),
+                    "available": item.get("Version", ""),
+                }
+                for item in r.json().get("data", [])
+            ]
+
+    async def get_nodes(self) -> list[str]:
+        """Return names of all online nodes."""
+        async with self._client() as c:
+            r = await c.get("/api2/json/nodes")
+            r.raise_for_status()
+            return [
+                n["node"]
+                for n in r.json().get("data", [])
+                if n.get("status") == "online"
+            ]
+
     async def discover_resources(self) -> list[dict]:
         """Return all VMs and LXC containers across all nodes with IPs, sorted by node + vmid."""
         import asyncio

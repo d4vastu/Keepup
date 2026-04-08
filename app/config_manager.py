@@ -50,6 +50,8 @@ def _build_host_entry(
     port: int | None,
     key_path: str | None = None,
     docker_mode: str | None = None,
+    proxmox_node: str | None = None,
+    proxmox_vmid: int | None = None,
 ) -> dict:
     """Builds a host entry for config.yml — no credentials stored here."""
     entry: dict = {"name": name, "host": host}
@@ -61,6 +63,10 @@ def _build_host_entry(
         entry["key"] = key_path
     if docker_mode and docker_mode != "none":
         entry["docker_mode"] = docker_mode
+    if proxmox_node:
+        entry["proxmox_node"] = proxmox_node
+    if proxmox_vmid is not None:
+        entry["proxmox_vmid"] = proxmox_vmid
     return entry
 
 
@@ -71,13 +77,19 @@ def add_host(
     port: int | None,
     key_path: str | None = None,
     docker_mode: str | None = None,
+    proxmox_node: str | None = None,
+    proxmox_vmid: int | None = None,
 ) -> str:
     """Add a host to config and return its slug."""
     config = load_config()
     hosts = config.setdefault("hosts", [])
     hosts.append(
         _build_host_entry(
-            name, host, user, port, key_path=key_path, docker_mode=docker_mode
+            name, host, user, port,
+            key_path=key_path,
+            docker_mode=docker_mode,
+            proxmox_node=proxmox_node,
+            proxmox_vmid=proxmox_vmid,
         )
     )
     save_config(config)

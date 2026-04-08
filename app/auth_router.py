@@ -401,19 +401,25 @@ async def setup_save_proxmox(
     proxmox_token_id: str = Form(""),
     proxmox_secret: str = Form(""),
     proxmox_verify_ssl: str = Form(""),
+    proxmox_ssh_user: str = Form(""),
+    proxmox_ssh_key: str = Form(""),
 ) -> HTMLResponse:
     url = proxmox_url.strip().rstrip("/")
     api_user = proxmox_api_user.strip()
     token_id = proxmox_token_id.strip()
     secret = proxmox_secret.strip()
     verify_ssl = proxmox_verify_ssl == "on"
+    ssh_user = proxmox_ssh_user.strip()
+    ssh_key = proxmox_ssh_key.strip()
     save_proxmox_config(url=url, verify_ssl=verify_ssl)
-    if api_user or token_id or secret:
+    if api_user or token_id or secret or ssh_user or ssh_key:
         save_integration_credentials(
             "proxmox",
             api_user=api_user or None,
             token_id=token_id or None,
             secret=secret or None,
+            ssh_user=ssh_user or None,
+            ssh_key=ssh_key or None,
         )
     _queue_integration_host(request, "proxmox", "Proxmox VE", url)
     return templates.TemplateResponse(

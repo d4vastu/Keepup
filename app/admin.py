@@ -113,6 +113,8 @@ def _integration_status() -> dict:
         "proxmox_secret_set": bool(px_creds.get("secret") or px_creds.get("api_token")),
         "proxmox_configured": bool(px_cfg.get("url") and (px_creds.get("secret") or px_creds.get("api_token"))),
         "proxmox_verify_ssl": px_cfg.get("verify_ssl", False),
+        "proxmox_ssh_user": px_creds.get("ssh_user", ""),
+        "proxmox_ssh_key": px_creds.get("ssh_key", ""),
         "pbs_url": pbs_cfg.get("url", ""),
         "pbs_api_user": pbs_creds.get("api_user", ""),
         "pbs_token_id": pbs_creds.get("token_id", ""),
@@ -159,7 +161,12 @@ async def admin_integrations(request: Request) -> HTMLResponse:
 
     return templates.TemplateResponse(
         "admin_integrations.html",
-        {"request": request, "integ": _integration_status(), "app_version": APP_VERSION},
+        {
+            "request": request,
+            "integ": _integration_status(),
+            "available_keys": get_available_ssh_keys(),
+            "app_version": APP_VERSION,
+        },
     )
 
 
@@ -280,119 +287,121 @@ async def admin_proxmox_discover(request: Request) -> HTMLResponse:
 
 @router.post("/integrations/proxmox/select-hosts", response_class=HTMLResponse)
 async def admin_proxmox_select_hosts(request: Request) -> HTMLResponse:
+    """Quick-add selected Proxmox VMs/LXCs as hosts without SSH setup.
+
+    LXCs: stored with proxmox_node + proxmox_vmid so updates run via pct exec.
+    VMs: stored as regular hosts (SSH credentials set later from Admin > Hosts).
+    """
     form = await request.form()
     selected = form.getlist("selected_hosts")
-    hosts = []
+
+    existing = {h["host"] for h in get_hosts()}
+    lxc_added, vm_added, skipped = [], [], []
+
     for entry in selected:
         parts = entry.split(":", 4)
-        if len(parts) >= 4:
-            hosts.append(
-                {
-                    "node": parts[0],
-                    "vmid": parts[1],
-                    "type": parts[2],
-                    "name": parts[3],
-                    "ip": parts[4] if len(parts) > 4 else "",
-                }
+        if len(parts) < 4:
+            continue
+        node, vmid_str, rtype, name = parts[0], parts[1], parts[2], parts[3]
+        ip = parts[4] if len(parts) > 4 else ""
+        if not ip:
+            skipped.append(name)
+            continue
+        if ip in existing:
+            skipped.append(name)
+            continue
+        vmid = int(vmid_str) if vmid_str.isdigit() else None
+        if rtype == "lxc":
+            add_host(
+                name=name, host=ip, user=None, port=None,
+                proxmox_node=node,
+                proxmox_vmid=vmid,
             )
-    if not hosts:
-        return HTMLResponse(
-            '<span style="font-size:12px;color:#8b949e">No hosts selected.</span>'
+            lxc_added.append(name)
+        else:
+            add_host(name=name, host=ip, user=None, port=None)
+            vm_added.append(name)
+        existing.add(ip)
+
+    if not lxc_added and not vm_added:
+        msg = "No hosts added"
+        if skipped:
+            msg += f" — {len(skipped)} already exist or have no IP"
+        return HTMLResponse(f'<span style="font-size:12px;color:#8b949e">{msg}.</span>')
+
+    parts_msg = []
+    if lxc_added:
+        parts_msg.append(
+            f'{len(lxc_added)} LXC{"s" if len(lxc_added) != 1 else ""} added '
+            f'(managed via Proxmox API)'
         )
-    return templates.TemplateResponse(
-        "partials/admin_proxmox_host_forms.html",
-        {"request": request, "hosts": hosts, "available_keys": get_available_ssh_keys()},
+    if vm_added:
+        parts_msg.append(
+            f'{len(vm_added)} VM{"s" if len(vm_added) != 1 else ""} added '
+            f'— configure SSH from Admin › Hosts'
+        )
+    if skipped:
+        parts_msg.append(f'{len(skipped)} skipped (no IP or duplicate)')
+
+    return HTMLResponse(
+        f'<span style="font-size:12px;color:#3fb950">&#10003; {"; ".join(parts_msg)}. '
+        f'<a href="/admin/hosts" style="color:#388bfd;text-decoration:underline">Go to Hosts →</a></span>'
     )
 
 
-@router.post("/integrations/proxmox/test-host", response_class=HTMLResponse)
-async def admin_proxmox_test_host(
-    request: Request,
-    host: str = Form(""),
-    user: str = Form(""),
-    port: str = Form("22"),
-    auth_method: str = Form("key"),
-    ssh_password: str = Form(""),
-    key_file: str = Form(""),
-) -> HTMLResponse:
-    host_addr = host.strip()
-    user_val = user.strip() or None
-    port_val = int(port) if port.strip().isdigit() else 22
-    key_path = f"/app/keys/{key_file}" if auth_method == "key" and key_file else None
-    if not host_addr or not user_val:
+@router.post("/integrations/proxmox/add-node-host", response_class=HTMLResponse)
+async def admin_proxmox_add_node_host(request: Request) -> HTMLResponse:
+    """Add the Proxmox hypervisor node(s) as hosts monitored via the Proxmox apt API."""
+    cfg = get_proxmox_config()
+    creds = get_integration_credentials("proxmox")
+    url = cfg.get("url", "")
+    token_id = creds.get("token_id", "")
+    secret = creds.get("secret", "")
+    if not token_id:
+        api_user = creds.get("api_user", "")
+        api_token = creds.get("api_token", "")
+        token = f"{api_user}!{api_token}" if api_user else api_token
+    else:
+        token = f"{token_id}={secret}"
+    verify_ssl = cfg.get("verify_ssl", False)
+    if not url or not token:
         return HTMLResponse(
-            '<span style="font-size:12px;color:#f85149">IP and SSH user are required.</span>'
-        )
-    creds: dict = {}
-    if auth_method == "password":
-        creds = {"ssh_password": ssh_password}
-    elif key_path:
-        creds = {"key_path": key_path}
-    host_entry = {"host": host_addr, "user": user_val, "port": port_val}
-    try:
-        result = await verify_connection(host_entry, get_ssh_config(), creds)
-        if result.get("ok"):
-            return HTMLResponse(
-                '<span style="font-size:12px;color:#3fb950">&#10003; Connection successful.</span>'
-            )
-        return HTMLResponse(
-            f'<span style="font-size:12px;color:#f85149">Failed: {result.get("message", "unknown error")}</span>'
-        )
-    except Exception as exc:
-        return HTMLResponse(
-            f'<span style="font-size:12px;color:#f85149">Error: {exc}</span>'
+            '<span style="font-size:12px;color:#f85149">Proxmox not configured.</span>'
         )
 
+    import urllib.parse
+    px_host = urllib.parse.urlparse(url).hostname or ""
 
-@router.post("/integrations/proxmox/add-host", response_class=HTMLResponse)
-async def admin_proxmox_add_host(
-    request: Request,
-    name: str = Form(""),
-    host: str = Form(""),
-    user: str = Form(""),
-    port: str = Form("22"),
-    auth_method: str = Form("key"),
-    ssh_password: str = Form(""),
-    key_file: str = Form(""),
-) -> HTMLResponse:
-    name = name.strip()
-    host_addr = host.strip()
-    user_val = user.strip() or None
-    port_val = int(port) if port.strip().isdigit() else 22
-    key_path = f"/app/keys/{key_file}" if auth_method == "key" and key_file else None
-    if not name or not host_addr or not user_val:
-        return HTMLResponse(
-            '<span style="font-size:12px;color:#f85149">Display name, IP, and SSH user are required.</span>'
-        )
-    if auth_method == "password" and not ssh_password.strip():
-        return HTMLResponse(
-            '<span style="font-size:12px;color:#f85149">Password is required for password auth.</span>'
-        )
-    if auth_method == "key" and not key_file:
-        return HTMLResponse(
-            '<span style="font-size:12px;color:#f85149">Select an SSH key file.</span>'
-        )
-    creds: dict = {}
-    if auth_method == "password":
-        creds = {"ssh_password": ssh_password}
-    elif key_path:
-        creds = {"key_path": key_path}
-    host_entry = {"host": host_addr, "user": user_val, "port": port_val}
     try:
-        result = await verify_connection(host_entry, get_ssh_config(), creds)
-        if not result.get("ok"):
-            return HTMLResponse(
-                f'<span style="font-size:12px;color:#f85149">Connection failed: {result.get("message", "")}</span>'
-            )
+        client = ProxmoxClient(url=url, api_token=token, verify_ssl=verify_ssl)
+        nodes = await client.get_nodes()
     except Exception as exc:
         return HTMLResponse(
-            f'<span style="font-size:12px;color:#f85149">Connection error: {exc}</span>'
+            f'<span style="font-size:12px;color:#f85149">Could not reach Proxmox API: {exc}</span>'
         )
-    slug = add_host(name=name, host=host_addr, user=user_val, port=port_val, key_path=key_path)
-    if auth_method == "password" and ssh_password.strip():
-        save_credentials(slug, ssh_password=ssh_password.strip())
+
+    existing = {h["host"] for h in get_hosts()}
+    added = []
+    for node in nodes:
+        host_ip = px_host
+        if host_ip in existing:
+            continue
+        add_host(
+            name=f"Proxmox VE ({node})",
+            host=host_ip,
+            user=None,
+            port=None,
+            proxmox_node=node,
+        )
+        existing.add(host_ip)
+        added.append(node)
+
+    if not added:
+        return HTMLResponse(
+            '<span style="font-size:12px;color:#8b949e">Proxmox node already added.</span>'
+        )
     return HTMLResponse(
-        f'<span style="font-size:12px;color:#3fb950">&#10003; {name} added successfully. '
+        f'<span style="font-size:12px;color:#3fb950">&#10003; Added: {", ".join(added)}. '
         f'<a href="/admin/hosts" style="color:#388bfd;text-decoration:underline">Go to Hosts →</a></span>'
     )
 

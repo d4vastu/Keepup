@@ -186,21 +186,44 @@
         <input type="checkbox" id="proxmox-ssl" name="proxmox_verify_ssl" value="on" {% if integ.proxmox_verify_ssl %}checked{% endif %}>
         <label for="proxmox-ssl">Verify SSL certificate</label>
       </div>
+      {% if integ.proxmox_configured %}
+      <div style="border-top:0.5px solid #21262d;margin:10px 0 12px;"></div>
+      <div class="field-label" style="margin-bottom:6px;">SSH ACCESS FOR LXC UPDATES</div>
+      <div class="field-hint" style="margin-bottom:8px;">Used to run <code style="background:#0d1117;padding:1px 4px;border-radius:3px;">pct exec</code> on the Proxmox host for LXC package checks. Requires SSH access to the Proxmox node.</div>
+      <div class="field-row">
+        <div class="field">
+          <div class="field-label">SSH USER</div>
+          <input type="text" id="proxmox-ssh-user" name="proxmox_ssh_user" value="{{ integ.proxmox_ssh_user or 'root' }}" class="field-input">
+        </div>
+        <div class="field">
+          <div class="field-label">SSH KEY</div>
+          <select id="proxmox-ssh-key" name="proxmox_ssh_key" class="field-input">
+            <option value="">— select key —</option>
+            {% for k in available_keys %}
+            <option value="{{ k }}" {% if integ.proxmox_ssh_key == k %}selected{% endif %}>{{ k }}</option>
+            {% endfor %}
+          </select>
+        </div>
+      </div>
+      {% endif %}
       <div id="proxmox-test-result" class="result-area"></div>
       <div class="btn-row">
         <button class="btn-test"
           hx-post="/setup/connect/proxmox/test"
           hx-include="#proxmox-url,#proxmox-api-user,#proxmox-token-id,#proxmox-secret,#proxmox-ssl"
-          hx-target="#proxmox-test-result">Test connection</button>
+          hx-target="#proxmox-test-result">Test API</button>
         <button class="btn-save"
           hx-post="/setup/connect/proxmox/save"
-          hx-include="#proxmox-url,#proxmox-api-user,#proxmox-token-id,#proxmox-secret,#proxmox-ssl"
+          hx-include="#proxmox-url,#proxmox-api-user,#proxmox-token-id,#proxmox-secret,#proxmox-ssl,#proxmox-ssh-user,#proxmox-ssh-key"
           hx-target="#proxmox-result">Save</button>
         {% if integ.proxmox_configured %}
         <button class="btn-test"
+          hx-post="/admin/integrations/proxmox/add-node-host"
+          hx-target="#proxmox-result"
+          style="color:#3fb950;border-color:#1a4a25;">Add Proxmox node</button>
+        <button class="btn-test"
           hx-post="/admin/integrations/proxmox/discover"
           hx-target="#proxmox-discover-section"
-          hx-indicator="#proxmox-discover-section"
           style="color:#388bfd;border-color:#1a3a6e;">Discover VMs &amp; LXCs</button>
         {% endif %}
       </div>

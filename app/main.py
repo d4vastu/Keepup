@@ -18,7 +18,7 @@ from .notifications import get_unread_count, get_notifications, mark_all_read
 from .auto_update_scheduler import apply_all_schedules, scheduler
 from .auto_updates_router import router as auto_updates_router
 from .backend_loader import get_backends, get_dockerhub_creds, reload_backends
-from .config_manager import get_hosts, get_ssh_config, get_pbs_config
+from .config_manager import get_hosts, get_ssh_config, get_pbs_config, get_proxmox_config
 from .credentials import get_credentials, get_integration_credentials, save_sudo_password
 from .ssh_client import (
     _needs_sudo,
@@ -341,10 +341,79 @@ async def pbs_status(request: Request) -> HTMLResponse:
 # ---------------------------------------------------------------------------
 
 
+async def _proxmox_client_from_config():
+    """Build a ProxmoxClient from the stored integration config."""
+    from .proxmox_client import ProxmoxClient
+
+    cfg = get_proxmox_config()
+    creds = get_integration_credentials("proxmox")
+    url = cfg.get("url", "")
+    token_id = creds.get("token_id", "")
+    secret = creds.get("secret", "")
+    if not token_id:
+        api_user = creds.get("api_user", "")
+        api_token = creds.get("api_token", "")
+        token = f"{api_user}!{api_token}" if api_user else api_token
+    else:
+        token = f"{token_id}={secret}"
+    verify_ssl = cfg.get("verify_ssl", False)
+    if not url or not token:
+        raise RuntimeError("Proxmox integration not configured.")
+    return ProxmoxClient(url=url, api_token=token, verify_ssl=verify_ssl)
+
+
 @app.get("/api/host/{slug}/check", response_class=HTMLResponse)
 async def host_check(request: Request, slug: str) -> HTMLResponse:
     try:
         host = _get_host(slug)
+        proxmox_node = host.get("proxmox_node")
+        proxmox_vmid = host.get("proxmox_vmid")
+        if proxmox_node and proxmox_vmid is not None:
+            # LXC container — use pct exec via SSH to the Proxmox host
+            from .credentials import get_integration_credentials as _get_int_creds
+            px_creds = _get_int_creds("proxmox")
+            ssh_user = px_creds.get("ssh_user", "root")
+            ssh_key = px_creds.get("ssh_key", "")
+            px_cfg = get_proxmox_config()
+            proxmox_url = px_cfg.get("url", "")
+            import urllib.parse
+            px_host = urllib.parse.urlparse(proxmox_url).hostname or host["host"]
+            ssh_key_path = f"/app/keys/{ssh_key}" if ssh_key else None
+            ssh_creds: dict = {"user": ssh_user}
+            if ssh_key_path:
+                ssh_creds["key_path"] = ssh_key_path
+            client = await _proxmox_client_from_config()
+            packages = await client.get_lxc_updates(
+                proxmox_node, proxmox_vmid, px_host, get_ssh_config(), ssh_creds
+            )
+            return templates.TemplateResponse(
+                "partials/host_status.html",
+                {
+                    "request": request,
+                    "slug": slug,
+                    "packages": packages,
+                    "reboot_required": False,
+                    "package_manager": f"apt · pct exec ({proxmox_node}/{proxmox_vmid})",
+                    "proxmox_node": proxmox_node,
+                    "proxmox_url": proxmox_url,
+                },
+            )
+        if proxmox_node:
+            client = await _proxmox_client_from_config()
+            packages = await client.get_node_updates(proxmox_node)
+            proxmox_url = get_proxmox_config().get("url", "")
+            return templates.TemplateResponse(
+                "partials/host_status.html",
+                {
+                    "request": request,
+                    "slug": slug,
+                    "packages": packages,
+                    "reboot_required": False,
+                    "package_manager": f"apt · Proxmox API ({proxmox_node})",
+                    "proxmox_node": proxmox_node,
+                    "proxmox_url": proxmox_url,
+                },
+            )
         creds = get_credentials(slug)
         result = await check_host_updates(host, get_ssh_config(), creds)
         return templates.TemplateResponse(

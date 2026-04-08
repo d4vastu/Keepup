@@ -12,6 +12,12 @@
   {% endfor %}
 </div>
 <div class="mt-2 flex flex-wrap gap-2">
+  {% if proxmox_node %}
+  <a href="{{ proxmox_url }}" target="_blank" rel="noopener"
+    class="text-[12px] font-medium px-3 py-1 rounded-md border border-slate-700 text-slate-400 hover:bg-slate-800 transition-colors">
+    Upgrade via Proxmox UI ↗
+  </a>
+  {% else %}
   <button
     hx-post="/api/host/{{ slug }}/update"
     hx-target="#host-{{ slug }}-action"
@@ -20,6 +26,7 @@
     class="text-[12px] font-medium px-3 py-1 rounded-md border border-[#2ea043] text-green-400 hover:bg-green-900/20 transition-colors">
     Upgrade
   </button>
+  {% endif %}
   {% if reboot_required %}
   <button
     hx-post="/api/host/{{ slug }}/restart"
