@@ -1,7 +1,10 @@
 import asyncio
+import logging
 import os
 import time
 import uuid
+
+log = logging.getLogger(__name__)
 from pathlib import Path
 
 from fastapi import BackgroundTasks, FastAPI, Form, Request
@@ -430,6 +433,7 @@ async def host_check(request: Request, slug: str) -> HTMLResponse:
             },
         )
     except Exception as exc:
+        log.exception("host_check failed for %s: %s", slug, exc)
         return templates.TemplateResponse(
             "partials/error.html",
             {"request": request, "message": str(exc)},

@@ -78,6 +78,12 @@ class ProxmoxClient:
         """
         from .ssh_client import _connect, _run
 
+        if not ssh_creds.get("key_path") and not ssh_creds.get("ssh_password"):
+            raise RuntimeError(
+                "No SSH credentials configured for Proxmox host. "
+                "Set SSH user and key/password in Admin → Integrations → Proxmox VE."
+            )
+
         host_entry = {
             "host": ssh_host,
             "user": ssh_creds.get("user", "root"),
@@ -85,7 +91,7 @@ class ProxmoxClient:
         }
         cmd = f"pct exec {vmid} -- apt list -qq --upgradable 2>/dev/null"
         async with await _connect(host_entry, ssh_cfg, ssh_creds) as conn:
-            result = await _run(conn, cmd)
+            result = await _run(conn, cmd, sudo_password=None, needs_sudo=False, timeout=30)
 
         packages = []
         for line in result.stdout.splitlines():
