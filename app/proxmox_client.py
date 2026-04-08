@@ -71,48 +71,27 @@ class ProxmoxClient:
         import asyncio
 
         async with self._client() as c:
-            nodes_resp = await c.get("/api2/json/nodes")
-            nodes_resp.raise_for_status()
-            nodes = nodes_resp.json()["data"]
+            # cluster/resources?type=vm returns both qemu and lxc in one call
+            # and requires only VM.Audit on /vms — no per-node path permissions needed.
+            r = await c.get("/api2/json/cluster/resources", params={"type": "vm"})
+            r.raise_for_status()
 
             resources: list[dict] = []
-
-            for node in nodes:
-                node_name = node["node"]
-
-                try:
-                    r = await c.get(f"/api2/json/nodes/{node_name}/qemu")
-                    r.raise_for_status()
-                    for vm in r.json()["data"]:
-                        resources.append(
-                            {
-                                "type": "qemu",
-                                "node": node_name,
-                                "vmid": vm["vmid"],
-                                "name": vm.get("name", f"vm-{vm['vmid']}"),
-                                "status": vm.get("status", "unknown"),
-                                "ip": "",
-                            }
-                        )
-                except Exception:
-                    pass
-
-                try:
-                    r = await c.get(f"/api2/json/nodes/{node_name}/lxc")
-                    r.raise_for_status()
-                    for ct in r.json()["data"]:
-                        resources.append(
-                            {
-                                "type": "lxc",
-                                "node": node_name,
-                                "vmid": ct["vmid"],
-                                "name": ct.get("name", f"ct-{ct['vmid']}"),
-                                "status": ct.get("status", "unknown"),
-                                "ip": "",
-                            }
-                        )
-                except Exception:
-                    pass
+            for item in r.json().get("data", []):
+                rtype = item.get("type")
+                if rtype not in ("qemu", "lxc"):
+                    continue
+                vmid = item.get("vmid")
+                resources.append(
+                    {
+                        "type": rtype,
+                        "node": item.get("node", ""),
+                        "vmid": vmid,
+                        "name": item.get("name", f"{rtype}-{vmid}"),
+                        "status": item.get("status", "unknown"),
+                        "ip": "",
+                    }
+                )
 
             # Fetch IPs concurrently
             async def _fill_ip(resource: dict) -> None:

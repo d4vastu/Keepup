@@ -36,24 +36,13 @@ async def test_get_version_returns_data(mock_client):
 
 @pytest.mark.asyncio
 async def test_discover_resources_returns_vms_and_lxc(mock_client):
-    nodes = [{"node": "pve"}]
-    vms = [{"vmid": 100, "name": "ubuntu-vm", "status": "running"}]
-    containers = [{"vmid": 101, "name": "debian-ct", "status": "running"}]
-
-    responses = [
-        _make_response(nodes),
-        _make_response(vms),
-        _make_response(containers),
+    cluster_data = [
+        {"type": "qemu", "node": "pve", "vmid": 100, "name": "ubuntu-vm", "status": "running"},
+        {"type": "lxc", "node": "pve", "vmid": 101, "name": "debian-ct", "status": "running"},
     ]
-    call_count = 0
 
-    async def fake_get(path, **kwargs):
-        nonlocal call_count
-        resp = responses[call_count]
-        call_count += 1
-        return resp
-
-    with patch("httpx.AsyncClient.get", new_callable=AsyncMock, side_effect=fake_get):
+    with patch("httpx.AsyncClient.get", new_callable=AsyncMock) as mock_get:
+        mock_get.return_value = _make_response(cluster_data)
         result = await mock_client.discover_resources()
 
     assert len(result) == 2
@@ -63,46 +52,27 @@ async def test_discover_resources_returns_vms_and_lxc(mock_client):
 
 
 @pytest.mark.asyncio
-async def test_discover_resources_handles_vm_failure_gracefully(mock_client):
-    """If VM listing fails, LXC listing still works."""
-    nodes = [{"node": "pve"}]
-    containers = [{"vmid": 200, "name": "web-ct", "status": "stopped"}]
+async def test_discover_resources_filters_unknown_types(mock_client):
+    """Non-VM/LXC resource types (storage, node) are excluded."""
+    cluster_data = [
+        {"type": "qemu", "node": "pve", "vmid": 100, "name": "my-vm", "status": "running"},
+        {"type": "storage", "node": "pve", "storage": "local"},
+        {"type": "node", "node": "pve"},
+    ]
 
-    call_count = 0
-
-    async def fake_get(path, **kwargs):
-        nonlocal call_count
-        call_count += 1
-        if call_count == 1:
-            return _make_response(nodes)
-        elif call_count == 2:
-            raise httpx.ConnectError("timeout")
-        else:
-            return _make_response(containers)
-
-    with patch("httpx.AsyncClient.get", new_callable=AsyncMock, side_effect=fake_get):
+    with patch("httpx.AsyncClient.get", new_callable=AsyncMock) as mock_get:
+        mock_get.return_value = _make_response(cluster_data)
         result = await mock_client.discover_resources()
 
     assert len(result) == 1
-    assert result[0]["name"] == "web-ct"
-    assert result[0]["type"] == "lxc"
+    assert result[0]["name"] == "my-vm"
 
 
 @pytest.mark.asyncio
-async def test_discover_resources_empty_node(mock_client):
-    """Handles a node with no VMs or LXCs."""
-    nodes = [{"node": "pve"}]
-
-    call_count = 0
-
-    async def fake_get(path, **kwargs):
-        nonlocal call_count
-        call_count += 1
-        if call_count == 1:
-            return _make_response(nodes)
-        return _make_response([])  # empty VMs and LXCs
-
-    with patch("httpx.AsyncClient.get", new_callable=AsyncMock, side_effect=fake_get):
+async def test_discover_resources_empty(mock_client):
+    """Handles a cluster with no VMs or LXCs."""
+    with patch("httpx.AsyncClient.get", new_callable=AsyncMock) as mock_get:
+        mock_get.return_value = _make_response([])
         result = await mock_client.discover_resources()
 
     assert result == []
@@ -111,27 +81,13 @@ async def test_discover_resources_empty_node(mock_client):
 @pytest.mark.asyncio
 async def test_discover_resources_multiple_nodes(mock_client):
     """Resources from multiple nodes are all returned."""
-    nodes = [{"node": "pve1"}, {"node": "pve2"}]
-    vms_node1 = [{"vmid": 100, "name": "vm-1", "status": "running"}]
-    vms_node2 = [{"vmid": 200, "name": "vm-2", "status": "stopped"}]
+    cluster_data = [
+        {"type": "qemu", "node": "pve1", "vmid": 100, "name": "vm-1", "status": "running"},
+        {"type": "lxc", "node": "pve2", "vmid": 200, "name": "ct-1", "status": "stopped"},
+    ]
 
-    call_count = 0
-
-    async def fake_get(path, **kwargs):
-        nonlocal call_count
-        call_count += 1
-        if call_count == 1:
-            return _make_response(nodes)
-        elif call_count == 2:
-            return _make_response(vms_node1)
-        elif call_count == 3:
-            return _make_response([])  # no LXC on node1
-        elif call_count == 4:
-            return _make_response(vms_node2)
-        else:
-            return _make_response([])  # no LXC on node2
-
-    with patch("httpx.AsyncClient.get", new_callable=AsyncMock, side_effect=fake_get):
+    with patch("httpx.AsyncClient.get", new_callable=AsyncMock) as mock_get:
+        mock_get.return_value = _make_response(cluster_data)
         result = await mock_client.discover_resources()
 
     assert len(result) == 2
@@ -141,23 +97,33 @@ async def test_discover_resources_multiple_nodes(mock_client):
 
 
 @pytest.mark.asyncio
-async def test_discover_resources_uses_vmid_as_fallback_name(mock_client):
-    """VMs/LXCs without a 'name' field fall back to 'vm-{vmid}'."""
-    nodes = [{"node": "pve"}]
-    vms = [{"vmid": 101, "status": "running"}]  # no 'name' key
+async def test_discover_resources_uses_type_vmid_as_fallback_name(mock_client):
+    """Items without a 'name' field fall back to '{type}-{vmid}'."""
+    cluster_data = [
+        {"type": "qemu", "node": "pve", "vmid": 101, "status": "running"},
+        {"type": "lxc", "node": "pve", "vmid": 202, "status": "stopped"},
+    ]
 
-    call_count = 0
-
-    async def fake_get(path, **kwargs):
-        nonlocal call_count
-        call_count += 1
-        if call_count == 1:
-            return _make_response(nodes)
-        elif call_count == 2:
-            return _make_response(vms)
-        return _make_response([])
-
-    with patch("httpx.AsyncClient.get", new_callable=AsyncMock, side_effect=fake_get):
+    with patch("httpx.AsyncClient.get", new_callable=AsyncMock) as mock_get:
+        mock_get.return_value = _make_response(cluster_data)
         result = await mock_client.discover_resources()
 
-    assert result[0]["name"] == "vm-101"
+    names = {r["name"] for r in result}
+    assert "qemu-101" in names
+    assert "lxc-202" in names
+
+
+@pytest.mark.asyncio
+async def test_discover_resources_sorted_by_node_then_vmid(mock_client):
+    """Results are sorted by node then vmid."""
+    cluster_data = [
+        {"type": "qemu", "node": "pve", "vmid": 200, "name": "b", "status": "running"},
+        {"type": "lxc", "node": "pve", "vmid": 100, "name": "a", "status": "running"},
+    ]
+
+    with patch("httpx.AsyncClient.get", new_callable=AsyncMock) as mock_get:
+        mock_get.return_value = _make_response(cluster_data)
+        result = await mock_client.discover_resources()
+
+    assert result[0]["vmid"] == 100
+    assert result[1]["vmid"] == 200
