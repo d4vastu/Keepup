@@ -385,12 +385,18 @@ async def test_get_stacks_with_update_status_all_mode(config_file, data_dir):
     )
     ps_output = json.dumps([{"Image": "sonarr:latest"}])
     inspect_output = '["sonarr@sha256:abc123"]'
+    # docker ps -a for standalone containers; sonarr container belongs to compose project
+    docker_ps_output = json.dumps(
+        {"Names": "/sonarr", "Image": "sonarr:latest",
+         "Labels": "com.docker.compose.project=sonarr"}
+    )
 
     conn = _make_multi_conn(
         [
-            MagicMock(stdout=ls_output, returncode=0),  # compose ls
-            MagicMock(stdout=ps_output, returncode=0),  # compose ps
-            MagicMock(stdout=inspect_output, returncode=0),  # image inspect
+            MagicMock(stdout=ls_output, returncode=0),        # compose ls
+            MagicMock(stdout=ps_output, returncode=0),        # compose ps
+            MagicMock(stdout=inspect_output, returncode=0),   # image inspect
+            MagicMock(stdout=docker_ps_output, returncode=0), # docker ps -a (standalone check)
         ]
     )
 
