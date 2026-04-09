@@ -1,12 +1,12 @@
 """
 SSH-based Docker backend.
 
-Monitors and updates both Docker Compose stacks and standalone containers
-(containers not managed by Compose) on remote hosts over SSH.
+Monitors every container on a remote host, mirroring Watchtower's model:
+one entry per container, regardless of whether it's in a Compose stack.
 
-Compose stacks use `docker compose pull && up -d`.
-Standalone containers are recreated from their `docker inspect` config,
-mirroring Watchtower's approach but via the Docker CLI over SSH.
+Update strategy (per container):
+  - Belongs to a Compose project → docker compose pull && up -d (whole project)
+  - Standalone → docker pull + stop/rm/recreate from docker inspect config
 """
 
 import asyncio
@@ -22,9 +22,10 @@ from ..registry_client import check_image_update, extract_local_digest
 from ..credentials import get_credentials
 from ..config_manager import get_hosts, get_ssh_config
 
-# Sentinel prefix in the project/container part of a ref to distinguish
-# standalone containers from Compose project names.
-_CONTAINER_PREFIX = "~"
+# Ref formats (the slug-relative part after "{slug}/"):
+#   Compose container:  "{project}:{container_name}"   (colon separator)
+#   Standalone:         "~{container_name}"             (tilde prefix)
+_STANDALONE_PREFIX = "~"
 
 
 class SSHDockerBackend:
@@ -33,26 +34,26 @@ class SSHDockerBackend:
     def _docker_hosts(self) -> list[dict]:
         return [h for h in get_hosts() if h.get("docker_mode")]
 
+    def _make_compose_ref(self, slug: str, project: str, container: str) -> str:
+        return f"{slug}/{quote(project, safe='')}:{quote(container, safe='')}"
+
+    def _make_standalone_ref(self, slug: str, container: str) -> str:
+        return f"{slug}/{_STANDALONE_PREFIX}{quote(container, safe='')}"
+
+    # Keep old name so any call sites that use _make_ref still work
     def _make_ref(self, host_slug: str, project_name: str) -> str:
         return f"{host_slug}/{quote(project_name, safe='')}"
-
-    def _make_container_ref(self, host_slug: str, container_name: str) -> str:
-        return f"{host_slug}/{_CONTAINER_PREFIX}{quote(container_name, safe='')}"
 
     def _parse_ref(self, ref: str) -> tuple[str, str]:
         slug, encoded = ref.split("/", 1)
         return slug, unquote(encoded)
 
     # ------------------------------------------------------------------
-    # Discovery (also used by the admin panel when adding hosts)
+    # Discovery (admin panel)
     # ------------------------------------------------------------------
 
     async def discover_stacks(self, host: dict) -> list[dict]:
-        """
-        SSH into a host and return all Compose projects found.
-        Returns a list of {"name": str, "config_file": str} dicts.
-        Does not check for image updates — used purely for discovery.
-        """
+        """Return all Compose projects on the host (for admin discovery only)."""
         ssh_cfg = get_ssh_config()
         creds = get_credentials(host["slug"])
         try:
@@ -80,35 +81,39 @@ class SSHDockerBackend:
     ) -> list[dict]:
         hosts = self._docker_hosts()
         ssh_cfg = get_ssh_config()
-        tasks = [self._stacks_for_host(h, ssh_cfg, dockerhub_creds) for h in hosts]
+        tasks = [self._containers_for_host(h, ssh_cfg, dockerhub_creds) for h in hosts]
         results = await asyncio.gather(*tasks, return_exceptions=True)
-        all_stacks = []
+        all_entries = []
         for host, r in zip(hosts, results):
             if isinstance(r, Exception):
                 log.warning(
                     "Docker SSH: skipping %s — %s", host.get("host", host["slug"]), r
                 )
             elif isinstance(r, list):
-                all_stacks.extend(r)
-        return sorted(all_stacks, key=lambda s: (s["endpoint_name"], s["name"]))
+                all_entries.extend(r)
+        return sorted(all_entries, key=lambda s: (s["endpoint_name"], s["name"]))
 
     async def update_stack(self, ref: str) -> None:
-        slug, project_part = self._parse_ref(ref)
+        slug, rest = self._parse_ref(ref)
         host = next((h for h in self._docker_hosts() if h["slug"] == slug), None)
         if host is None:
             raise ValueError(f"No Docker-enabled host with slug {slug!r}")
 
-        if project_part.startswith(_CONTAINER_PREFIX):
-            container_name = project_part[len(_CONTAINER_PREFIX):]
+        if rest.startswith(_STANDALONE_PREFIX):
+            container_name = rest[len(_STANDALONE_PREFIX):]
             await self._update_standalone_container(host, container_name)
+        elif ":" in rest:
+            project_name, _container_name = rest.split(":", 1)
+            await self._update_compose_project(host, project_name)
         else:
-            await self._update_compose_stack(host, project_part)
+            # Backward-compat: old refs that were just project names
+            await self._update_compose_project(host, rest)
 
     # ------------------------------------------------------------------
     # Internals — discovery
     # ------------------------------------------------------------------
 
-    async def _stacks_for_host(
+    async def _containers_for_host(
         self,
         host: dict,
         ssh_cfg: dict,
@@ -117,114 +122,66 @@ class SSHDockerBackend:
         slug = host["slug"]
         h = host.get("host", slug)
         docker_mode = host.get("docker_mode", "all")
-        allowed_stacks: set[str] | None = None
+        allowed_projects: set[str] | None = None
         if docker_mode == "selected":
-            allowed_stacks = set(host.get("docker_stacks") or [])
+            allowed_projects = set(host.get("docker_stacks") or [])
 
         creds = get_credentials(slug)
-        stacks = []
-        compose_project_names: set[str] = set()
+        entries = []
 
         async with await _connect(host, ssh_cfg, creds) as conn:
-            # --- Compose stacks ---
-            rows = _parse_json_output(
-                (
-                    await conn.run("docker compose ls --all --format json", check=False)
-                ).stdout
+            ps_result = await conn.run(
+                "docker ps -a --format '{{json .}}'", check=False
             )
-            for row in rows:
-                project_name = row.get("Name", "")
-                config_file = row.get("ConfigFiles", "")
-                if not project_name:
-                    continue
-                compose_project_names.add(project_name)
-                if allowed_stacks is not None and project_name not in allowed_stacks:
+            containers = _parse_json_output(ps_result.stdout)
+
+            for c in containers:
+                labels = _parse_docker_ps_labels(c.get("Labels", "") or "")
+                project = labels.get("com.docker.compose.project", "")
+                raw_names = c.get("Names", "")
+                container_name = raw_names.split(",")[0].lstrip("/").strip()
+                image = c.get("Image", "")
+
+                if not container_name or not image:
                     continue
 
-                images = await self._check_images(conn, project_name, dockerhub_creds)
-                rollup = _rollup_status(images)
-                ref = self._make_ref(slug, project_name)
-                stacks.append(
+                # In "selected" mode only include containers from chosen projects
+                if allowed_projects is not None:
+                    if not project or project not in allowed_projects:
+                        continue
+
+                status = await self._check_image_status(conn, image, dockerhub_creds)
+                images = [{"name": image, "status": status}]
+
+                if project:
+                    ref = self._make_compose_ref(slug, project, container_name)
+                else:
+                    ref = self._make_standalone_ref(slug, container_name)
+
+                entries.append(
                     {
                         "id": ref,
-                        "name": project_name,
+                        "name": container_name,
                         "endpoint_id": slug,
                         "endpoint_name": host["name"],
-                        "update_status": rollup,
+                        "update_status": status,
                         "images": images,
                         "update_path": f"{self.BACKEND_KEY}/{ref}",
-                        "_config_file": config_file,
+                        "_compose_project": project,
                     }
                 )
 
-            # --- Standalone containers (not part of any Compose project) ---
-            # Only when monitoring all containers, not a hand-picked subset.
-            if docker_mode != "selected":
-                standalone = await self._standalone_containers(
-                    conn, slug, host["name"], compose_project_names, dockerhub_creds
-                )
-                stacks.extend(standalone)
-
-        n_compose = len([s for s in stacks if not s["id"].split("/", 1)[-1].startswith(_CONTAINER_PREFIX)])
-        n_standalone = len(stacks) - n_compose
+        n_compose = sum(1 for e in entries if e.get("_compose_project"))
+        n_standalone = len(entries) - n_compose
         log.info(
-            "Docker SSH: %s — %d compose stack(s), %d standalone container(s)",
+            "Docker SSH: %s — %d compose container(s), %d standalone container(s)",
             h, n_compose, n_standalone,
         )
-        return stacks
-
-    async def _standalone_containers(
-        self,
-        conn,
-        slug: str,
-        host_name: str,
-        compose_project_names: set[str],
-        dockerhub_creds: dict | None,
-    ) -> list[dict]:
-        """Return stack-like dicts for containers not managed by any Compose project."""
-        ps_result = await conn.run(
-            "docker ps -a --format '{{json .}}'", check=False
-        )
-        containers = _parse_json_output(ps_result.stdout)
-
-        entries = []
-        for c in containers:
-            labels = _parse_docker_ps_labels(c.get("Labels", "") or "")
-            project = labels.get("com.docker.compose.project", "")
-            if project and project in compose_project_names:
-                continue  # Managed by a known Compose stack
-
-            # Take the first name, strip leading slash
-            raw_names = c.get("Names", "")
-            container_name = raw_names.split(",")[0].lstrip("/").strip()
-            image = c.get("Image", "")
-            if not container_name or not image:
-                continue
-
-            log.info(
-                "Docker SSH: %s — standalone container %s (%s)",
-                host_name, container_name, image,
-            )
-            status = await self._check_standalone_image(conn, container_name, image, dockerhub_creds)
-            images = [{"name": image, "status": status}]
-            ref = self._make_container_ref(slug, container_name)
-            entries.append(
-                {
-                    "id": ref,
-                    "name": container_name,
-                    "endpoint_id": slug,
-                    "endpoint_name": host_name,
-                    "update_status": status,
-                    "images": images,
-                    "update_path": f"{self.BACKEND_KEY}/{ref}",
-                }
-            )
         return entries
 
-    async def _check_standalone_image(
+    async def _check_image_status(
         self,
         conn,
-        container_name: str,
         image_name: str,
         dockerhub_creds: dict | None,
     ) -> str:
@@ -242,6 +199,7 @@ class SSHDockerBackend:
             log.warning("Docker SSH: image check failed for %s — %s", image_name, exc)
             return "unknown"
 
+    # Kept for backward compatibility (used by discover_stacks path)
     async def _check_images(
         self,
         conn,
@@ -252,37 +210,15 @@ class SSHDockerBackend:
             f"docker compose -p {shlex.quote(project_name)} ps --format json", check=False
         )
         containers = _parse_json_output(ps_result.stdout)
-
         seen: set[str] = set()
         tasks = []
         for c in containers:
             img = c.get("Image", "")
             if img and img not in seen:
                 seen.add(img)
-                tasks.append(self._check_one_image(conn, img, dockerhub_creds))
-
+                tasks.append(self._check_image_status(conn, img, dockerhub_creds))
         checked = await asyncio.gather(*tasks, return_exceptions=True)
-        return [r for r in checked if isinstance(r, dict)]
-
-    async def _check_one_image(
-        self,
-        conn,
-        image_name: str,
-        dockerhub_creds: dict | None,
-    ) -> dict:
-        try:
-            inspect = await conn.run(
-                f"docker image inspect {image_name} --format '{{{{json .RepoDigests}}}}'",
-                check=False,
-            )
-            repo_digests: list[str] = []
-            if inspect.returncode == 0:
-                repo_digests = json.loads(inspect.stdout.strip())
-            local_digest = extract_local_digest(repo_digests, image_name)
-            status = await check_image_update(image_name, local_digest, dockerhub_creds)
-        except Exception:
-            status = "unknown"
-        return {"name": image_name, "status": status}
+        return [{"name": img, "status": r} for img, r in zip(seen, checked) if isinstance(r, str)]
 
     async def _get_config_file(self, conn, project_name: str) -> str:
         result = await conn.run("docker compose ls --all --format json", check=False)
@@ -294,10 +230,10 @@ class SSHDockerBackend:
     # Internals — updates
     # ------------------------------------------------------------------
 
-    async def _update_compose_stack(self, host: dict, project_name: str) -> None:
+    async def _update_compose_project(self, host: dict, project_name: str) -> None:
         slug = host["slug"]
         h = host.get("host", slug)
-        log.info("Docker SSH: updating compose stack %s on %s", project_name, h)
+        log.info("Docker SSH: updating compose project %s on %s", project_name, h)
         ssh_cfg = get_ssh_config()
         creds = get_credentials(slug)
         async with await _connect(host, ssh_cfg, creds) as conn:
@@ -320,7 +256,6 @@ class SSHDockerBackend:
         ssh_cfg = get_ssh_config()
         creds = get_credentials(slug)
         async with await _connect(host, ssh_cfg, creds) as conn:
-            # Get full container config before stopping it
             inspect_result = await conn.run(
                 f"docker inspect {shlex.quote(container_name)}", check=False
             )
@@ -330,7 +265,6 @@ class SSHDockerBackend:
 
             image = inspect_data["Config"]["Image"]
             log.info("Docker SSH: pulling %s for container %s", image, container_name)
-
             pull = await conn.run(f"docker pull {shlex.quote(image)} 2>&1", check=False)
             if pull.returncode != 0:
                 log.error("Docker SSH: pull failed for %s on %s", container_name, h)
@@ -368,7 +302,6 @@ def _parse_json_output(text: str) -> list[dict]:
             return [parsed]
     except json.JSONDecodeError:
         pass
-    # NDJSON: one JSON object per line
     rows = []
     for line in text.splitlines():
         line = line.strip()
@@ -435,15 +368,14 @@ def _build_docker_run_cmd(inspect: dict) -> str:
     if network_mode and network_mode not in ("default", "bridge", ""):
         parts += ["--network", network_mode]
     else:
-        # Re-attach to custom networks from NetworkSettings
         for net_name in (network_settings.get("Networks") or {}):
             if net_name not in ("bridge", "host", "none"):
                 parts += ["--network", net_name]
 
-    # Hostname (skip if it looks like the auto-generated short container ID)
+    # Hostname
     hostname = config.get("Hostname", "")
     short_id = inspect.get("Id", "")[:12]
-    if hostname and hostname != short_id and not hostname == name:
+    if hostname and hostname != short_id and hostname != name:
         parts += ["--hostname", hostname]
 
     # Privileged
@@ -456,11 +388,10 @@ def _build_docker_run_cmd(inspect: dict) -> str:
     for cap in host_config.get("CapDrop") or []:
         parts += ["--cap-drop", cap]
 
-    # PID / IPC / network container mode
+    # PID / IPC mode
     pid_mode = host_config.get("PidMode", "")
-    if pid_mode and pid_mode != "":
+    if pid_mode:
         parts += ["--pid", pid_mode]
-
     ipc_mode = host_config.get("IpcMode", "")
     if ipc_mode and ipc_mode not in ("", "shareable", "private"):
         parts += ["--ipc", ipc_mode]
@@ -469,7 +400,7 @@ def _build_docker_run_cmd(inspect: dict) -> str:
     for env in config.get("Env") or []:
         parts += ["-e", env]
 
-    # Volume mounts (bind mounts and named volumes)
+    # Volume mounts
     for bind in host_config.get("Binds") or []:
         parts += ["-v", bind]
 
@@ -498,7 +429,7 @@ def _build_docker_run_cmd(inspect: dict) -> str:
         if path_on_host and path_in_container:
             parts += ["--device", f"{path_on_host}:{path_in_container}:{perms}"]
 
-    # Labels (skip internal Docker/Compose labels that would conflict on recreate)
+    # Labels (skip internal Docker/Compose labels)
     _skip_prefixes = ("com.docker.compose.", "org.opencontainers.", "desktop.docker.")
     for key, val in (config.get("Labels") or {}).items():
         if not any(key.startswith(p) for p in _skip_prefixes):
@@ -523,9 +454,9 @@ def _build_docker_run_cmd(inspect: dict) -> str:
     # Image
     parts.append(config.get("Image", ""))
 
-    # Command override (if set and different from image default — we include if present)
-    cmd = config.get("Cmd") or []
+    # Entrypoint + command overrides
     entrypoint = config.get("Entrypoint") or []
+    cmd = config.get("Cmd") or []
     if entrypoint:
         parts += ["--entrypoint", entrypoint[0]]
         parts.extend(entrypoint[1:])

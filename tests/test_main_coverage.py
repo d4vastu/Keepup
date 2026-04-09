@@ -250,3 +250,103 @@ async def test_fetch_latest_version_exception(monkeypatch):
         tag, url = await m._fetch_latest_version()
     assert tag is None
     assert url is None
+
+
+# ---------------------------------------------------------------------------
+# PBS status endpoint
+# ---------------------------------------------------------------------------
+
+
+def test_pbs_status_not_configured_returns_empty(client):
+    response = client.get("/api/integration/pbs/status")
+    assert response.status_code == 200
+    assert response.text.strip() == ""
+
+
+def test_pbs_status_success(client, data_dir, config_file):
+    from app.config_manager import save_pbs_config
+    from app.credentials import save_integration_credentials
+
+    save_pbs_config(url="https://pbs.test:8007", verify_ssl=False)
+    save_integration_credentials("proxmox_backup", token_id="root@pam!pbs", secret="abc")
+
+    import httpx
+    mock_resp = MagicMock(spec=httpx.Response)
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = {"data": {"version": "3.1.0"}}
+    mock_resp.raise_for_status = MagicMock()
+
+    with patch("httpx.AsyncClient.get", new=AsyncMock(return_value=mock_resp)):
+        response = client.get("/api/integration/pbs/status")
+    assert response.status_code == 200
+
+
+def test_pbs_status_failure_returns_error_card(client, data_dir, config_file):
+    from app.config_manager import save_pbs_config
+    from app.credentials import save_integration_credentials
+
+    save_pbs_config(url="https://pbs.test:8007", verify_ssl=False)
+    save_integration_credentials("proxmox_backup", token_id="root@pam!pbs", secret="abc")
+
+    import httpx
+    with patch("httpx.AsyncClient.get", new=AsyncMock(side_effect=httpx.ConnectError("refused"))):
+        response = client.get("/api/integration/pbs/status")
+    assert response.status_code == 200
+
+
+# ---------------------------------------------------------------------------
+# Proxmox API host check (proxmox_node only, no vmid)
+# ---------------------------------------------------------------------------
+
+
+def test_host_check_proxmox_node_returns_status(client, data_dir, config_file):
+    import yaml
+
+    raw = yaml.safe_load(config_file.read_text())
+    raw["hosts"][0]["proxmox_node"] = "pve"
+    config_file.write_text(yaml.dump(raw))
+
+    from app.auth_router import save_proxmox_config
+    from app.credentials import save_integration_credentials
+
+    save_proxmox_config(url="https://192.168.1.10:8006", verify_ssl=False)
+    save_integration_credentials("proxmox", token_id="root@pam!tok", secret="abc")
+
+    packages = [{"name": "curl", "current": "7.81", "available": "7.90"}]
+    with patch(
+        "app.proxmox_client.ProxmoxClient.get_node_updates",
+        new=AsyncMock(return_value=packages),
+    ):
+        response = client.get("/api/host/test-host/check")
+    assert response.status_code == 200
+
+
+# ---------------------------------------------------------------------------
+# Proxmox LXC host check (proxmox_node + proxmox_vmid)
+# ---------------------------------------------------------------------------
+
+
+def test_host_check_proxmox_lxc_returns_status(client, data_dir, config_file):
+    import yaml
+
+    raw = yaml.safe_load(config_file.read_text())
+    raw["hosts"][0]["proxmox_node"] = "pve"
+    raw["hosts"][0]["proxmox_vmid"] = 101
+    config_file.write_text(yaml.dump(raw))
+
+    from app.auth_router import save_proxmox_config
+    from app.credentials import save_integration_credentials
+
+    save_proxmox_config(url="https://192.168.1.10:8006", verify_ssl=False)
+    save_integration_credentials(
+        "proxmox", token_id="root@pam!tok", secret="abc",
+        ssh_user="root", ssh_key="", ssh_password="secret",
+    )
+
+    packages = [{"name": "vim", "current": "9.0", "available": "9.1"}]
+    with patch(
+        "app.proxmox_client.ProxmoxClient.get_lxc_updates",
+        new=AsyncMock(return_value=packages),
+    ):
+        response = client.get("/api/host/test-host/check")
+    assert response.status_code == 200

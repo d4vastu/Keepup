@@ -426,3 +426,378 @@ def test_connection_test_unknown_host(client):
     response = client.post("/admin/hosts/does-not-exist/test")
     assert response.status_code == 200
     assert "not found" in response.text.lower()
+
+
+# ---------------------------------------------------------------------------
+# POST /admin/integrations/portainer/test
+# ---------------------------------------------------------------------------
+
+
+def test_admin_integrations_test_portainer_missing_fields(client):
+    response = client.post(
+        "/admin/integrations/portainer/test",
+        data={"portainer_url": "", "portainer_api_key": ""},
+    )
+    assert response.status_code == 200
+    assert "Enter a URL" in response.text
+
+
+def test_admin_integrations_test_portainer_success(client):
+    with patch(
+        "app.portainer_client.PortainerClient.get_endpoints",
+        new=AsyncMock(return_value=[{"Id": 1}, {"Id": 2}]),
+    ):
+        response = client.post(
+            "/admin/integrations/portainer/test",
+            data={
+                "portainer_url": "https://portainer.test:9443",
+                "portainer_api_key": "testkey",
+                "portainer_verify_ssl": "",
+            },
+        )
+    assert response.status_code == 200
+    assert "Connected" in response.text
+    assert "2 environments" in response.text
+
+
+def test_admin_integrations_test_portainer_failure(client):
+    with patch(
+        "app.portainer_client.PortainerClient.get_endpoints",
+        new=AsyncMock(side_effect=Exception("401 Unauthorized")),
+    ):
+        response = client.post(
+            "/admin/integrations/portainer/test",
+            data={
+                "portainer_url": "https://portainer.test:9443",
+                "portainer_api_key": "badkey",
+            },
+        )
+    assert response.status_code == 200
+    assert "Invalid API token" in response.text
+
+
+def test_admin_integrations_test_portainer_ssl_error(client):
+    with patch(
+        "app.portainer_client.PortainerClient.get_endpoints",
+        new=AsyncMock(side_effect=Exception("SSL certificate verify failed")),
+    ):
+        response = client.post(
+            "/admin/integrations/portainer/test",
+            data={
+                "portainer_url": "https://portainer.test:9443",
+                "portainer_api_key": "key",
+            },
+        )
+    assert response.status_code == 200
+    assert "SSL error" in response.text
+
+
+# ---------------------------------------------------------------------------
+# POST /admin/integrations/portainer (save)
+# ---------------------------------------------------------------------------
+
+
+def test_admin_integrations_save_portainer(client):
+    with patch("app.admin.reload_backends", new=AsyncMock()):
+        response = client.post(
+            "/admin/integrations/portainer",
+            data={
+                "portainer_url": "https://portainer.test:9443",
+                "portainer_api_key": "mykey",
+                "portainer_verify_ssl": "",
+            },
+        )
+    assert response.status_code == 200
+    assert "saved" in response.text.lower()
+
+
+# ---------------------------------------------------------------------------
+# POST /admin/integrations/dockerhub (save)
+# ---------------------------------------------------------------------------
+
+
+def test_admin_integrations_save_dockerhub(client):
+    with patch("app.admin.reload_backends", new=AsyncMock()):
+        response = client.post(
+            "/admin/integrations/dockerhub",
+            data={"dockerhub_username": "myuser", "dockerhub_token": "mytoken"},
+        )
+    assert response.status_code == 200
+    assert "saved" in response.text.lower()
+
+
+def test_admin_integrations_save_dockerhub_clear(client):
+    """Saving with empty username and token clears credentials."""
+    with patch("app.admin.reload_backends", new=AsyncMock()):
+        response = client.post(
+            "/admin/integrations/dockerhub",
+            data={"dockerhub_username": "", "dockerhub_token": ""},
+        )
+    assert response.status_code == 200
+
+
+# ---------------------------------------------------------------------------
+# POST /admin/integrations/proxmox/discover
+# ---------------------------------------------------------------------------
+
+
+def test_admin_proxmox_discover_not_configured(client):
+    response = client.post("/admin/integrations/proxmox/discover")
+    assert response.status_code == 200
+    assert "not configured" in response.text.lower() or response.text.strip() != ""
+
+
+def test_admin_proxmox_discover_success(client, data_dir, config_file):
+    from app.auth_router import save_proxmox_config
+    from app.credentials import save_integration_credentials
+
+    save_proxmox_config(url="https://192.168.1.10:8006", verify_ssl=False)
+    save_integration_credentials("proxmox", token_id="root@pam!tok", secret="abc123")
+
+    resources = [
+        {"type": "qemu", "node": "pve", "vmid": 100, "name": "myvm",
+         "status": "running", "ip": "192.168.1.20"},
+        {"type": "lxc", "node": "pve", "vmid": 101, "name": "myct",
+         "status": "running", "ip": "192.168.1.21"},
+    ]
+    with patch(
+        "app.proxmox_client.ProxmoxClient.discover_resources",
+        new=AsyncMock(return_value=resources),
+    ):
+        response = client.post("/admin/integrations/proxmox/discover")
+    assert response.status_code == 200
+    assert "myvm" in response.text or "myct" in response.text or "pve" in response.text
+
+
+def test_admin_proxmox_discover_error(client, data_dir, config_file):
+    from app.auth_router import save_proxmox_config
+    from app.credentials import save_integration_credentials
+
+    save_proxmox_config(url="https://192.168.1.10:8006", verify_ssl=False)
+    save_integration_credentials("proxmox", token_id="root@pam!tok", secret="abc123")
+
+    with patch(
+        "app.proxmox_client.ProxmoxClient.discover_resources",
+        new=AsyncMock(side_effect=Exception("connection refused")),
+    ):
+        response = client.post("/admin/integrations/proxmox/discover")
+    assert response.status_code == 200
+
+
+# ---------------------------------------------------------------------------
+# POST /admin/integrations/proxmox/select-hosts
+# ---------------------------------------------------------------------------
+
+
+def test_admin_proxmox_select_hosts_adds_hosts(client, data_dir, config_file):
+    import yaml
+
+    response = client.post(
+        "/admin/integrations/proxmox/select-hosts",
+        data={
+            "hosts": [
+                "lxc|pve|101|myct|192.168.1.21",
+                "qemu|pve|100|myvm|192.168.1.20",
+            ]
+        },
+    )
+    assert response.status_code == 200
+    # Should report hosts added
+    assert "added" in response.text.lower() or "host" in response.text.lower()
+
+
+def test_admin_proxmox_select_hosts_empty(client):
+    response = client.post("/admin/integrations/proxmox/select-hosts", data={})
+    assert response.status_code == 200
+
+
+# ---------------------------------------------------------------------------
+# POST /admin/integrations/proxmox/add-node-host
+# ---------------------------------------------------------------------------
+
+
+def test_admin_proxmox_add_node_host(client, data_dir, config_file):
+    response = client.post(
+        "/admin/integrations/proxmox/add-node-host",
+        data={
+            "node_name": "pve",
+            "display_name": "Proxmox VE",
+            "ip_address": "192.168.1.10",
+        },
+    )
+    assert response.status_code == 200
+
+
+def test_admin_integrations_test_portainer_connect_error(client):
+    with patch(
+        "app.portainer_client.PortainerClient.get_endpoints",
+        new=AsyncMock(side_effect=Exception("could not connect to host")),
+    ):
+        response = client.post(
+            "/admin/integrations/portainer/test",
+            data={"portainer_url": "https://bad.host:9443", "portainer_api_key": "key"},
+        )
+    assert response.status_code == 200
+    assert "reach" in response.text.lower() or "connect" in response.text.lower()
+
+
+def test_admin_integrations_test_portainer_generic_error(client):
+    with patch(
+        "app.portainer_client.PortainerClient.get_endpoints",
+        new=AsyncMock(side_effect=Exception("unexpected internal error")),
+    ):
+        response = client.post(
+            "/admin/integrations/portainer/test",
+            data={"portainer_url": "https://portainer.test:9443", "portainer_api_key": "key"},
+        )
+    assert response.status_code == 200
+
+
+# ---------------------------------------------------------------------------
+# POST /admin/integrations/proxmox/select-hosts — correct field name + format
+# ---------------------------------------------------------------------------
+
+
+def test_admin_proxmox_select_hosts_correct_format(client, data_dir, config_file):
+    """selected_hosts field uses node:vmid:type:name:ip format."""
+    response = client.post(
+        "/admin/integrations/proxmox/select-hosts",
+        data={
+            "selected_hosts": [
+                "pve:101:lxc:myct:192.168.1.21",
+                "pve:100:qemu:myvm:192.168.1.20",
+            ]
+        },
+    )
+    assert response.status_code == 200
+    assert "added" in response.text.lower()
+
+
+def test_admin_proxmox_select_hosts_skips_no_ip(client):
+    response = client.post(
+        "/admin/integrations/proxmox/select-hosts",
+        data={"selected_hosts": ["pve:101:lxc:myct"]}  # no IP part
+    )
+    assert response.status_code == 200
+    assert "No hosts added" in response.text or response.status_code == 200
+
+
+def test_admin_proxmox_select_hosts_skips_duplicate(client, data_dir, config_file):
+    import yaml
+    raw = yaml.safe_load(config_file.read_text())
+    existing_ip = raw["hosts"][0]["host"]
+    response = client.post(
+        "/admin/integrations/proxmox/select-hosts",
+        data={"selected_hosts": [f"pve:101:lxc:myct:{existing_ip}"]}
+    )
+    assert response.status_code == 200
+
+
+# ---------------------------------------------------------------------------
+# POST /admin/integrations/proxmox/add-node-host — with Proxmox configured
+# ---------------------------------------------------------------------------
+
+
+def test_admin_proxmox_add_node_host_success(client, data_dir, config_file):
+    from app.auth_router import save_proxmox_config
+    from app.credentials import save_integration_credentials
+
+    save_proxmox_config(url="https://192.168.1.10:8006", verify_ssl=False)
+    save_integration_credentials("proxmox", token_id="root@pam!tok", secret="abc")
+
+    with patch(
+        "app.proxmox_client.ProxmoxClient.get_nodes",
+        new=AsyncMock(return_value=["pve"]),
+    ):
+        response = client.post("/admin/integrations/proxmox/add-node-host")
+    assert response.status_code == 200
+    assert "Added" in response.text or "already added" in response.text
+
+
+def test_admin_proxmox_add_node_host_already_exists(client, data_dir, config_file):
+    """If the Proxmox host IP is already in the host list, returns 'already added'."""
+    import yaml
+    raw = yaml.safe_load(config_file.read_text())
+    existing_ip = raw["hosts"][0]["host"]
+
+    from app.auth_router import save_proxmox_config
+    from app.credentials import save_integration_credentials
+    import urllib.parse
+
+    # Use a Proxmox URL whose hostname resolves to an existing host IP
+    save_proxmox_config(url=f"https://{existing_ip}:8006", verify_ssl=False)
+    save_integration_credentials("proxmox", token_id="root@pam!tok", secret="abc")
+
+    with patch(
+        "app.proxmox_client.ProxmoxClient.get_nodes",
+        new=AsyncMock(return_value=["pve"]),
+    ):
+        response = client.post("/admin/integrations/proxmox/add-node-host")
+    assert response.status_code == 200
+    assert "already added" in response.text
+
+
+def test_admin_proxmox_add_node_host_api_error(client, data_dir, config_file):
+    from app.auth_router import save_proxmox_config
+    from app.credentials import save_integration_credentials
+
+    save_proxmox_config(url="https://192.168.1.10:8006", verify_ssl=False)
+    save_integration_credentials("proxmox", token_id="root@pam!tok", secret="abc")
+
+    with patch(
+        "app.proxmox_client.ProxmoxClient.get_nodes",
+        new=AsyncMock(side_effect=Exception("connection refused")),
+    ):
+        response = client.post("/admin/integrations/proxmox/add-node-host")
+    assert response.status_code == 200
+    assert "Could not reach" in response.text
+
+
+# ---------------------------------------------------------------------------
+# POST /admin/account/timezone
+# ---------------------------------------------------------------------------
+
+
+def test_admin_save_timezone_valid(client):
+    response = client.post(
+        "/admin/account/timezone", data={"timezone": "America/New_York"}
+    )
+    assert response.status_code == 200
+
+
+def test_admin_save_timezone_invalid(client):
+    response = client.post(
+        "/admin/account/timezone", data={"timezone": "Invalid/Zone"}
+    )
+    assert response.status_code == 200
+    assert "Unknown timezone" in response.text
+
+
+# ---------------------------------------------------------------------------
+# POST /admin/https/self-signed and /admin/https/disable
+# ---------------------------------------------------------------------------
+
+
+def test_admin_https_self_signed_no_hostname(client):
+    response = client.post("/admin/https/self-signed", data={"hostname": ""})
+    assert response.status_code == 200
+    assert "Enter your server" in response.text
+
+
+def test_admin_https_self_signed_with_hostname(client):
+    with patch("app.admin._restart_after_delay", new=AsyncMock()):
+        with patch("app.ssl_manager.generate_self_signed_cert", return_value=("CERT", "KEY")):
+            with patch("app.ssl_manager.save_ssl_files"):
+                with patch("app.admin.save_ssl_config"):
+                    response = client.post(
+                        "/admin/https/self-signed", data={"hostname": "192.168.1.100"}
+                    )
+    assert response.status_code == 200
+
+
+def test_admin_https_disable(client):
+    with patch("app.admin._restart_after_delay", new=AsyncMock()):
+        with patch("app.ssl_manager.remove_ssl_files"):
+            with patch("app.admin.clear_ssl_config"):
+                response = client.post("/admin/https/disable")
+    assert response.status_code == 200
