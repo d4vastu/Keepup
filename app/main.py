@@ -225,6 +225,21 @@ async def _job_run_host_update(job_id: str, host: dict, creds: dict) -> None:
         _jobs[job_id]["done"] = True
 
 
+async def _job_run_proxmox_node_upgrade(job_id: str, node: str) -> None:
+    try:
+        client = await _proxmox_client_from_config()
+        lines = await client.upgrade_node(node)
+        _jobs[job_id]["lines"] = lines
+        _jobs[job_id]["status"] = "done"
+        log.info("Proxmox node upgrade complete: %s", node)
+    except Exception as exc:
+        _jobs[job_id]["status"] = "error"
+        _jobs[job_id]["error"] = str(exc)
+        log.error("Proxmox node upgrade failed on %s: %s", node, exc)
+    finally:
+        _jobs[job_id]["done"] = True
+
+
 async def _job_run_host_restart(job_id: str, host: dict, creds: dict) -> None:
     try:
         lines = await reboot_host(host, get_ssh_config(), creds)
@@ -477,6 +492,26 @@ async def host_update(
         host = _get_host(slug)
         host_name = host.get("name", slug)
         log.info("Running OS upgrade on %s (%s)", host_name, slug)
+
+        proxmox_node = host.get("proxmox_node")
+        proxmox_vmid = host.get("proxmox_vmid")
+        if proxmox_node and proxmox_vmid is None:
+            job_id = uuid.uuid4().hex[:8]
+            _jobs[job_id] = {
+                "done": False,
+                "status": "running",
+                "error": None,
+                "lines": [],
+                "type": "os_upgrade",
+                "label": host_name,
+                "sub": proxmox_node,
+            }
+            background_tasks.add_task(_job_run_proxmox_node_upgrade, job_id, proxmox_node)
+            return templates.TemplateResponse(
+                "partials/job_poll.html",
+                {"request": request, "job_id": job_id, "job": _jobs[job_id]},
+            )
+
         creds = get_credentials(slug)
 
         if _needs_sudo(host, get_ssh_config()):

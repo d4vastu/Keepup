@@ -317,6 +317,67 @@ async def test_get_lxc_updates_no_packages(mock_client):
 
 
 # ---------------------------------------------------------------------------
+# upgrade_node
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_upgrade_node_returns_log_lines(mock_client):
+    """upgrade_node posts upgrade task, polls until stopped, returns log lines."""
+    upid = "UPID:pve:00001234:00000001:65000000:aptupgrade:pve:root@pam:"
+
+    post_resp = _make_response(upid)
+    status_resp = _make_response({"status": "stopped", "exitstatus": "OK"})
+    log_resp = _make_response([{"t": "Reading package lists..."}, {"t": "Done."}])
+
+    async def fake_post(path, **kwargs):
+        return post_resp
+
+    async def fake_get(path, **kwargs):
+        if "status" in path:
+            return status_resp
+        if "log" in path:
+            return log_resp
+        return _make_response({})
+
+    with patch("httpx.AsyncClient.post", new_callable=AsyncMock, side_effect=fake_post), \
+         patch("httpx.AsyncClient.get", new_callable=AsyncMock, side_effect=fake_get), \
+         patch("asyncio.sleep", new_callable=AsyncMock):
+        result = await mock_client.upgrade_node("pve")
+
+    assert result == ["Reading package lists...", "Done."]
+
+
+@pytest.mark.asyncio
+async def test_upgrade_node_raises_when_no_upid(mock_client):
+    """upgrade_node raises RuntimeError when the API returns no task ID."""
+    post_resp = _make_response(None)
+
+    with patch("httpx.AsyncClient.post", new_callable=AsyncMock, return_value=post_resp):
+        with pytest.raises(RuntimeError, match="did not return a task ID"):
+            await mock_client.upgrade_node("pve")
+
+
+@pytest.mark.asyncio
+async def test_upgrade_node_logs_non_ok_exit_status(mock_client, caplog):
+    """upgrade_node warns but does not raise when exitstatus is not OK."""
+    import logging
+    upid = "UPID:pve:abc"
+    post_resp = _make_response(upid)
+    status_resp = _make_response({"status": "stopped", "exitstatus": "1"})
+    log_resp = _make_response([{"t": "error line"}])
+
+    with patch("httpx.AsyncClient.post", new_callable=AsyncMock, return_value=post_resp), \
+         patch("httpx.AsyncClient.get", new_callable=AsyncMock, side_effect=[status_resp, log_resp]), \
+         patch("asyncio.sleep", new_callable=AsyncMock), \
+         caplog.at_level(logging.WARNING, logger="app.proxmox_client"):
+        result = await mock_client.upgrade_node("pve")
+
+    assert "error line" in result
+    assert any("1" in r.message for r in caplog.records)
+
+
+# ---------------------------------------------------------------------------
 # _get_lxc_ip / _get_vm_ip (called during discover_resources)
 # ---------------------------------------------------------------------------
 

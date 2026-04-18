@@ -4,7 +4,9 @@
     <span class="w-1.5 h-1.5 rounded-full bg-current flex-shrink-0"></span>
     {{ packages | length }} update{{ 's' if packages | length != 1 }}
   </span>
-
+  {% if proxmox_node %}
+  <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium bg-orange-950/50 text-orange-400 border border-orange-900/40">Proxmox · {{ proxmox_node }}</span>
+  {% endif %}
 </div>
 <div class="mt-1.5 text-[11px] text-slate-500 max-h-20 overflow-y-auto space-y-0.5">
   {% for pkg in packages %}
@@ -12,11 +14,7 @@
   {% endfor %}
 </div>
 <div class="mt-2 flex flex-wrap gap-2">
-  {% if proxmox_node %}
-  <a href="{{ proxmox_url }}" target="_blank" rel="noopener"
-    class="text-[12px] font-medium px-3 py-1 rounded-md border border-slate-700 text-slate-400 hover:bg-slate-800 transition-colors">
-    Upgrade via Proxmox UI ↗
-  </a>
+  {% if false %}{# placeholder — both node and SSH now use the same button #}
   {% else %}
   <button
     hx-post="/api/host/{{ slug }}/update"
@@ -44,7 +42,9 @@
     <span class="w-1.5 h-1.5 rounded-full bg-current flex-shrink-0"></span>
     Up to date
   </span>
-
+  {% if proxmox_node %}
+  <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium bg-orange-950/50 text-orange-400 border border-orange-900/40">Proxmox · {{ proxmox_node }}</span>
+  {% endif %}
 </div>
 {% if reboot_required %}
 <div class="mt-2 flex flex-wrap items-center gap-2">

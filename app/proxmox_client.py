@@ -143,6 +143,37 @@ class ProxmoxClient:
             log.info("Proxmox: node %s — up to date", node)
         return packages
 
+    async def upgrade_node(self, node: str) -> list[str]:
+        """Run apt upgrade on a Proxmox node via the API. Returns log lines."""
+        import asyncio
+
+        log.info("Proxmox: starting apt upgrade on node %s", node)
+        async with self._client() as c:
+            r = await c.post(f"/api2/json/nodes/{node}/apt/upgrade")
+            r.raise_for_status()
+            upid = r.json().get("data", "")
+            if not upid:
+                raise RuntimeError("Proxmox API did not return a task ID for upgrade.")
+            log.info("Proxmox: upgrade task %s started on node %s", upid, node)
+
+            for _ in range(120):
+                await asyncio.sleep(3)
+                status_r = await c.get(f"/api2/json/nodes/{node}/tasks/{upid}/status")
+                status_r.raise_for_status()
+                status = status_r.json().get("data", {})
+                if status.get("status") == "stopped":
+                    exit_status = status.get("exitstatus", "")
+                    if exit_status != "OK":
+                        log.warning("Proxmox: upgrade task exited with %s", exit_status)
+                    break
+
+            log_r = await c.get(f"/api2/json/nodes/{node}/tasks/{upid}/log", params={"limit": 500})
+            log_r.raise_for_status()
+            lines = [entry.get("t", "") for entry in log_r.json().get("data", [])]
+
+        log.info("Proxmox: upgrade complete on node %s", node)
+        return lines
+
     async def get_nodes(self) -> list[str]:
         """Return names of all online nodes."""
         async with self._client() as c:
