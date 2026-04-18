@@ -240,6 +240,30 @@ async def _job_run_proxmox_node_upgrade(job_id: str, node: str) -> None:
         _jobs[job_id]["done"] = True
 
 
+async def _job_run_lxc_upgrade(
+    job_id: str, node: str, vmid: int, ssh_host: str
+) -> None:
+    try:
+        client = await _proxmox_client_from_config()
+        px_creds = get_integration_credentials("proxmox")
+        ssh_creds = {
+            "user": px_creds.get("ssh_user", "root"),
+            "port": px_creds.get("ssh_port", 22),
+            "key_path": px_creds.get("ssh_key_path", ""),
+            "ssh_password": px_creds.get("ssh_password", ""),
+        }
+        lines = await client.upgrade_lxc(node, vmid, ssh_host, get_ssh_config(), ssh_creds)
+        _jobs[job_id]["lines"] = lines
+        _jobs[job_id]["status"] = "done"
+        log.info("LXC upgrade complete: %s/%s", node, vmid)
+    except Exception as exc:
+        _jobs[job_id]["status"] = "error"
+        _jobs[job_id]["error"] = str(exc)
+        log.error("LXC upgrade failed on %s/%s: %s", node, vmid, exc)
+    finally:
+        _jobs[job_id]["done"] = True
+
+
 async def _job_run_host_restart(job_id: str, host: dict, creds: dict) -> None:
     try:
         lines = await reboot_host(host, get_ssh_config(), creds)
@@ -507,6 +531,28 @@ async def host_update(
                 "sub": proxmox_node,
             }
             background_tasks.add_task(_job_run_proxmox_node_upgrade, job_id, proxmox_node)
+            return templates.TemplateResponse(
+                "partials/job_poll.html",
+                {"request": request, "job_id": job_id, "job": _jobs[job_id]},
+            )
+
+        if proxmox_node and proxmox_vmid is not None:
+            proxmox_url = get_proxmox_config().get("url", "")
+            import urllib.parse as _up
+            ssh_host = _up.urlparse(proxmox_url).hostname or host.get("host", "")
+            job_id = uuid.uuid4().hex[:8]
+            _jobs[job_id] = {
+                "done": False,
+                "status": "running",
+                "error": None,
+                "lines": [],
+                "type": "os_upgrade",
+                "label": host_name,
+                "sub": f"{proxmox_node}/{proxmox_vmid}",
+            }
+            background_tasks.add_task(
+                _job_run_lxc_upgrade, job_id, proxmox_node, proxmox_vmid, ssh_host
+            )
             return templates.TemplateResponse(
                 "partials/job_poll.html",
                 {"request": request, "job_id": job_id, "job": _jobs[job_id]},

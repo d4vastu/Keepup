@@ -711,3 +711,89 @@ def test_host_update_proxmox_node_job_completes(client):
         response = client.post("/api/host/pve-node/update")
 
     assert response.status_code == 200
+
+
+# ---------------------------------------------------------------------------
+# _job_run_lxc_upgrade
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_job_run_lxc_upgrade_success(config_file, data_dir):
+    import app.main as m
+
+    job_id = "lxcjob1"
+    m._jobs[job_id] = {"done": False, "status": "running", "error": None, "lines": []}
+
+    mock_client = AsyncMock()
+    mock_client.upgrade_lxc = AsyncMock(return_value=["5 upgraded", "done"])
+
+    with (
+        patch("app.main._proxmox_client_from_config", new=AsyncMock(return_value=mock_client)),
+        patch("app.main.get_integration_credentials", return_value={"ssh_key_path": "/root/.ssh/id_rsa"}),
+        patch("app.main.get_proxmox_config", return_value={"url": "https://192.168.1.10:8006"}),
+    ):
+        await m._job_run_lxc_upgrade(job_id, "pve", 101, "192.168.1.10")
+
+    assert m._jobs[job_id]["done"] is True
+    assert m._jobs[job_id]["status"] == "done"
+    assert "5 upgraded" in m._jobs[job_id]["lines"]
+
+
+@pytest.mark.asyncio
+async def test_job_run_lxc_upgrade_failure(config_file, data_dir):
+    import app.main as m
+
+    job_id = "lxcjob2"
+    m._jobs[job_id] = {"done": False, "status": "running", "error": None, "lines": []}
+
+    with patch(
+        "app.main._proxmox_client_from_config",
+        new=AsyncMock(side_effect=Exception("pct exec failed")),
+    ):
+        await m._job_run_lxc_upgrade(job_id, "pve", 101, "192.168.1.10")
+
+    assert m._jobs[job_id]["done"] is True
+    assert m._jobs[job_id]["status"] == "error"
+    assert "pct exec failed" in m._jobs[job_id]["error"]
+
+
+# ---------------------------------------------------------------------------
+# POST /api/host/{slug}/update — LXC path
+# ---------------------------------------------------------------------------
+
+
+def test_host_update_lxc_dispatches_job(client):
+    """LXC host (proxmox_node + proxmox_vmid set) → job_poll returned."""
+    import app.main as m
+
+    lxc_host = {"name": "My LXC", "host": "10.0.0.6", "proxmox_node": "pve", "proxmox_vmid": 101}
+
+    with (
+        patch("app.main._get_host", return_value=lxc_host),
+        patch("app.main._job_run_lxc_upgrade", new=AsyncMock(return_value=None)),
+        patch("app.main.get_proxmox_config", return_value={"url": "https://192.168.1.10:8006"}),
+    ):
+        response = client.post("/api/host/my-lxc/update")
+
+    assert response.status_code == 200
+    assert "sudo" not in response.text.lower()
+    assert any(j.get("sub") == "pve/101" for j in m._jobs.values())
+
+
+def test_host_update_lxc_job_completes(client):
+    """LXC upgrade end-to-end with mocked ProxmoxClient."""
+    mock_client = AsyncMock()
+    mock_client.upgrade_lxc = AsyncMock(return_value=["5 upgraded"])
+
+    lxc_host = {"name": "My LXC", "host": "10.0.0.6", "proxmox_node": "pve", "proxmox_vmid": 101}
+
+    with (
+        patch("app.main._get_host", return_value=lxc_host),
+        patch("app.main._proxmox_client_from_config", new=AsyncMock(return_value=mock_client)),
+        patch("app.main.get_integration_credentials", return_value={"ssh_key_path": "/root/.ssh/id_rsa"}),
+        patch("app.main.get_proxmox_config", return_value={"url": "https://192.168.1.10:8006"}),
+    ):
+        response = client.post("/api/host/my-lxc/update")
+
+    assert response.status_code == 200

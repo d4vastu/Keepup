@@ -378,6 +378,67 @@ async def test_upgrade_node_logs_non_ok_exit_status(mock_client, caplog):
 
 
 # ---------------------------------------------------------------------------
+# upgrade_lxc
+# ---------------------------------------------------------------------------
+
+
+def _make_run_result(stdout: str):
+    r = MagicMock()
+    r.stdout = stdout
+    return r
+
+
+@pytest.mark.asyncio
+async def test_upgrade_lxc_returns_output_lines(mock_client):
+    """upgrade_lxc SSHs to the node, runs pct exec apt-get upgrade, returns lines."""
+    run_result = _make_run_result("Reading package lists...\n5 upgraded\n")
+
+    mock_conn = MagicMock()
+    mock_conn.__aenter__ = AsyncMock(return_value=mock_conn)
+    mock_conn.__aexit__ = AsyncMock(return_value=False)
+
+    with (
+        patch("app.ssh_client._connect", new=AsyncMock(return_value=mock_conn)),
+        patch("app.ssh_client._run", new=AsyncMock(return_value=run_result)),
+    ):
+        result = await mock_client.upgrade_lxc(
+            "pve", 101, "192.168.1.10",
+            {},
+            {"key_path": "/root/.ssh/id_rsa"},
+        )
+
+    assert "5 upgraded" in result
+    assert "Reading package lists..." in result
+
+
+@pytest.mark.asyncio
+async def test_upgrade_lxc_raises_without_credentials(mock_client):
+    """upgrade_lxc raises RuntimeError when no SSH credentials supplied."""
+    with pytest.raises(RuntimeError, match="No SSH credentials"):
+        await mock_client.upgrade_lxc("pve", 101, "192.168.1.10", {}, {})
+
+
+@pytest.mark.asyncio
+async def test_upgrade_lxc_filters_blank_lines(mock_client):
+    """upgrade_lxc strips blank lines from output."""
+    run_result = _make_run_result("line1\n\n   \nline2\n")
+
+    mock_conn = AsyncMock()
+    mock_conn.__aenter__ = AsyncMock(return_value=mock_conn)
+    mock_conn.__aexit__ = AsyncMock(return_value=False)
+
+    with (
+        patch("app.ssh_client._connect", new=AsyncMock(return_value=mock_conn)),
+        patch("app.ssh_client._run", new=AsyncMock(return_value=run_result)),
+    ):
+        result = await mock_client.upgrade_lxc(
+            "pve", 101, "192.168.1.10", {}, {"key_path": "/root/.ssh/id_rsa"}
+        )
+
+    assert result == ["line1", "line2"]
+
+
+# ---------------------------------------------------------------------------
 # _get_lxc_ip / _get_vm_ip (called during discover_resources)
 # ---------------------------------------------------------------------------
 
