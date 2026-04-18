@@ -155,13 +155,17 @@ async def check_host_updates(
     use_sudo = _needs_sudo(host, ssh_cfg)
     sudo_password = creds.get("sudo_password")
 
+    check_timeout = ssh_cfg.get("check_timeout", 60)
     async with await _connect(host, ssh_cfg, creds) as conn:
-        pm = await _detect_pm(conn, sudo_password, use_sudo)
+        pm = await asyncio.wait_for(
+            _detect_pm(conn, sudo_password, use_sudo), timeout=check_timeout
+        )
         result = await _run(
             conn,
             pm.list_cmd(),
             sudo_password=sudo_password,
             needs_sudo=use_sudo,
+            timeout=check_timeout,
         )
 
     packages, reboot_required = pm.parse(result.stdout)
