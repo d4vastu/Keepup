@@ -143,6 +143,33 @@ class ProxmoxClient:
             log.info("Proxmox: node %s — up to date", node)
         return packages
 
+    async def upgrade_lxc(
+        self, node: str, vmid: int, ssh_host: str, ssh_cfg: dict, ssh_creds: dict
+    ) -> list[str]:
+        """Run apt-get upgrade inside an LXC container via pct exec over SSH."""
+        from .ssh_client import _connect, _run
+
+        log.info("Proxmox: pct exec upgrade on %s/%s via %s", node, vmid, ssh_host)
+
+        if not ssh_creds.get("key_path") and not ssh_creds.get("ssh_password"):
+            raise RuntimeError(
+                "No SSH credentials configured for Proxmox host. "
+                "Set SSH user and key/password in Admin → Integrations → Proxmox VE."
+            )
+
+        host_entry = {
+            "host": ssh_host,
+            "user": ssh_creds.get("user", "root"),
+            "port": ssh_creds.get("port", 22),
+        }
+        cmd = f"pct exec {vmid} -- apt-get upgrade -y 2>&1"
+        async with await _connect(host_entry, ssh_cfg, ssh_creds) as conn:
+            result = await _run(conn, cmd, sudo_password=None, needs_sudo=False, timeout=300)
+
+        lines = [l for l in result.stdout.splitlines() if l.strip()]
+        log.info("Proxmox: upgrade complete on %s/%s — %d line(s)", node, vmid, len(lines))
+        return lines
+
     async def upgrade_node(self, node: str) -> list[str]:
         """Run apt upgrade on a Proxmox node via the API. Returns log lines."""
         import asyncio
