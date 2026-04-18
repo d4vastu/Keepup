@@ -135,6 +135,8 @@ class SSHDockerBackend:
             )
             containers = _parse_json_output(ps_result.stdout)
 
+            # First pass: collect qualifying containers and unique images
+            raw: list[tuple[str, str, str]] = []  # (container_name, image, project)
             for c in containers:
                 labels = _parse_docker_ps_labels(c.get("Labels", "") or "")
                 project = labels.get("com.docker.compose.project", "")
@@ -150,9 +152,21 @@ class SSHDockerBackend:
                     if not project or project not in allowed_projects:
                         continue
 
-                status = await self._check_image_status(conn, image, dockerhub_creds)
-                images = [{"name": image, "status": status}]
+                raw.append((container_name, image, project))
 
+            # Check all unique images concurrently (deduplicates registry lookups)
+            unique_images = list({image for _, image, _ in raw})
+            statuses = await asyncio.gather(
+                *[self._check_image_status(conn, img, dockerhub_creds) for img in unique_images],
+                return_exceptions=True,
+            )
+            image_status: dict[str, str] = {
+                img: (s if isinstance(s, str) else "unknown")
+                for img, s in zip(unique_images, statuses)
+            }
+
+            for container_name, image, project in raw:
+                status = image_status.get(image, "unknown")
                 if project:
                     ref = self._make_compose_ref(slug, project, container_name)
                 else:
@@ -165,7 +179,7 @@ class SSHDockerBackend:
                         "endpoint_id": slug,
                         "endpoint_name": host["name"],
                         "update_status": status,
-                        "images": images,
+                        "images": [{"name": image, "status": status}],
                         "update_path": f"{self.BACKEND_KEY}/{ref}",
                         "_compose_project": project,
                     }
