@@ -50,7 +50,9 @@ from .config_manager import (
     save_timezone,
     save_update_check_schedule,
     save_wizard_container_selection,
+    set_docker_monitoring,
     set_host_auto_update,
+    slugify,
 )
 from .credentials import (
     delete_credentials,
@@ -637,6 +639,7 @@ async def setup_proxmox_save_lxcs(
     save_integration_credentials("proxmox", **cred_kwargs)
 
     existing = {h["host"] for h in get_hosts()}
+    added_lxcs: list[dict] = []
     for entry in selected:
         parts = entry.split(":", 3)
         if len(parts) < 3:
@@ -647,15 +650,49 @@ async def setup_proxmox_save_lxcs(
             continue
         vmid = int(vmid_str) if vmid_str.isdigit() else None
         if vmid is not None:
-            add_host(name=name, host=ip, user=None, port=None, proxmox_node=node, proxmox_vmid=vmid, docker_mode="all")
+            add_host(name=name, host=ip, user=None, port=None, proxmox_node=node, proxmox_vmid=vmid)
             existing.add(ip)
+            added_lxcs.append({"name": name, "slug": slugify(name)})
 
     resources = request.session.get("setup_proxmox_resources", [])
+    if added_lxcs:
+        return _proxmox_docker_step(request, added_lxcs, resources)
     return _proxmox_vm_step(request, resources)
 
 
 @router.post("/setup/connect/proxmox/skip-lxcs", response_class=HTMLResponse)
 async def setup_proxmox_skip_lxcs(request: Request) -> HTMLResponse:
+    resources = request.session.get("setup_proxmox_resources", [])
+    return _proxmox_vm_step(request, resources)
+
+
+def _proxmox_docker_step(
+    request: Request, lxcs: list[dict], resources: list[dict]
+) -> HTMLResponse:
+    request.session["setup_proxmox_docker_lxcs"] = lxcs
+    return templates.TemplateResponse(
+        "partials/setup_proxmox_section.html",
+        {
+            "request": request,
+            "proxmox_connected": True,
+            "proxmox_step": "docker",
+            "proxmox_lxcs": lxcs,
+        },
+    )
+
+
+@router.post("/setup/connect/proxmox/save-docker", response_class=HTMLResponse)
+async def setup_proxmox_save_docker(request: Request) -> HTMLResponse:
+    form = await request.form()
+    selected_slugs = form.getlist("docker_lxcs")
+    for slug in selected_slugs:
+        set_docker_monitoring(slug=slug, mode="all")
+    resources = request.session.get("setup_proxmox_resources", [])
+    return _proxmox_vm_step(request, resources)
+
+
+@router.post("/setup/connect/proxmox/skip-docker", response_class=HTMLResponse)
+async def setup_proxmox_skip_docker(request: Request) -> HTMLResponse:
     resources = request.session.get("setup_proxmox_resources", [])
     return _proxmox_vm_step(request, resources)
 
