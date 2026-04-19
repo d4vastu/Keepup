@@ -574,3 +574,96 @@ def test_homeassistant_test_generic_failure(setup_client, data_dir):
         )
     assert response.status_code == 200
     assert "&#10007;" in response.text
+
+
+# ---------------------------------------------------------------------------
+# POST /setup/connect/proxmox/generate-ssh-key
+# ---------------------------------------------------------------------------
+
+
+def test_generate_ssh_key_creates_file(setup_client, data_dir, tmp_path, monkeypatch):
+    _create_admin()
+    keys_dir = tmp_path / "keys"
+    keys_dir.mkdir()
+    monkeypatch.setattr("app.auth_router.Path", lambda p: keys_dir / "keepup_proxmox_ed25519" if "keepup" in str(p) else __import__("pathlib").Path(p))
+
+    import app.auth_router as ar
+    real_path = __import__("pathlib").Path
+
+    def patched_path(p):
+        s = str(p)
+        if s == "/app/keys/keepup_proxmox_ed25519":
+            return keys_dir / "keepup_proxmox_ed25519"
+        return real_path(p)
+
+    monkeypatch.setattr(ar, "Path", patched_path)
+
+    response = setup_client.post("/setup/connect/proxmox/generate-ssh-key")
+    assert response.status_code == 200
+    assert (keys_dir / "keepup_proxmox_ed25519").exists()
+
+
+def test_generate_ssh_key_idempotent(setup_client, data_dir, tmp_path, monkeypatch):
+    _create_admin()
+    keys_dir = tmp_path / "keys"
+    keys_dir.mkdir()
+
+    import app.auth_router as ar
+    real_path = __import__("pathlib").Path
+
+    def patched_path(p):
+        if str(p) == "/app/keys/keepup_proxmox_ed25519":
+            return keys_dir / "keepup_proxmox_ed25519"
+        return real_path(p)
+
+    monkeypatch.setattr(ar, "Path", patched_path)
+
+    r1 = setup_client.post("/setup/connect/proxmox/generate-ssh-key")
+    r2 = setup_client.post("/setup/connect/proxmox/generate-ssh-key")
+    assert r1.status_code == 200
+    assert r2.status_code == 200
+    # Both responses should contain the same public key
+    assert "ssh-ed25519" in r1.text
+    assert r1.text == r2.text
+
+
+def test_generate_ssh_key_private_not_in_response(setup_client, data_dir, tmp_path, monkeypatch):
+    _create_admin()
+    keys_dir = tmp_path / "keys"
+    keys_dir.mkdir()
+
+    import app.auth_router as ar
+    real_path = __import__("pathlib").Path
+
+    def patched_path(p):
+        if str(p) == "/app/keys/keepup_proxmox_ed25519":
+            return keys_dir / "keepup_proxmox_ed25519"
+        return real_path(p)
+
+    monkeypatch.setattr(ar, "Path", patched_path)
+
+    response = setup_client.post("/setup/connect/proxmox/generate-ssh-key")
+    assert response.status_code == 200
+    assert "PRIVATE" not in response.text
+    assert "BEGIN OPENSSH" not in response.text
+
+
+def test_generate_ssh_key_public_key_valid_format(setup_client, data_dir, tmp_path, monkeypatch):
+    _create_admin()
+    keys_dir = tmp_path / "keys"
+    keys_dir.mkdir()
+
+    import app.auth_router as ar
+    real_path = __import__("pathlib").Path
+
+    def patched_path(p):
+        if str(p) == "/app/keys/keepup_proxmox_ed25519":
+            return keys_dir / "keepup_proxmox_ed25519"
+        return real_path(p)
+
+    monkeypatch.setattr(ar, "Path", patched_path)
+
+    response = setup_client.post("/setup/connect/proxmox/generate-ssh-key")
+    assert response.status_code == 200
+    assert "ssh-ed25519" in response.text
+    assert "authorized_keys" in response.text
