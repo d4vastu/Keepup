@@ -177,6 +177,33 @@ def _get_host(slug: str) -> dict:
     raise KeyError(f"Host {slug!r} not in config")
 
 
+def _group_hosts(hosts: list[dict]) -> tuple[list[dict], list[dict]]:
+    """Return (proxmox_groups, standalone_hosts).
+
+    Each group: {name, node_host, lxcs, vms} where node_host may be None
+    if the node itself isn't monitored.
+    """
+    nodes: dict[str, dict] = {}
+    standalone: list[dict] = []
+    for h in hosts:
+        node = h.get("proxmox_node")
+        if not node:
+            standalone.append(h)
+            continue
+        if node not in nodes:
+            nodes[node] = {"name": node, "node_host": None, "lxcs": [], "vms": []}
+        vmid = h.get("proxmox_vmid")
+        if vmid is None:
+            nodes[node]["node_host"] = h
+        else:
+            ptype = h.get("proxmox_type") or "lxc"
+            if ptype == "vm":
+                nodes[node]["vms"].append(h)
+            else:
+                nodes[node]["lxcs"].append(h)
+    return list(nodes.values()), standalone
+
+
 _jobs: dict[str, dict] = {}
 
 
@@ -321,11 +348,14 @@ async def main_home(request: Request) -> HTMLResponse:
     )
     latest_tag, latest_url = await _get_latest_version()
     show_update = _newer_version(latest_tag)
+    host_groups, standalone_hosts = _group_hosts(hosts)
     return templates.TemplateResponse(
         "index.html",
         {
             "request": request,
             "hosts": hosts,
+            "host_groups": host_groups,
+            "standalone_hosts": standalone_hosts,
             "docker_configured": docker_configured,
             "pbs_configured": pbs_configured,
             "app_version": APP_VERSION,

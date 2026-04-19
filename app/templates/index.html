@@ -135,7 +135,88 @@
           <span class="text-[11px] font-medium text-slate-600 uppercase tracking-widest text-right">Action</span>
         </div>
 
-        {% for host in hosts %}
+        {% if not hosts %}
+        <div class="px-4 py-8 text-sm text-slate-500 text-center">No hosts configured. <a href="/admin" class="text-blue-400 hover:underline">Add one in Admin →</a></div>
+        {% endif %}
+
+        {# Proxmox groups #}
+        {% for group in host_groups %}
+        <div class="flex items-center gap-2 px-4 py-2 bg-[#0d1117] border-b border-[#21262d]">
+          <span class="text-orange-500" style="font-size:11px">◈</span>
+          <span class="text-[11px] font-medium text-orange-400 tracking-wide">Proxmox VE {{ group.name }}</span>
+        </div>
+
+        {% if group.node_host %}
+        {% set host = group.node_host %}
+        <div class="border-b border-[#21262d] px-4 py-3 grid grid-cols-1 sm:grid-cols-[1fr_1fr_160px] gap-2 sm:gap-3 items-start sm:items-center hover:bg-white/[0.02] transition-colors">
+          <div>
+            <div class="text-[13px] font-medium text-slate-100">{{ host.name }}</div>
+            <div class="text-[11px] text-slate-500 font-mono mt-0.5">{{ host.host }}</div>
+            <span class="inline-flex items-center mt-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-orange-950/50 text-orange-400 border border-orange-900/40">Node</span>
+          </div>
+          <div id="host-{{ host.slug }}-status"
+            data-check
+            hx-get="/api/host/{{ host.slug }}/check"
+            hx-trigger="load, check"
+            hx-swap="innerHTML"
+            hx-indicator="#host-{{ host.slug }}-spinner">
+            <span class="text-[12px] text-slate-500 animate-pulse">Checking…</span>
+          </div>
+          <div id="host-{{ host.slug }}-action" class="sm:text-right"></div>
+          <span id="host-{{ host.slug }}-spinner" class="spinner text-[11px] text-slate-600">Refreshing…</span>
+        </div>
+        {% endif %}
+
+        {% for host in group.lxcs %}
+        <div class="border-b border-[#21262d] px-4 py-3 grid grid-cols-1 sm:grid-cols-[1fr_1fr_160px] gap-2 sm:gap-3 items-start sm:items-center hover:bg-white/[0.02] transition-colors">
+          <div>
+            <div class="text-[13px] font-medium text-slate-100">{{ host.name }}</div>
+            <div class="text-[11px] text-slate-500 font-mono mt-0.5">{{ host.host }}</div>
+            <span class="inline-flex items-center mt-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-orange-950/50 text-orange-400 border border-orange-900/40">LXC {{ host.proxmox_vmid }}</span>
+          </div>
+          <div id="host-{{ host.slug }}-status"
+            data-check
+            hx-get="/api/host/{{ host.slug }}/check"
+            hx-trigger="load, check"
+            hx-swap="innerHTML"
+            hx-indicator="#host-{{ host.slug }}-spinner">
+            <span class="text-[12px] text-slate-500 animate-pulse">Checking…</span>
+          </div>
+          <div id="host-{{ host.slug }}-action" class="sm:text-right"></div>
+          <span id="host-{{ host.slug }}-spinner" class="spinner text-[11px] text-slate-600">Refreshing…</span>
+        </div>
+        {% endfor %}
+
+        {% for host in group.vms %}
+        <div class="border-b border-[#21262d] px-4 py-3 grid grid-cols-1 sm:grid-cols-[1fr_1fr_160px] gap-2 sm:gap-3 items-start sm:items-center hover:bg-white/[0.02] transition-colors">
+          <div>
+            <div class="text-[13px] font-medium text-slate-100">{{ host.name }}</div>
+            <div class="text-[11px] text-slate-500 font-mono mt-0.5">{{ host.host }}</div>
+            <span class="inline-flex items-center mt-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-orange-950/50 text-orange-400 border border-orange-900/40">VM {{ host.proxmox_vmid }}</span>
+          </div>
+          <div id="host-{{ host.slug }}-status"
+            data-check
+            hx-get="/api/host/{{ host.slug }}/check"
+            hx-trigger="load, check"
+            hx-swap="innerHTML"
+            hx-indicator="#host-{{ host.slug }}-spinner">
+            <span class="text-[12px] text-slate-500 animate-pulse">Checking…</span>
+          </div>
+          <div id="host-{{ host.slug }}-action" class="sm:text-right"></div>
+          <span id="host-{{ host.slug }}-spinner" class="spinner text-[11px] text-slate-600">Refreshing…</span>
+        </div>
+        {% endfor %}
+
+        {% endfor %}
+
+        {# Standalone hosts — section divider only shown when Proxmox groups also exist #}
+        {% if standalone_hosts and host_groups %}
+        <div class="px-4 py-2 bg-[#0d1117] border-b border-[#21262d]">
+          <span class="text-[11px] font-medium text-slate-500 uppercase tracking-widest">Standalone hosts</span>
+        </div>
+        {% endif %}
+
+        {% for host in standalone_hosts %}
         <div class="border-b border-[#21262d] last:border-0 px-4 py-3 grid grid-cols-1 sm:grid-cols-[1fr_1fr_160px] gap-2 sm:gap-3 items-start sm:items-center hover:bg-white/[0.02] transition-colors">
           <div>
             <div class="text-[13px] font-medium text-slate-100">{{ host.name }}</div>
@@ -152,9 +233,8 @@
           <div id="host-{{ host.slug }}-action" class="sm:text-right"></div>
           <span id="host-{{ host.slug }}-spinner" class="spinner text-[11px] text-slate-600">Refreshing…</span>
         </div>
-        {% else %}
-        <div class="px-4 py-8 text-sm text-slate-500 text-center">No hosts configured. <a href="/admin" class="text-blue-400 hover:underline">Add one in Admin →</a></div>
         {% endfor %}
+
       </div>
     </section>
 

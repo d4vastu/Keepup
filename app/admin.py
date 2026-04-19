@@ -317,10 +317,16 @@ async def admin_proxmox_select_hosts(request: Request) -> HTMLResponse:
                 name=name, host=ip, user=None, port=None,
                 proxmox_node=node,
                 proxmox_vmid=vmid,
+                proxmox_type="lxc",
             )
             lxc_added.append(name)
         else:
-            add_host(name=name, host=ip, user=None, port=None)
+            add_host(
+                name=name, host=ip, user=None, port=None,
+                proxmox_node=node,
+                proxmox_vmid=vmid,
+                proxmox_type="vm",
+            )
             vm_added.append(name)
         existing.add(ip)
 
