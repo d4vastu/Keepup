@@ -32,7 +32,10 @@ class SSHDockerBackend:
     BACKEND_KEY = "ssh"
 
     def _docker_hosts(self) -> list[dict]:
-        return [h for h in get_hosts() if h.get("docker_mode")]
+        return [
+            h for h in get_hosts()
+            if h.get("docker_mode") and not (h.get("proxmox_node") and not h.get("proxmox_vmid"))
+        ]
 
     def _make_compose_ref(self, slug: str, project: str, container: str) -> str:
         return f"{slug}/{quote(project, safe='')}:{quote(container, safe='')}"

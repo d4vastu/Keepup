@@ -1,0 +1,41 @@
+{% for stack in stacks %}
+{% set action_id = stack.update_path | replace('/', '-') | replace(':', '-') %}
+<div class="border-b border-[#21262d] px-4 py-3 grid grid-cols-1 sm:grid-cols-[1fr_1fr_160px] gap-2 sm:gap-3 items-start sm:items-center hover:bg-white/[0.02] transition-colors">
+  <div>
+    <div class="text-[13px] font-medium text-slate-100">{{ stack.name }}</div>
+    {% if stack.images %}
+    <div class="text-[11px] text-slate-500 font-mono mt-0.5">{{ stack.images[0].name }}</div>
+    {% endif %}
+    <span class="inline-flex items-center mt-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-blue-950/50 text-blue-400 border border-blue-900/40">Docker</span>
+  </div>
+  <div>
+    {% if stack.update_status == "update_available" or stack.update_status == "mixed" %}
+    <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[12px] font-medium bg-amber-900/40 text-amber-400 border border-amber-800/50">
+      <span class="w-1.5 h-1.5 rounded-full bg-current flex-shrink-0"></span>
+      {% if stack.update_status == "mixed" %}Partial update{% else %}Update available{% endif %}
+    </span>
+    {% elif stack.update_status == "up_to_date" %}
+    <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[12px] font-medium bg-green-900/40 text-green-400 border border-green-800/50">
+      <span class="w-1.5 h-1.5 rounded-full bg-current flex-shrink-0"></span>
+      Up to date
+    </span>
+    {% else %}
+    <span class="text-[12px] text-slate-500">Unknown</span>
+    {% endif %}
+  </div>
+  <div class="sm:text-right">
+    {% if stack.update_status in ("update_available", "mixed") %}
+    <div id="stack-{{ action_id }}-action">
+      <button
+        hx-post="/api/docker/stack/{{ stack.update_path }}/update"
+        hx-target="#stack-{{ action_id }}-action"
+        hx-swap="innerHTML"
+        hx-confirm="Pull and redeploy '{{ stack.name }}'?"
+        class="text-[12px] font-medium px-3 py-1 rounded-md border border-[#2ea043] text-green-400 hover:bg-green-900/20 transition-colors">
+        Redeploy
+      </button>
+    </div>
+    {% endif %}
+  </div>
+</div>
+{% endfor %}

@@ -343,3 +343,167 @@ def test_home_shows_standalone_divider_when_mixed(client, config_file):
 def test_home_no_standalone_divider_when_only_standalone(client):
     response = client.get("/home")
     assert "Standalone hosts" not in response.text
+
+
+# ---------------------------------------------------------------------------
+# Node Docker monitoring (OP#82)
+# ---------------------------------------------------------------------------
+
+
+def test_home_shows_docker_section_for_node_with_docker_mode(client, config_file):
+    """Node host with docker_mode gets an inline Docker HTMX section."""
+    import yaml
+
+    cfg = yaml.safe_load(config_file.read_text())
+    cfg["hosts"].append({
+        "name": "Proxmox VE (pve)",
+        "host": "10.0.0.1",
+        "proxmox_node": "pve",
+        "docker_mode": "all",
+    })
+    config_file.write_text(yaml.dump(cfg))
+
+    response = client.get("/home")
+    assert response.status_code == 200
+    assert "/api/host/proxmox-ve-(pve)/docker" in response.text
+
+
+def test_home_no_docker_section_for_node_without_docker_mode(client, config_file):
+    """Node host without docker_mode does not render an inline Docker section."""
+    import yaml
+
+    cfg = yaml.safe_load(config_file.read_text())
+    cfg["hosts"].append({
+        "name": "Proxmox VE (pve)",
+        "host": "10.0.0.1",
+        "proxmox_node": "pve",
+    })
+    config_file.write_text(yaml.dump(cfg))
+
+    response = client.get("/home")
+    assert response.status_code == 200
+    assert "/api/host/proxmox-ve-(pve)/docker" not in response.text
+
+
+def test_host_docker_no_docker_mode_returns_empty(client, config_file):
+    """Host without docker_mode returns empty response from /api/host/{slug}/docker."""
+    response = client.get("/api/host/test-host/docker")
+    assert response.status_code == 200
+    assert response.text == ""
+
+
+def test_host_docker_returns_container_rows(client, config_file):
+    """Node host with docker_mode and containers returns Docker badge rows."""
+    import yaml
+    from unittest.mock import AsyncMock, patch
+
+    cfg = yaml.safe_load(config_file.read_text())
+    cfg["hosts"].append({
+        "name": "PVE Node",
+        "host": "10.0.0.1",
+        "proxmox_node": "pve",
+        "docker_mode": "all",
+    })
+    config_file.write_text(yaml.dump(cfg))
+
+    mock_stacks = [
+        {
+            "id": "pve-node/myapp:myapp",
+            "name": "myapp",
+            "endpoint_id": "pve-node",
+            "endpoint_name": "PVE Node",
+            "update_status": "up_to_date",
+            "images": [{"name": "nginx:latest", "status": "up_to_date"}],
+            "update_path": "ssh/pve-node/myapp:myapp",
+            "_compose_project": "myapp",
+        }
+    ]
+
+    with patch(
+        "app.backends.ssh_docker_backend.SSHDockerBackend._containers_for_host",
+        new=AsyncMock(return_value=mock_stacks),
+    ):
+        response = client.get("/api/host/pve-node/docker")
+
+    assert response.status_code == 200
+    assert "myapp" in response.text
+    assert "Docker" in response.text
+    assert "Up to date" in response.text
+
+
+def test_host_docker_update_available_shows_redeploy(client, config_file):
+    """Container with update_available shows Redeploy button."""
+    import yaml
+    from unittest.mock import AsyncMock, patch
+
+    cfg = yaml.safe_load(config_file.read_text())
+    cfg["hosts"].append({
+        "name": "PVE Node",
+        "host": "10.0.0.1",
+        "proxmox_node": "pve",
+        "docker_mode": "all",
+    })
+    config_file.write_text(yaml.dump(cfg))
+
+    mock_stacks = [
+        {
+            "id": "pve-node/myapp:myapp",
+            "name": "myapp",
+            "endpoint_id": "pve-node",
+            "endpoint_name": "PVE Node",
+            "update_status": "update_available",
+            "images": [{"name": "nginx:latest", "status": "update_available"}],
+            "update_path": "ssh/pve-node/myapp:myapp",
+            "_compose_project": "myapp",
+        }
+    ]
+
+    with patch(
+        "app.backends.ssh_docker_backend.SSHDockerBackend._containers_for_host",
+        new=AsyncMock(return_value=mock_stacks),
+    ):
+        response = client.get("/api/host/pve-node/docker")
+
+    assert "Update available" in response.text
+    assert "Redeploy" in response.text
+
+
+def test_ssh_docker_backend_excludes_proxmox_nodes(monkeypatch, config_file):
+    """SSHDockerBackend._docker_hosts() does not include Proxmox node hosts."""
+    import yaml
+    import app.config_manager as cm
+
+    cfg = yaml.safe_load(config_file.read_text())
+    cfg["hosts"] = [
+        {"name": "Plain Host", "host": "1.2.3.4", "docker_mode": "all"},
+        {"name": "PVE Node", "host": "10.0.0.1", "proxmox_node": "pve", "docker_mode": "all"},
+        {"name": "LXC 101", "host": "10.0.0.2", "proxmox_node": "pve", "proxmox_vmid": 101, "docker_mode": "all"},
+    ]
+    config_file.write_text(yaml.dump(cfg))
+
+    from app.backends.ssh_docker_backend import SSHDockerBackend
+
+    backend = SSHDockerBackend()
+    docker_hosts = backend._docker_hosts()
+    names = [h["name"] for h in docker_hosts]
+
+    assert "Plain Host" in names
+    assert "LXC 101" in names
+    assert "PVE Node" not in names
+
+
+def test_home_node_with_docker_not_in_global_containers(client, config_file):
+    """Node host with docker_mode doesn't make docker_configured True for global section."""
+    import yaml
+
+    cfg = yaml.safe_load(config_file.read_text())
+    # Remove portainer env, ensure only node Docker exists
+    cfg["hosts"] = [
+        {"name": "PVE Node", "host": "10.0.0.1", "proxmox_node": "pve", "docker_mode": "all"},
+    ]
+    config_file.write_text(yaml.dump(cfg))
+
+    response = client.get("/home")
+    assert response.status_code == 200
+    # Global Containers section should NOT appear (no portainer, no non-node docker hosts)
+    assert 'id="docker-status"' not in response.text

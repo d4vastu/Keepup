@@ -338,8 +338,10 @@ async def home(request: Request) -> HTMLResponse:
 async def main_home(request: Request) -> HTMLResponse:
     hosts = get_hosts()
     backends = get_backends()
+    # Node hosts with docker_mode show inline — exclude from global Containers section
     docker_configured = any(b.BACKEND_KEY == "portainer" for b in backends) or any(
-        h.get("docker_mode") for h in hosts
+        h.get("docker_mode") and not (h.get("proxmox_node") and not h.get("proxmox_vmid"))
+        for h in hosts
     )
     pbs_creds = get_integration_credentials("proxmox_backup")
     pbs_cfg = get_pbs_config()
@@ -349,6 +351,11 @@ async def main_home(request: Request) -> HTMLResponse:
     latest_tag, latest_url = await _get_latest_version()
     show_update = _newer_version(latest_tag)
     host_groups, standalone_hosts = _group_hosts(hosts)
+    node_docker_slugs = [
+        g["node_host"]["slug"]
+        for g in host_groups
+        if g.get("node_host") and g["node_host"].get("docker_mode")
+    ]
     return templates.TemplateResponse(
         "index.html",
         {
@@ -356,6 +363,7 @@ async def main_home(request: Request) -> HTMLResponse:
             "hosts": hosts,
             "host_groups": host_groups,
             "standalone_hosts": standalone_hosts,
+            "node_docker_slugs": node_docker_slugs,
             "docker_configured": docker_configured,
             "pbs_configured": pbs_configured,
             "app_version": APP_VERSION,
@@ -368,6 +376,29 @@ async def main_home(request: Request) -> HTMLResponse:
 @app.get("/dashboard", response_class=HTMLResponse)
 async def dashboard_redirect(request: Request) -> HTMLResponse:
     return RedirectResponse("/home", status_code=301)
+
+
+@app.get("/api/host/{slug}/docker", response_class=HTMLResponse)
+async def host_docker(request: Request, slug: str) -> HTMLResponse:
+    """Return inline Docker container rows for a Proxmox node host."""
+    try:
+        host = _get_host(slug)
+        if not host.get("docker_mode"):
+            return HTMLResponse("")
+        from .backends.ssh_docker_backend import SSHDockerBackend
+
+        backend = SSHDockerBackend()
+        stacks = await backend._containers_for_host(host, get_ssh_config(), get_dockerhub_creds())
+        return templates.TemplateResponse(
+            "partials/node_docker_status.html",
+            {"request": request, "stacks": stacks, "slug": slug},
+        )
+    except Exception as exc:
+        log.exception("host_docker failed for %s: %s", slug, exc)
+        return templates.TemplateResponse(
+            "partials/error.html",
+            {"request": request, "message": str(exc)},
+        )
 
 
 @app.get("/api/integration/pbs/status", response_class=HTMLResponse)

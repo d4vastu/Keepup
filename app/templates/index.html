@@ -165,6 +165,16 @@
           <div id="host-{{ host.slug }}-action" class="sm:text-right"></div>
           <span id="host-{{ host.slug }}-spinner" class="spinner text-[11px] text-slate-600">Refreshing…</span>
         </div>
+        {% if host.docker_mode %}
+        <div id="node-{{ host.slug }}-docker"
+          data-check
+          hx-get="/api/host/{{ host.slug }}/docker"
+          hx-trigger="load, check"
+          hx-swap="innerHTML"
+          hx-indicator="#node-{{ host.slug }}-docker-spinner">
+        </div>
+        <span id="node-{{ host.slug }}-docker-spinner" class="spinner text-[11px] text-slate-600">Checking containers…</span>
+        {% endif %}
         {% endif %}
 
         {% for host in group.lxcs %}
@@ -303,9 +313,10 @@
 
   <script>
   const _hostSlugs = {{ hosts | map(attribute='slug') | list | tojson }};
+  const _nodeDockerSlugs = {{ node_docker_slugs | tojson }};
   const _dockerConfigured = {{ 'true' if docker_configured else 'false' }};
   const _checkedIds = new Set();
-  const _totalChecks = _hostSlugs.length + (_dockerConfigured ? 1 : 0);
+  const _totalChecks = _hostSlugs.length + (_dockerConfigured ? 1 : 0) + _nodeDockerSlugs.length;
 
   function resetBanner() {
     _checkedIds.clear();
@@ -323,7 +334,8 @@
     const id = e.detail.target.id;
     const isHost = _hostSlugs.some(s => `host-${s}-status` === id);
     const isDocker = id === 'docker-status';
-    if (isHost || isDocker) {
+    const isNodeDocker = _nodeDockerSlugs.some(s => `node-${s}-docker` === id);
+    if (isHost || isDocker || isNodeDocker) {
       _checkedIds.add(id);
       if (_checkedIds.size >= _totalChecks) updateBanner();
     }
@@ -343,6 +355,10 @@
       const el = document.getElementById('docker-status');
       if (el && el.querySelector('.text-amber-400')) containerUpdates = true;
     }
+    _nodeDockerSlugs.forEach(slug => {
+      const el = document.getElementById(`node-${slug}-docker`);
+      if (el && el.querySelector('.text-amber-400')) containerUpdates = true;
+    });
 
     const banner = document.getElementById('status-banner');
     const icon = document.getElementById('banner-icon');
