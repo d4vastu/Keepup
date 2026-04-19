@@ -9,7 +9,11 @@ _lock = threading.Lock()
 
 
 def slugify(name: str) -> str:
-    return name.lower().replace(" ", "-").replace("_", "-")
+    import re
+    slug = name.lower().replace(" ", "-").replace("_", "-")
+    slug = re.sub(r"[^a-z0-9-]", "", slug)
+    slug = re.sub(r"-+", "-", slug).strip("-")
+    return slug
 
 
 def load_config() -> dict:

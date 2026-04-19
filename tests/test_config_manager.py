@@ -28,6 +28,18 @@ def test_slugify_already_lower():
     assert slugify("pbs") == "pbs"
 
 
+def test_slugify_strips_parentheses():
+    assert slugify("Proxmox VE (pve)") == "proxmox-ve-pve"
+
+
+def test_slugify_strips_special_chars():
+    assert slugify("My Host!@#") == "my-host"
+
+
+def test_slugify_collapses_hyphens():
+    assert slugify("a--b") == "a-b"
+
+
 # ---------------------------------------------------------------------------
 # get_hosts
 # ---------------------------------------------------------------------------
