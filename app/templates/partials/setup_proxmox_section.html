@@ -13,37 +13,7 @@
 
   <div class="px-5 py-4 space-y-3">
 
-  {% if proxmox_step == 'node' %}
-  <!-- ── Step 2: Proxmox node ── -->
-  <p class="text-xs text-slate-400">Would you like to monitor OS updates on the Proxmox host itself?</p>
-  {% if proxmox_nodes %}
-  <div class="space-y-1">
-    {% for node in proxmox_nodes %}
-    <div class="flex items-center gap-2 px-3 py-2 rounded-lg bg-slate-700/40 text-sm text-slate-200">
-      <span class="text-slate-500">◈</span> {{ node }}
-      <span class="text-xs text-slate-500 ml-1">Proxmox node</span>
-    </div>
-    {% endfor %}
-  </div>
-  {% endif %}
-  <div class="flex gap-2">
-    <button
-      hx-post="/setup/connect/proxmox/add-node"
-      hx-target="#proxmox-section"
-      hx-swap="outerHTML"
-      class="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-sm font-medium text-white transition-colors">
-      Add Proxmox node to monitoring
-    </button>
-    <button
-      hx-post="/setup/connect/proxmox/skip-node"
-      hx-target="#proxmox-section"
-      hx-swap="outerHTML"
-      class="px-4 py-2 rounded-lg bg-slate-700 hover:bg-slate-600 text-sm font-medium text-slate-300 transition-colors">
-      Skip
-    </button>
-  </div>
-
-  {% elif proxmox_step == 'lxcs' %}
+  {% if proxmox_step == 'lxcs' %}
   <!-- ── Step 3: LXC containers ── -->
   {% set lxcs = proxmox_resources | selectattr('type', 'equalto', 'lxc') | list %}
   <p class="text-xs text-slate-400">Select the LXC containers you want Keepup to monitor.</p>
