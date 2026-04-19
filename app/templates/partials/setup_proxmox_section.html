@@ -92,13 +92,23 @@
     </div>
     <div id="proxmox-lxc-key-row">
       <label class="block text-xs font-medium text-slate-400 mb-1">Key file</label>
-      <select id="proxmox-lxc-ssh-key" name="proxmox_ssh_key"
-              class="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-blue-500">
-        <option value="">— select key —</option>
-        {% for k in available_keys %}
-        <option value="{{ k }}">{{ k }}</option>
-        {% endfor %}
-      </select>
+      <div class="flex gap-2">
+        <select id="proxmox-lxc-ssh-key" name="proxmox_ssh_key"
+                class="flex-1 bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-blue-500">
+          <option value="">— select key —</option>
+          {% for k in available_keys %}
+          <option value="{{ k }}"{% if k == 'keepup_proxmox_ed25519' %} selected{% endif %}>{{ k }}</option>
+          {% endfor %}
+        </select>
+        <button type="button"
+          hx-post="/setup/connect/proxmox/generate-ssh-key"
+          hx-target="#proxmox-keygen-result"
+          hx-swap="innerHTML"
+          class="px-3 py-2 rounded-lg bg-slate-600 hover:bg-slate-500 text-xs font-medium text-slate-200 transition-colors whitespace-nowrap">
+          Generate key pair
+        </button>
+      </div>
+      <div id="proxmox-keygen-result"></div>
     </div>
     <div id="proxmox-lxc-pass-row" class="hidden">
       <label class="block text-xs font-medium text-slate-400 mb-1">Password</label>

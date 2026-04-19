@@ -1,6 +1,7 @@
 import re
 import time
 from collections import defaultdict
+from pathlib import Path
 from zoneinfo import available_timezones
 
 import httpx
@@ -583,6 +584,57 @@ async def setup_proxmox_test_ssh(
         )
     return HTMLResponse(
         f'<span class="text-red-400 text-xs">&#10007; {result["message"]}</span>'
+    )
+
+
+@router.post("/setup/connect/proxmox/generate-ssh-key", response_class=HTMLResponse)
+async def setup_proxmox_generate_ssh_key() -> HTMLResponse:
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+    from cryptography.hazmat.primitives import serialization
+
+    key_path = Path("/app/keys/keepup_proxmox_ed25519")
+    key_path.parent.mkdir(parents=True, exist_ok=True)
+
+    if key_path.exists():
+        private_key = serialization.load_ssh_private_key(key_path.read_bytes(), password=None)
+    else:
+        private_key = Ed25519PrivateKey.generate()
+        pem = private_key.private_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PrivateFormat.OpenSSH,
+            encryption_algorithm=serialization.NoEncryption(),
+        )
+        key_path.write_bytes(pem)
+        key_path.chmod(0o600)
+
+    pub = private_key.public_key().public_bytes(
+        encoding=serialization.Encoding.OpenSSH,
+        format=serialization.PublicFormat.OpenSSH,
+    ).decode()
+
+    echo_cmd = f'echo "{pub}" >> ~/.ssh/authorized_keys'
+    return HTMLResponse(
+        f'<div class="mt-2 space-y-2">'
+        f'<p class="text-xs text-green-400">&#10003; Key pair generated &mdash; <code>keepup_proxmox_ed25519</code></p>'
+        f'<p class="text-xs text-slate-400">Run this on your Proxmox node to authorise Keepup:</p>'
+        f'<div class="relative">'
+        f'<textarea readonly rows="2" id="proxmox-keygen-cmd"'
+        f' class="w-full bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-xs text-slate-300 font-mono resize-none focus:outline-none"'
+        f'>{echo_cmd}</textarea>'
+        f'<button type="button"'
+        f' onclick="navigator.clipboard.writeText(document.getElementById(\'proxmox-keygen-cmd\').value)"'
+        f' class="absolute top-2 right-2 px-2 py-0.5 rounded bg-slate-600 hover:bg-slate-500 text-xs text-slate-300 transition-colors">'
+        f'Copy</button>'
+        f'</div>'
+        f'<script>'
+        f'(function(){{'
+        f'  var sel = document.getElementById("proxmox-lxc-ssh-key");'
+        f'  if (sel) {{ for (var i=0; i<sel.options.length; i++) {{'
+        f'    if (sel.options[i].value === "keepup_proxmox_ed25519") {{ sel.selectedIndex = i; break; }}'
+        f'  }} }}'
+        f'}})();'
+        f'</script>'
+        f'</div>'
     )
 
 
