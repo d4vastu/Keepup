@@ -3,12 +3,34 @@ import yaml
 from app.config_manager import (
     add_host,
     delete_host,
+    derive_api_user,
     get_hosts,
     get_ssh_config,
     slugify,
     update_host,
     update_ssh_config,
 )
+
+
+# ---------------------------------------------------------------------------
+# derive_api_user
+# ---------------------------------------------------------------------------
+
+
+def test_derive_api_user_standard():
+    assert derive_api_user("root@pam!mytoken") == "root@pam"
+
+
+def test_derive_api_user_custom_realm():
+    assert derive_api_user("keepup@pve!Keepup") == "keepup@pve"
+
+
+def test_derive_api_user_no_exclamation_returns_full():
+    assert derive_api_user("root@pam") == "root@pam"
+
+
+def test_derive_api_user_empty():
+    assert derive_api_user("") == ""
 
 
 # ---------------------------------------------------------------------------

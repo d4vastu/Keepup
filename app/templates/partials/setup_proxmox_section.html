@@ -256,12 +256,6 @@
       placeholder="https://192.168.1.10:8006"
       class="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-blue-500 placeholder:text-slate-500">
   </div>
-  <div>
-    <label class="block text-xs font-medium text-slate-400 mb-1">API user</label>
-    <input type="text" name="proxmox_api_user" placeholder="root@pam"
-      class="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-blue-500 placeholder:text-slate-500">
-    <p class="text-xs text-slate-500 mt-1">Datacenter → Permissions → Users</p>
-  </div>
   <div class="flex gap-3">
     <div class="flex-1">
       <label class="block text-xs font-medium text-slate-400 mb-1">Token ID</label>
@@ -283,14 +277,14 @@
   <div class="flex gap-2 items-center flex-wrap">
     <button
       hx-post="/setup/connect/proxmox/test"
-      hx-include="[name='proxmox_url'],[name='proxmox_api_user'],[name='proxmox_token_id'],[name='proxmox_secret'],[name='proxmox_verify_ssl']"
+      hx-include="[name='proxmox_url'],[name='proxmox_token_id'],[name='proxmox_secret'],[name='proxmox_verify_ssl']"
       hx-target="#proxmox-test-result"
       class="px-4 py-2 rounded-lg bg-slate-600 hover:bg-slate-500 text-sm font-medium text-slate-200 transition-colors">
       Test connection
     </button>
     <button
       hx-post="/setup/connect/proxmox/save"
-      hx-include="[name='proxmox_url'],[name='proxmox_api_user'],[name='proxmox_token_id'],[name='proxmox_secret'],[name='proxmox_verify_ssl']"
+      hx-include="[name='proxmox_url'],[name='proxmox_token_id'],[name='proxmox_secret'],[name='proxmox_verify_ssl']"
       hx-target="#proxmox-section"
       hx-swap="outerHTML"
       class="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-sm font-medium text-white transition-colors">
