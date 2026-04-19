@@ -395,7 +395,73 @@ def test_proxmox_save_lxcs(setup_client, data_dir):
     hosts = get_hosts()
     lxc = next((h for h in hosts if h.get("proxmox_vmid") == 100), None)
     assert lxc is not None
+    # docker_mode is not set at this stage — user is prompted next
+    assert lxc.get("docker_mode") is None
+
+
+def test_proxmox_save_lxcs_shows_docker_step(setup_client, data_dir):
+    """After saving LXCs, wizard shows Docker monitoring prompt."""
+    _create_admin()
+    response = setup_client.post(
+        "/setup/connect/proxmox/save-lxcs",
+        data={
+            "selected_lxcs": ["pve:100:debian:192.168.1.100"],
+            "proxmox_ssh_user": "root",
+            "proxmox_ssh_auth": "password",
+            "proxmox_ssh_password": "secret",
+        },
+    )
+    assert response.status_code == 200
+    assert "docker_lxcs" in response.text
+    assert "debian" in response.text
+    assert "Enable for all" in response.text
+
+
+def test_proxmox_save_docker_sets_monitoring(setup_client, data_dir, config_file):
+    """Saving docker selections sets docker_mode=all on chosen LXCs."""
+    import yaml
+    _create_admin()
+    # First add an LXC
+    setup_client.post(
+        "/setup/connect/proxmox/save-lxcs",
+        data={
+            "selected_lxcs": ["pve:100:debian:192.168.1.100"],
+            "proxmox_ssh_user": "root",
+            "proxmox_ssh_auth": "password",
+            "proxmox_ssh_password": "secret",
+        },
+    )
+    # Then submit docker selection
+    response = setup_client.post(
+        "/setup/connect/proxmox/save-docker",
+        data={"docker_lxcs": ["debian"]},
+    )
+    assert response.status_code == 200
+    raw = yaml.safe_load(config_file.read_text())
+    lxc = next((h for h in raw["hosts"] if h.get("proxmox_vmid") == 100), None)
+    assert lxc is not None
     assert lxc.get("docker_mode") == "all"
+
+
+def test_proxmox_skip_docker_sets_no_monitoring(setup_client, data_dir, config_file):
+    """Skipping docker step leaves docker_mode unset."""
+    import yaml
+    _create_admin()
+    setup_client.post(
+        "/setup/connect/proxmox/save-lxcs",
+        data={
+            "selected_lxcs": ["pve:100:debian:192.168.1.100"],
+            "proxmox_ssh_user": "root",
+            "proxmox_ssh_auth": "password",
+            "proxmox_ssh_password": "secret",
+        },
+    )
+    response = setup_client.post("/setup/connect/proxmox/skip-docker")
+    assert response.status_code == 200
+    raw = yaml.safe_load(config_file.read_text())
+    lxc = next((h for h in raw["hosts"] if h.get("proxmox_vmid") == 100), None)
+    assert lxc is not None
+    assert lxc.get("docker_mode") is None
 
 
 def test_proxmox_skip_lxcs(setup_client, data_dir):
