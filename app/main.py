@@ -3,8 +3,6 @@ import logging
 import os
 import time
 import uuid
-
-log = logging.getLogger(__name__)
 from pathlib import Path
 
 from fastapi import BackgroundTasks, FastAPI, Form, Request
@@ -31,6 +29,8 @@ from .ssh_client import (
 )
 from .__version__ import APP_VERSION
 from .templates_env import make_templates
+
+log = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # GitHub version check (cached 1 hour)

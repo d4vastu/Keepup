@@ -590,7 +590,6 @@ def test_admin_proxmox_discover_error(client, data_dir, config_file):
 
 
 def test_admin_proxmox_select_hosts_adds_hosts(client, data_dir, config_file):
-    import yaml
 
     response = client.post(
         "/admin/integrations/proxmox/select-hosts",
@@ -722,7 +721,6 @@ def test_admin_proxmox_add_node_host_already_exists(client, data_dir, config_fil
 
     from app.auth_router import save_proxmox_config
     from app.credentials import save_integration_credentials
-    import urllib.parse
 
     # Use a Proxmox URL whose hostname resolves to an existing host IP
     save_proxmox_config(url=f"https://{existing_ip}:8006", verify_ssl=False)

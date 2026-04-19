@@ -15,12 +15,12 @@ import logging
 import shlex
 from urllib.parse import quote, unquote
 
-log = logging.getLogger(__name__)
-
 from ..ssh_client import _connect
 from ..registry_client import check_image_update, extract_local_digest
 from ..credentials import get_credentials
 from ..config_manager import get_hosts, get_ssh_config
+
+log = logging.getLogger(__name__)
 
 # Ref formats (the slug-relative part after "{slug}/"):
 #   Compose container:  "{project}:{container_name}"   (colon separator)

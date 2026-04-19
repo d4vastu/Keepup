@@ -166,7 +166,7 @@ class ProxmoxClient:
         async with await _connect(host_entry, ssh_cfg, ssh_creds) as conn:
             result = await _run(conn, cmd, sudo_password=None, needs_sudo=False, timeout=300)
 
-        lines = [l for l in result.stdout.splitlines() if l.strip()]
+        lines = [ln for ln in result.stdout.splitlines() if ln.strip()]
         log.info("Proxmox: upgrade complete on %s/%s — %d line(s)", node, vmid, len(lines))
         return lines
 

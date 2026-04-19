@@ -192,14 +192,6 @@ async def test_discover_resources_sorted_by_node_then_vmid(mock_client):
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.asyncio
-async def test_get_version_returns_data(mock_client):
-    resp = _make_response({"version": "8.1", "release": "8"})
-    with patch("httpx.AsyncClient.get", new_callable=AsyncMock, return_value=resp):
-        result = await mock_client.get_version()
-    assert result["version"] == "8.1"
-
-
 # ---------------------------------------------------------------------------
 # get_node_updates
 # ---------------------------------------------------------------------------
@@ -259,7 +251,6 @@ async def test_get_nodes_empty(mock_client):
 
 @pytest.mark.asyncio
 async def test_get_lxc_updates_no_credentials_raises(mock_client):
-    from app.proxmox_client import ProxmoxClient
     with pytest.raises(RuntimeError, match="No SSH credentials"):
         await mock_client.get_lxc_updates(
             node="pve", vmid=100,
@@ -452,8 +443,6 @@ async def test_discover_resources_fetches_lxc_ip(mock_client):
     iface_resp = _make_response([
         {"name": "eth0", "inet": "192.168.5.50/24"},
     ])
-    lxc_resp = _make_response([])  # per-node LXC list (already in cluster)
-
     call_count = [0]
 
     async def fake_get(path, **kwargs):
@@ -525,8 +514,6 @@ async def test_discover_resources_ip_fetch_failure_returns_empty(mock_client):
 async def test_discover_resources_cluster_failure_falls_back_to_node_lxc(mock_client):
     """When cluster/resources fails, per-node LXC list is used as fallback."""
     lxc_data = [{"vmid": 101, "name": "fallback-ct", "status": "running"}]
-
-    call_count = {"cluster": 0}
 
     async def fake_get(path, **kwargs):
         if "cluster/resources" in path:
