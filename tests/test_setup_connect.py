@@ -206,23 +206,14 @@ def test_proxmox_discover_success(setup_client, data_dir):
 
     with patch("app.auth_router.ProxmoxClient") as MockClient:
         instance = AsyncMock()
-        instance.discover_resources = AsyncMock(
-            return_value=[
-                {
-                    "type": "qemu",
-                    "node": "pve",
-                    "vmid": 100,
-                    "name": "ubuntu",
-                    "status": "running",
-                    "ip": "",
-                },
-            ]
-        )
+        instance.get_nodes = AsyncMock(return_value=["pve"])
+        instance.discover_resources = AsyncMock(return_value=[])
         MockClient.return_value = instance
         response = setup_client.post("/setup/connect/proxmox/discover")
 
     assert response.status_code == 200
-    assert "ubuntu" in response.text
+    # Discover now returns the node step
+    assert "pve" in response.text or "Proxmox node" in response.text or "Add Proxmox node" in response.text
 
 
 def test_proxmox_discover_failure(setup_client, data_dir):
@@ -235,6 +226,7 @@ def test_proxmox_discover_failure(setup_client, data_dir):
 
     with patch("app.auth_router.ProxmoxClient") as MockClient:
         instance = AsyncMock()
+        instance.get_nodes = AsyncMock(side_effect=Exception("timeout"))
         instance.discover_resources = AsyncMock(side_effect=Exception("timeout"))
         MockClient.return_value = instance
         response = setup_client.post("/setup/connect/proxmox/discover")
@@ -244,27 +236,139 @@ def test_proxmox_discover_failure(setup_client, data_dir):
 
 
 # ---------------------------------------------------------------------------
-# POST /setup/connect/proxmox/select-hosts
+# New guided flow endpoints
 # ---------------------------------------------------------------------------
 
 
-def test_proxmox_select_hosts(setup_client, data_dir):
+def test_proxmox_add_node(setup_client, data_dir):
+    _create_admin()
+    from app.config_manager import save_proxmox_config
+    from app.credentials import save_integration_credentials
+
+    save_proxmox_config(url="https://192.168.1.10:8006", verify_ssl=False)
+    save_integration_credentials("proxmox", token_id="user@pam!token", secret="abc")
+
+    with patch("app.auth_router.ProxmoxClient") as MockClient:
+        instance = AsyncMock()
+        instance.get_nodes = AsyncMock(return_value=["pve"])
+        MockClient.return_value = instance
+        response = setup_client.post("/setup/connect/proxmox/add-node")
+
+    assert response.status_code == 200
+    # Proceeds to LXC step (or done if no resources in session)
+    assert "proxmox-section" in response.text
+
+
+def test_proxmox_skip_node(setup_client, data_dir):
+    _create_admin()
+    response = setup_client.post("/setup/connect/proxmox/skip-node")
+    assert response.status_code == 200
+    # No LXCs in session → skips to done or VMs
+    assert "proxmox-section" in response.text
+
+
+def test_proxmox_test_ssh_no_config(setup_client, data_dir):
     _create_admin()
     response = setup_client.post(
-        "/setup/connect/proxmox/select-hosts",
+        "/setup/connect/proxmox/test-ssh",
+        data={"proxmox_ssh_user": "root", "proxmox_ssh_auth": "key", "proxmox_ssh_key": ""},
+    )
+    assert response.status_code == 200
+    assert "not configured" in response.text.lower() or "select a key" in response.text.lower()
+
+
+def test_proxmox_test_ssh_success(setup_client, data_dir):
+    _create_admin()
+    from app.config_manager import save_proxmox_config
+
+    save_proxmox_config(url="https://192.168.1.10:8006", verify_ssl=False)
+
+    with patch("app.auth_router.verify_connection", new_callable=AsyncMock) as mock_vc:
+        mock_vc.return_value = {"ok": True, "message": ""}
+        response = setup_client.post(
+            "/setup/connect/proxmox/test-ssh",
+            data={"proxmox_ssh_user": "root", "proxmox_ssh_auth": "password", "proxmox_ssh_password": "secret"},
+        )
+    assert response.status_code == 200
+    assert "192.168.1.10" in response.text
+    assert "proxmoxSshTestPassed" in response.text
+
+
+def test_proxmox_test_ssh_failure(setup_client, data_dir):
+    _create_admin()
+    from app.config_manager import save_proxmox_config
+
+    save_proxmox_config(url="https://192.168.1.10:8006", verify_ssl=False)
+
+    with patch("app.auth_router.verify_connection", new_callable=AsyncMock) as mock_vc:
+        mock_vc.return_value = {"ok": False, "message": "Connection refused"}
+        response = setup_client.post(
+            "/setup/connect/proxmox/test-ssh",
+            data={"proxmox_ssh_user": "root", "proxmox_ssh_auth": "password", "proxmox_ssh_password": "secret"},
+        )
+    assert response.status_code == 200
+    assert "Connection refused" in response.text
+
+
+def test_proxmox_save_lxcs(setup_client, data_dir):
+    _create_admin()
+    response = setup_client.post(
+        "/setup/connect/proxmox/save-lxcs",
         data={
-            "selected_hosts": ["pve:100:vm:ubuntu-vm", "pve:101:lxc:debian-ct"],
+            "selected_lxcs": ["pve:100:debian:192.168.1.100"],
+            "proxmox_ssh_user": "root",
+            "proxmox_ssh_auth": "password",
+            "proxmox_ssh_password": "secret",
         },
     )
     assert response.status_code == 200
-    assert "2 hosts" in response.text or "queued" in response.text.lower()
+    from app.config_manager import get_hosts
+    assert any(h.get("proxmox_vmid") == 100 for h in get_hosts())
 
 
-def test_proxmox_select_hosts_empty(setup_client, data_dir):
+def test_proxmox_skip_lxcs(setup_client, data_dir):
     _create_admin()
-    response = setup_client.post("/setup/connect/proxmox/select-hosts", data={})
+    response = setup_client.post("/setup/connect/proxmox/skip-lxcs")
     assert response.status_code == 200
-    assert "0 hosts" in response.text or "queued" in response.text.lower()
+    assert "proxmox-section" in response.text
+
+
+def test_proxmox_save_vms_later(setup_client, data_dir):
+    _create_admin()
+    response = setup_client.post(
+        "/setup/connect/proxmox/save-vms",
+        data={
+            "selected_vms": ["pve:200:ubuntu-server"],
+            "vm_ip_200": "192.168.1.200",
+            "vm_action": "later",
+        },
+    )
+    assert response.status_code == 200
+    assert "done" in response.text or "complete" in response.text.lower() or "added" in response.text
+    from app.config_manager import get_hosts
+    assert any(h.get("host") == "192.168.1.200" for h in get_hosts())
+
+
+def test_proxmox_save_vms_now(setup_client, data_dir):
+    _create_admin()
+    with setup_client as c:
+        response = c.post(
+            "/setup/connect/proxmox/save-vms",
+            data={
+                "selected_vms": ["pve:201:media-server"],
+                "vm_ip_201": "192.168.1.201",
+                "vm_action": "now",
+            },
+        )
+    assert response.status_code == 200
+    assert "done" in response.text or "complete" in response.text.lower() or "added" in response.text
+
+
+def test_proxmox_skip_vms(setup_client, data_dir):
+    _create_admin()
+    response = setup_client.post("/setup/connect/proxmox/skip-vms")
+    assert response.status_code == 200
+    assert "complete" in response.text.lower() or "done" in response.text
 
 
 # ---------------------------------------------------------------------------

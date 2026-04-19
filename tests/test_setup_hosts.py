@@ -537,29 +537,15 @@ def test_setup_hosts_shows_queued_cards_when_pending(
 ):
     """GET /setup/hosts shows queued host cards when proxmox_pending is in session."""
     _create_admin()
-    # Inject queued hosts into session by using the select-hosts route
-    from unittest.mock import MagicMock, AsyncMock, patch
-
-    with patch("app.auth_router.ProxmoxClient") as MockClient:
-        mock_instance = MagicMock()
-        mock_instance.discover_resources = AsyncMock(
-            return_value=[
-                {
-                    "type": "vm",
-                    "node": "pve1",
-                    "vmid": 100,
-                    "name": "MyVM",
-                    "status": "running",
-                },
-            ]
-        )
-        MockClient.return_value = mock_instance
-        setup_client.post(
-            "/setup/connect/proxmox/select-hosts",
-            data={
-                "selected_hosts": ["pve1:100:vm:MyVM"],
-            },
-        )
+    # Queue a VM via save-vms with vm_action=now so it ends up in setup_proxmox_pending
+    setup_client.post(
+        "/setup/connect/proxmox/save-vms",
+        data={
+            "selected_vms": ["pve1:100:MyVM"],
+            "vm_ip_100": "192.168.1.100",
+            "vm_action": "now",
+        },
+    )
     response = setup_client.get("/setup/hosts")
     assert response.status_code == 200
     assert "MyVM" in response.text

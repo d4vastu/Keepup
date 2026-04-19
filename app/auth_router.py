@@ -352,6 +352,56 @@ async def setup_connect(request: Request) -> HTMLResponse:
 # --- Proxmox ---
 
 
+def _setup_proxmox_client_parts() -> tuple[str, str, bool]:
+    """Return (url, token, verify_ssl) from saved Proxmox config."""
+    cfg = get_proxmox_config()
+    creds = get_integration_credentials("proxmox")
+    url = cfg.get("url", "")
+    token_id = creds.get("token_id", "")
+    secret = creds.get("secret", "")
+    if not token_id:
+        api_user = creds.get("api_user", "")
+        api_token = creds.get("api_token", "")
+        token = f"{api_user}!{api_token}" if api_user else api_token
+    else:
+        token = f"{token_id}={secret}"
+    return url, token, cfg.get("verify_ssl", False)
+
+
+def _proxmox_lxc_step(request: Request, resources: list[dict]) -> HTMLResponse:
+    lxcs = [r for r in resources if r["type"] == "lxc"]
+    if lxcs:
+        return templates.TemplateResponse(
+            "partials/setup_proxmox_section.html",
+            {
+                "request": request,
+                "proxmox_connected": True,
+                "proxmox_step": "lxcs",
+                "proxmox_resources": resources,
+                "available_keys": get_available_ssh_keys(),
+            },
+        )
+    return _proxmox_vm_step(request, resources)
+
+
+def _proxmox_vm_step(request: Request, resources: list[dict]) -> HTMLResponse:
+    vms = [r for r in resources if r["type"] == "qemu"]
+    if vms:
+        return templates.TemplateResponse(
+            "partials/setup_proxmox_section.html",
+            {
+                "request": request,
+                "proxmox_connected": True,
+                "proxmox_step": "vms",
+                "proxmox_resources": resources,
+            },
+        )
+    return templates.TemplateResponse(
+        "partials/setup_proxmox_section.html",
+        {"request": request, "proxmox_connected": True, "proxmox_step": "done"},
+    )
+
+
 @router.post("/setup/connect/proxmox/test", response_class=HTMLResponse)
 async def setup_test_proxmox(
     request: Request,
@@ -362,7 +412,6 @@ async def setup_test_proxmox(
     proxmox_verify_ssl: str = Form(""),
 ) -> HTMLResponse:
     url = proxmox_url.strip().rstrip("/")
-    api_user = proxmox_api_user.strip()
     token_id = proxmox_token_id.strip()
     secret = proxmox_secret.strip()
     verify_ssl = proxmox_verify_ssl == "on"
@@ -388,9 +437,7 @@ async def setup_test_proxmox(
             hint = "SSL error — try disabling SSL verification."
         else:
             hint = msg[:120]
-        return HTMLResponse(
-            f'<span class="text-red-400 text-sm">&#10007; {hint}</span>'
-        )
+        return HTMLResponse(f'<span class="text-red-400 text-sm">&#10007; {hint}</span>')
 
 
 @router.post("/setup/connect/proxmox/save", response_class=HTMLResponse)
@@ -401,19 +448,12 @@ async def setup_save_proxmox(
     proxmox_token_id: str = Form(""),
     proxmox_secret: str = Form(""),
     proxmox_verify_ssl: str = Form(""),
-    proxmox_ssh_user: str = Form(""),
-    proxmox_ssh_auth: str = Form("key"),
-    proxmox_ssh_key: str = Form(""),
-    proxmox_ssh_password: str = Form(""),
 ) -> HTMLResponse:
     url = proxmox_url.strip().rstrip("/")
     api_user = proxmox_api_user.strip()
     token_id = proxmox_token_id.strip()
     secret = proxmox_secret.strip()
     verify_ssl = proxmox_verify_ssl == "on"
-    ssh_user = proxmox_ssh_user.strip()
-    ssh_key = proxmox_ssh_key.strip() if proxmox_ssh_auth == "key" else ""
-    ssh_password = proxmox_ssh_password.strip() if proxmox_ssh_auth == "password" else ""
     save_proxmox_config(url=url, verify_ssl=verify_ssl)
     cred_kwargs: dict = {}
     if api_user:
@@ -422,87 +462,227 @@ async def setup_save_proxmox(
         cred_kwargs["token_id"] = token_id
     if secret:
         cred_kwargs["secret"] = secret
-    if ssh_user:
-        cred_kwargs["ssh_user"] = ssh_user
-    if ssh_key:
-        cred_kwargs["ssh_key"] = ssh_key
-        cred_kwargs["ssh_password"] = None  # clear password when switching to key
-    if ssh_password:
-        cred_kwargs["ssh_password"] = ssh_password
-        cred_kwargs["ssh_key"] = None  # clear key when switching to password
     if cred_kwargs:
         save_integration_credentials("proxmox", **cred_kwargs)
     _queue_integration_host(request, "proxmox", "Proxmox VE", url)
+
+    nodes: list[str] = []
+    resources: list[dict] = []
+    if url and token_id and secret:
+        try:
+            token = f"{token_id}={secret}"
+            client = ProxmoxClient(url=url, api_token=token, verify_ssl=verify_ssl)
+            nodes = await client.get_nodes()
+            resources = await client.discover_resources()
+            request.session["setup_proxmox_resources"] = resources
+        except Exception:
+            pass
+
     return templates.TemplateResponse(
         "partials/setup_proxmox_section.html",
         {
             "request": request,
-            "proxmox_url": url,
             "proxmox_connected": True,
-            "proxmox_saved": True,
+            "proxmox_step": "node",
+            "proxmox_nodes": nodes,
+            "proxmox_url": url,
         },
     )
 
 
 @router.post("/setup/connect/proxmox/discover", response_class=HTMLResponse)
 async def setup_proxmox_discover(request: Request) -> HTMLResponse:
-    cfg = get_proxmox_config()
-    creds = get_integration_credentials("proxmox")
-    url = cfg.get("url", "")
-    token_id = creds.get("token_id", "")
-    secret = creds.get("secret", "")
-    # Legacy fallback: old format stored full token in api_token
-    if not token_id:
-        api_user = creds.get("api_user", "")
-        api_token = creds.get("api_token", "")
-        token = f"{api_user}!{api_token}" if api_user else api_token
-    else:
-        token = f"{token_id}={secret}"
-    verify_ssl = cfg.get("verify_ssl", False)
+    """For already-connected Proxmox: discover resources and enter the guided flow."""
+    url, token, verify_ssl = _setup_proxmox_client_parts()
     if not url or not token:
-        return HTMLResponse(
-            '<p class="text-sm text-red-400">Proxmox not configured.</p>'
-        )
+        return HTMLResponse('<p class="text-sm text-red-400">Proxmox not configured.</p>')
     try:
         client = ProxmoxClient(url=url, api_token=token, verify_ssl=verify_ssl)
+        nodes = await client.get_nodes()
         resources = await client.discover_resources()
+        request.session["setup_proxmox_resources"] = resources
         return templates.TemplateResponse(
             "partials/setup_proxmox_section.html",
             {
                 "request": request,
-                "proxmox_url": url,
                 "proxmox_connected": True,
-                "proxmox_resources": resources,
+                "proxmox_step": "node",
+                "proxmox_nodes": nodes,
+                "proxmox_url": url,
             },
         )
     except Exception as exc:
+        return HTMLResponse(f'<p class="text-sm text-red-400">Discovery failed: {exc}</p>')
+
+
+@router.post("/setup/connect/proxmox/add-node", response_class=HTMLResponse)
+async def setup_proxmox_add_node(request: Request) -> HTMLResponse:
+    import urllib.parse
+    url, token, verify_ssl = _setup_proxmox_client_parts()
+    px_host = urllib.parse.urlparse(url).hostname or ""
+    try:
+        client = ProxmoxClient(url=url, api_token=token, verify_ssl=verify_ssl)
+        nodes = await client.get_nodes()
+    except Exception as exc:
         return HTMLResponse(
-            f'<p class="text-sm text-red-400">Discovery failed: {exc}</p>'
+            f'<p class="text-sm text-red-400">Could not reach Proxmox API: {exc}</p>'
         )
-
-
-@router.post("/setup/connect/proxmox/select-hosts", response_class=HTMLResponse)
-async def setup_proxmox_select_hosts(request: Request) -> HTMLResponse:
-    form = await request.form()
-    selected = form.getlist("selected_hosts")  # list of "node:vmid:type:name:ip" strings
-    pending = []
-    for entry in selected:
-        parts = entry.split(":", 4)
-        if len(parts) >= 4:
-            pending.append(
-                {
-                    "node": parts[0],
-                    "vmid": parts[1],
-                    "type": parts[2],
-                    "name": parts[3],
-                    "ip": parts[4] if len(parts) > 4 else "",
-                }
+    existing = {h["host"] for h in get_hosts()}
+    for node in nodes:
+        if px_host and px_host not in existing:
+            add_host(
+                name=f"Proxmox VE ({node})",
+                host=px_host,
+                user=None,
+                port=None,
+                proxmox_node=node,
             )
-    request.session["setup_proxmox_pending"] = pending
-    count = len(pending)
-    label = f"{count} host{'s' if count != 1 else ''}"
+            existing.add(px_host)
+    resources = request.session.get("setup_proxmox_resources", [])
+    return _proxmox_lxc_step(request, resources)
+
+
+@router.post("/setup/connect/proxmox/skip-node", response_class=HTMLResponse)
+async def setup_proxmox_skip_node(request: Request) -> HTMLResponse:
+    resources = request.session.get("setup_proxmox_resources", [])
+    return _proxmox_lxc_step(request, resources)
+
+
+@router.post("/setup/connect/proxmox/test-ssh", response_class=HTMLResponse)
+async def setup_proxmox_test_ssh(
+    request: Request,
+    proxmox_ssh_user: str = Form("root"),
+    proxmox_ssh_auth: str = Form("key"),
+    proxmox_ssh_key: str = Form(""),
+    proxmox_ssh_password: str = Form(""),
+) -> HTMLResponse:
+    import urllib.parse
+    cfg = get_proxmox_config()
+    px_host = urllib.parse.urlparse(cfg.get("url", "")).hostname or ""
+    if not px_host:
+        return HTMLResponse('<span class="text-red-400 text-xs">Proxmox not configured.</span>')
+    user = proxmox_ssh_user.strip() or "root"
+    key_path = (
+        f"/app/keys/{proxmox_ssh_key.strip()}"
+        if proxmox_ssh_auth == "key" and proxmox_ssh_key.strip()
+        else None
+    )
+    password = proxmox_ssh_password.strip() if proxmox_ssh_auth == "password" else ""
+    if proxmox_ssh_auth == "key" and not key_path:
+        return HTMLResponse('<span class="text-amber-400 text-xs">Select a key file first.</span>')
+    if proxmox_ssh_auth == "password" and not password:
+        return HTMLResponse('<span class="text-amber-400 text-xs">Enter a password first.</span>')
+    host_entry: dict = {"name": "Proxmox VE", "host": px_host, "user": user}
+    if key_path:
+        host_entry["key"] = key_path
+    creds: dict = {}
+    if password:
+        creds["ssh_password"] = password
+    result = await verify_connection(host_entry, get_ssh_config(), creds)
+    if result["ok"]:
+        return HTMLResponse(
+            f'<span class="text-green-400 text-xs">&#10003; Connected to {px_host}</span>'
+            f"<script>proxmoxSshTestPassed();</script>"
+        )
     return HTMLResponse(
-        f'<p class="text-sm text-green-400">&#10003; {label} queued for SSH setup in the next step.</p>'
+        f'<span class="text-red-400 text-xs">&#10007; {result["message"]}</span>'
+    )
+
+
+@router.post("/setup/connect/proxmox/save-lxcs", response_class=HTMLResponse)
+async def setup_proxmox_save_lxcs(
+    request: Request,
+    proxmox_ssh_user: str = Form("root"),
+    proxmox_ssh_auth: str = Form("key"),
+    proxmox_ssh_key: str = Form(""),
+    proxmox_ssh_password: str = Form(""),
+) -> HTMLResponse:
+    form = await request.form()
+    selected = form.getlist("selected_lxcs")
+
+    ssh_user = proxmox_ssh_user.strip() or "root"
+    ssh_key = proxmox_ssh_key.strip() if proxmox_ssh_auth == "key" else ""
+    ssh_password = proxmox_ssh_password.strip() if proxmox_ssh_auth == "password" else ""
+    cred_kwargs: dict = {"ssh_user": ssh_user}
+    if ssh_key:
+        cred_kwargs["ssh_key"] = ssh_key
+        cred_kwargs["ssh_password"] = None
+    if ssh_password:
+        cred_kwargs["ssh_password"] = ssh_password
+        cred_kwargs["ssh_key"] = None
+    save_integration_credentials("proxmox", **cred_kwargs)
+
+    existing = {h["host"] for h in get_hosts()}
+    for entry in selected:
+        parts = entry.split(":", 3)
+        if len(parts) < 3:
+            continue
+        node, vmid_str, name = parts[0], parts[1], parts[2]
+        ip = parts[3] if len(parts) > 3 else ""
+        if not ip or ip in existing:
+            continue
+        vmid = int(vmid_str) if vmid_str.isdigit() else None
+        if vmid is not None:
+            add_host(name=name, host=ip, user=None, port=None, proxmox_node=node, proxmox_vmid=vmid)
+            existing.add(ip)
+
+    resources = request.session.get("setup_proxmox_resources", [])
+    return _proxmox_vm_step(request, resources)
+
+
+@router.post("/setup/connect/proxmox/skip-lxcs", response_class=HTMLResponse)
+async def setup_proxmox_skip_lxcs(request: Request) -> HTMLResponse:
+    resources = request.session.get("setup_proxmox_resources", [])
+    return _proxmox_vm_step(request, resources)
+
+
+@router.post("/setup/connect/proxmox/save-vms", response_class=HTMLResponse)
+async def setup_proxmox_save_vms(request: Request) -> HTMLResponse:
+    form = await request.form()
+    selected = form.getlist("selected_vms")
+    vm_action = str(form.get("vm_action", "later"))
+
+    existing = {h["host"] for h in get_hosts()}
+    added: list[dict] = []
+    for entry in selected:
+        parts = entry.split(":", 2)
+        if len(parts) < 3:
+            continue
+        node, vmid_str, name = parts[0], parts[1], parts[2]
+        ip = str(form.get(f"vm_ip_{vmid_str}", "")).strip()
+        if not ip or ip in existing:
+            continue
+        add_host(name=name, host=ip, user=None, port=None)
+        existing.add(ip)
+        added.append({"node": node, "vmid": vmid_str, "name": name, "ip": ip, "type": "qemu"})
+
+    if vm_action == "now" and added:
+        pending = request.session.get("setup_proxmox_pending", [])
+        pending.extend(added)
+        request.session["setup_proxmox_pending"] = pending
+
+    summary = None
+    if added:
+        label = f"{len(added)} VM{'s' if len(added) != 1 else ''} added"
+        note = "continue to set up logins" if vm_action == "now" else "finish login setup from Admin › Hosts"
+        summary = f"{label} — {note}"
+
+    return templates.TemplateResponse(
+        "partials/setup_proxmox_section.html",
+        {
+            "request": request,
+            "proxmox_connected": True,
+            "proxmox_step": "done",
+            "proxmox_added_summary": summary,
+        },
+    )
+
+
+@router.post("/setup/connect/proxmox/skip-vms", response_class=HTMLResponse)
+async def setup_proxmox_skip_vms(request: Request) -> HTMLResponse:
+    return templates.TemplateResponse(
+        "partials/setup_proxmox_section.html",
+        {"request": request, "proxmox_connected": True, "proxmox_step": "done"},
     )
 
 
