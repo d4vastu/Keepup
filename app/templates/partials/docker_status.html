@@ -21,6 +21,7 @@
 
   {% for endpoint_name, group_stacks in needs_update | groupby("endpoint_name") %}
   {% set group_list = group_stacks | list %}
+  {% set badge = group_list[0].connection_badge if group_list else "" %}
   <div>
     <div class="host-group-header">
       <div class="host-group-name">
@@ -29,6 +30,9 @@
           <rect x="2" y="9" width="12" height="3" rx="1" stroke="#8b949e" stroke-width="1.3"/>
         </svg>
         {{ endpoint_name }}
+        {% if badge %}
+        <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-slate-800 text-slate-400 border border-slate-700">{{ badge }}</span>
+        {% endif %}
       </div>
       <span class="host-group-count">{{ group_list | length }} update{{ 's' if group_list | length != 1 }}</span>
     </div>

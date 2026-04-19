@@ -1085,3 +1085,105 @@ def test_parse_json_output_ignores_invalid_lines():
     assert len(result) == 2
     assert result[0]["Name"] == "good"
     assert result[1]["Name"] == "also-good"
+
+
+# ---------------------------------------------------------------------------
+# SSHDockerBackend — _connection_badge
+# ---------------------------------------------------------------------------
+
+
+def test_connection_badge_standalone():
+    b = SSHDockerBackend()
+    assert b._connection_badge({}) == "SSH"
+    assert b._connection_badge({"name": "plain"}) == "SSH"
+
+
+def test_connection_badge_proxmox_node():
+    b = SSHDockerBackend()
+    host = {"proxmox_node": "pve"}
+    assert b._connection_badge(host) == "Node · Proxmox API"
+
+
+def test_connection_badge_lxc_explicit():
+    b = SSHDockerBackend()
+    host = {"proxmox_node": "pve", "proxmox_vmid": 101, "proxmox_type": "lxc"}
+    assert b._connection_badge(host) == "LXC 101 · pct exec"
+
+
+def test_connection_badge_lxc_default():
+    """proxmox_type absent defaults to lxc."""
+    b = SSHDockerBackend()
+    host = {"proxmox_node": "pve", "proxmox_vmid": 102}
+    assert b._connection_badge(host) == "LXC 102 · pct exec"
+
+
+def test_connection_badge_vm():
+    b = SSHDockerBackend()
+    host = {"proxmox_node": "pve", "proxmox_vmid": 200, "proxmox_type": "vm"}
+    assert b._connection_badge(host) == "VM 200 · SSH"
+
+
+@pytest.mark.asyncio
+async def test_get_stacks_includes_connection_badge(config_file, data_dir):
+    """Each stack entry carries a connection_badge field."""
+    import yaml
+
+    raw = yaml.safe_load(config_file.read_text())
+    raw["hosts"][0]["docker_mode"] = "all"
+    config_file.write_text(yaml.dump(raw))
+
+    docker_ps_output = json.dumps(
+        {"Names": "/app", "Image": "app:latest", "Labels": ""}
+    )
+    inspect_output = '["app@sha256:abc"]'
+
+    conn = _make_multi_conn(
+        [
+            MagicMock(stdout=docker_ps_output, returncode=0),
+            MagicMock(stdout=inspect_output, returncode=0),
+        ]
+    )
+
+    with (
+        patch("app.backends.ssh_docker_backend._connect", new=AsyncMock(return_value=conn)),
+        patch("app.backends.ssh_docker_backend.check_image_update",
+              new=AsyncMock(return_value="up_to_date")),
+    ):
+        backend = SSHDockerBackend()
+        stacks = await backend.get_stacks_with_update_status()
+
+    assert len(stacks) == 1
+    assert stacks[0]["connection_badge"] == "SSH"
+
+
+@pytest.mark.asyncio
+async def test_get_stacks_proxmox_node_connection_badge(config_file, data_dir):
+    """A host flagged as a Proxmox node gets the Node · Proxmox API badge."""
+    import yaml
+
+    raw = yaml.safe_load(config_file.read_text())
+    raw["hosts"][0]["docker_mode"] = "all"
+    raw["hosts"][0]["proxmox_node"] = "pve"
+    config_file.write_text(yaml.dump(raw))
+
+    docker_ps_output = json.dumps(
+        {"Names": "/app", "Image": "app:latest", "Labels": ""}
+    )
+    inspect_output = '["app@sha256:abc"]'
+
+    conn = _make_multi_conn(
+        [
+            MagicMock(stdout=docker_ps_output, returncode=0),
+            MagicMock(stdout=inspect_output, returncode=0),
+        ]
+    )
+
+    with (
+        patch("app.backends.ssh_docker_backend._connect", new=AsyncMock(return_value=conn)),
+        patch("app.backends.ssh_docker_backend.check_image_update",
+              new=AsyncMock(return_value="up_to_date")),
+    ):
+        backend = SSHDockerBackend()
+        stacks = await backend.get_stacks_with_update_status()
+
+    assert stacks[0]["connection_badge"] == "Node · Proxmox API"

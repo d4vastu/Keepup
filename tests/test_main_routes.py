@@ -343,3 +343,128 @@ def test_home_shows_standalone_divider_when_mixed(client, config_file):
 def test_home_no_standalone_divider_when_only_standalone(client):
     response = client.get("/home")
     assert "Standalone hosts" not in response.text
+
+
+# ---------------------------------------------------------------------------
+# Connection source badges on OS Packages rows
+# ---------------------------------------------------------------------------
+
+
+def test_home_shows_proxmox_api_badge_on_node_row(client, config_file):
+    import yaml
+
+    cfg = yaml.safe_load(config_file.read_text())
+    cfg["hosts"].append({
+        "name": "My Node",
+        "host": "10.0.0.1",
+        "proxmox_node": "pve",
+    })
+    config_file.write_text(yaml.dump(cfg))
+
+    response = client.get("/home")
+    assert "Proxmox API" in response.text
+
+
+def test_home_shows_pct_exec_badge_on_lxc_row(client, config_file):
+    import yaml
+
+    cfg = yaml.safe_load(config_file.read_text())
+    cfg["hosts"].append({
+        "name": "My LXC",
+        "host": "10.0.0.5",
+        "proxmox_node": "pve",
+        "proxmox_vmid": 105,
+        "proxmox_type": "lxc",
+    })
+    config_file.write_text(yaml.dump(cfg))
+
+    response = client.get("/home")
+    assert "pct exec" in response.text
+
+
+def test_home_shows_ssh_badge_on_vm_row(client, config_file):
+    import yaml
+
+    cfg = yaml.safe_load(config_file.read_text())
+    cfg["hosts"].append({
+        "name": "My VM",
+        "host": "10.0.0.6",
+        "proxmox_node": "pve",
+        "proxmox_vmid": 201,
+        "proxmox_type": "vm",
+    })
+    config_file.write_text(yaml.dump(cfg))
+
+    response = client.get("/home")
+    assert response.text.count("SSH") >= 1
+
+
+def test_home_standalone_has_no_connection_badge(client):
+    response = client.get("/home")
+    assert "Proxmox API" not in response.text
+    assert "pct exec" not in response.text
+
+
+# ---------------------------------------------------------------------------
+# connection_badge rendered in docker_status partial
+# ---------------------------------------------------------------------------
+
+
+def test_docker_check_shows_connection_badge_in_group_header(client, config_file, monkeypatch):
+    import yaml
+    import app.backend_loader as bl
+
+    cfg = yaml.safe_load(config_file.read_text())
+    cfg["hosts"][0]["docker_mode"] = "all"
+    config_file.write_text(yaml.dump(cfg))
+
+    ssh_b = MagicMock()
+    ssh_b.BACKEND_KEY = "ssh"
+    ssh_b.get_stacks_with_update_status = AsyncMock(return_value=[
+        {
+            "id": "my-node/mystack:app",
+            "name": "app",
+            "endpoint_id": "my-node",
+            "endpoint_name": "My Node",
+            "connection_badge": "Node · Proxmox API",
+            "update_status": "update_available",
+            "images": [{"name": "app:latest", "status": "update_available"}],
+            "update_path": "ssh/my-node/mystack:app",
+            "_compose_project": "mystack",
+        }
+    ])
+    monkeypatch.setattr(bl, "_backends", [ssh_b])
+
+    response = client.get("/api/docker/check")
+    assert response.status_code == 200
+    assert "Node · Proxmox API" in response.text
+
+
+def test_docker_check_shows_lxc_connection_badge(client, config_file, monkeypatch):
+    import yaml
+    import app.backend_loader as bl
+
+    cfg = yaml.safe_load(config_file.read_text())
+    cfg["hosts"][0]["docker_mode"] = "all"
+    config_file.write_text(yaml.dump(cfg))
+
+    ssh_b = MagicMock()
+    ssh_b.BACKEND_KEY = "ssh"
+    ssh_b.get_stacks_with_update_status = AsyncMock(return_value=[
+        {
+            "id": "my-lxc/~app",
+            "name": "app",
+            "endpoint_id": "my-lxc",
+            "endpoint_name": "My LXC",
+            "connection_badge": "LXC 104 · pct exec",
+            "update_status": "update_available",
+            "images": [{"name": "app:latest", "status": "update_available"}],
+            "update_path": "ssh/my-lxc/~app",
+            "_compose_project": "",
+        }
+    ])
+    monkeypatch.setattr(bl, "_backends", [ssh_b])
+
+    response = client.get("/api/docker/check")
+    assert response.status_code == 200
+    assert "LXC 104 · pct exec" in response.text

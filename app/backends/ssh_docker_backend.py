@@ -34,6 +34,18 @@ class SSHDockerBackend:
     def _docker_hosts(self) -> list[dict]:
         return [h for h in get_hosts() if h.get("docker_mode")]
 
+    def _connection_badge(self, host: dict) -> str:
+        proxmox_node = host.get("proxmox_node")
+        proxmox_vmid = host.get("proxmox_vmid")
+        proxmox_type = host.get("proxmox_type") or "lxc"
+        if proxmox_node and proxmox_vmid is None:
+            return "Node · Proxmox API"
+        elif proxmox_node and proxmox_type == "lxc":
+            return f"LXC {proxmox_vmid} · pct exec"
+        elif proxmox_node and proxmox_type == "vm":
+            return f"VM {proxmox_vmid} · SSH"
+        return "SSH"
+
     def _make_compose_ref(self, slug: str, project: str, container: str) -> str:
         return f"{slug}/{quote(project, safe='')}:{quote(container, safe='')}"
 
@@ -178,6 +190,7 @@ class SSHDockerBackend:
                         "name": container_name,
                         "endpoint_id": slug,
                         "endpoint_name": host["name"],
+                        "connection_badge": self._connection_badge(host),
                         "update_status": status,
                         "images": [{"name": image, "status": status}],
                         "update_path": f"{self.BACKEND_KEY}/{ref}",
