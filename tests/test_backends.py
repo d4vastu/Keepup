@@ -237,9 +237,34 @@ async def test_discover_stacks_ssh_error_returns_empty(config_file, data_dir):
 @pytest.mark.asyncio
 async def test_update_stack_unknown_host_raises(config_file, data_dir):
     backend = SSHDockerBackend()
-    # No docker_mode hosts in config → _docker_hosts() returns []
+    # No docker_mode hosts in config → raises ValueError
     with pytest.raises(ValueError, match="my-server"):
         await backend.update_stack("my-server/sonarr")
+
+
+@pytest.mark.asyncio
+async def test_update_stack_proxmox_node_host_can_redeploy(config_file, data_dir):
+    """Proxmox node hosts are excluded from the global scan but can still be updated."""
+    import yaml
+
+    raw = yaml.safe_load(config_file.read_text())
+    raw["hosts"][0]["proxmox_node"] = "pve"
+    raw["hosts"][0]["docker_mode"] = "all"
+    config_file.write_text(yaml.dump(raw))
+
+    ls_output = json.dumps([{"Name": "sonarr", "ConfigFiles": "/opt/sonarr/docker-compose.yml"}])
+    conn = _make_multi_conn(
+        [
+            MagicMock(stdout=ls_output, returncode=0),
+            MagicMock(stdout="Pulled", returncode=0),
+            MagicMock(stdout="Started", returncode=0),
+        ]
+    )
+
+    with patch("app.backends.ssh_docker_backend._connect", new=AsyncMock(return_value=conn)):
+        backend = SSHDockerBackend()
+        # Should NOT raise even though node is excluded from _docker_hosts()
+        await backend.update_stack("test-host/sonarr:sonarr")
 
 
 @pytest.mark.asyncio

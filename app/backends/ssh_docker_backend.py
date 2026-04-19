@@ -98,7 +98,8 @@ class SSHDockerBackend:
 
     async def update_stack(self, ref: str) -> None:
         slug, rest = self._parse_ref(ref)
-        host = next((h for h in self._docker_hosts() if h["slug"] == slug), None)
+        all_docker = [h for h in get_hosts() if h.get("docker_mode")]
+        host = next((h for h in all_docker if h["slug"] == slug), None)
         if host is None:
             raise ValueError(f"No Docker-enabled host with slug {slug!r}")
 
