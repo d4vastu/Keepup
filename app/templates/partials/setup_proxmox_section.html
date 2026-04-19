@@ -13,156 +13,292 @@
 
   <div class="px-5 py-4 space-y-3">
 
-    {% if proxmox_saved %}
-    <p class="text-sm text-green-400">&#10003; Proxmox saved.</p>
-    {% endif %}
+  {% if proxmox_step == 'node' %}
+  <!-- ── Step 2: Proxmox node ── -->
+  <p class="text-xs text-slate-400">Would you like to monitor OS updates on the Proxmox host itself?</p>
+  {% if proxmox_nodes %}
+  <div class="space-y-1">
+    {% for node in proxmox_nodes %}
+    <div class="flex items-center gap-2 px-3 py-2 rounded-lg bg-slate-700/40 text-sm text-slate-200">
+      <span class="text-slate-500">◈</span> {{ node }}
+      <span class="text-xs text-slate-500 ml-1">Proxmox node</span>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+  <div class="flex gap-2">
+    <button
+      hx-post="/setup/connect/proxmox/add-node"
+      hx-target="#proxmox-section"
+      hx-swap="outerHTML"
+      class="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-sm font-medium text-white transition-colors">
+      Add Proxmox node to monitoring
+    </button>
+    <button
+      hx-post="/setup/connect/proxmox/skip-node"
+      hx-target="#proxmox-section"
+      hx-swap="outerHTML"
+      class="px-4 py-2 rounded-lg bg-slate-700 hover:bg-slate-600 text-sm font-medium text-slate-300 transition-colors">
+      Skip
+    </button>
+  </div>
 
-    {% if proxmox_resources is defined %}
+  {% elif proxmox_step == 'lxcs' %}
+  <!-- ── Step 3: LXC containers ── -->
+  {% set lxcs = proxmox_resources | selectattr('type', 'equalto', 'lxc') | list %}
+  <p class="text-xs text-slate-400">Select the LXC containers you want Keepup to monitor.</p>
+  <div class="space-y-1.5">
+    {% for r in lxcs %}
+    <label class="flex items-center gap-3 px-3 py-2 rounded-lg bg-slate-700/50 cursor-pointer hover:bg-slate-700 transition-colors">
+      <input type="checkbox" name="selected_lxcs"
+             value="{{ r.node }}:{{ r.vmid }}:{{ r.name }}:{{ r.ip or '' }}"
+             class="proxmox-lxc-check w-4 h-4 rounded accent-blue-500 flex-shrink-0"
+             onchange="proxmoxUpdateLxcPanel()">
+      <div class="min-w-0">
+        <span class="text-sm text-slate-200 font-medium">{{ r.name }}</span>
+        <span class="text-xs text-slate-500 ml-2">LXC {{ r.vmid }} · {{ r.node }}{% if r.ip %} · {{ r.ip }}{% endif %}</span>
+      </div>
+      <span class="ml-auto text-xs px-2 py-0.5 rounded-full flex-shrink-0
+        {% if r.status == 'running' %}bg-green-900/40 text-green-400
+        {% else %}bg-slate-700 text-slate-400{% endif %}">
+        {{ r.status }}
+      </span>
+    </label>
+    {% endfor %}
+  </div>
 
-      <!-- Discovered VMs/LXCs -->
-      {% if proxmox_resources %}
-      {% set vms = proxmox_resources | selectattr('type', 'equalto', 'qemu') | list %}
-      {% set lxcs = proxmox_resources | selectattr('type', 'equalto', 'lxc') | list %}
-      <form hx-post="/setup/connect/proxmox/select-hosts"
-            hx-target="#proxmox-select-result"
-            class="space-y-3">
-
-        {% if vms %}
-        <div>
-          <p class="text-xs font-medium text-slate-400 mb-1.5">Virtual Machines (QEMU)</p>
-          <p class="text-xs text-slate-500 mb-2">VMs require SSH for OS package monitoring. Select any you want Keepup to monitor.</p>
-          <div class="space-y-1.5 max-h-48 overflow-y-auto pr-1">
-            {% for r in vms %}
-            <label class="flex items-center gap-3 px-3 py-2 rounded-lg bg-slate-700/50 cursor-pointer hover:bg-slate-700 transition-colors">
-              <input type="checkbox" name="selected_hosts"
-                value="{{ r.node }}:{{ r.vmid }}:{{ r.type }}:{{ r.name }}:{{ r.ip or '' }}"
-                class="w-4 h-4 rounded accent-blue-500 flex-shrink-0">
-              <div class="min-w-0">
-                <span class="text-sm text-slate-200 font-medium">{{ r.name }}</span>
-                <span class="text-xs text-slate-500 ml-2">VM {{ r.vmid }} · {{ r.node }}{% if r.ip %} · {{ r.ip }}{% endif %}</span>
-              </div>
-              <span class="ml-auto text-xs px-2 py-0.5 rounded-full flex-shrink-0
-                {% if r.status == 'running' %}bg-green-900/40 text-green-400
-                {% else %}bg-slate-700 text-slate-400{% endif %}">
-                {{ r.status }}
-              </span>
-            </label>
-            {% endfor %}
-          </div>
-        </div>
-        {% endif %}
-
-        {% if lxcs %}
-        <div>
-          <p class="text-xs font-medium text-slate-400 mb-1.5">LXC Containers</p>
-          <p class="text-xs text-slate-500 mb-2">LXCs run directly on Proxmox. Select any you want Keepup to monitor via SSH.</p>
-          <div class="space-y-1.5 max-h-48 overflow-y-auto pr-1">
-            {% for r in lxcs %}
-            <label class="flex items-center gap-3 px-3 py-2 rounded-lg bg-slate-700/50 cursor-pointer hover:bg-slate-700 transition-colors">
-              <input type="checkbox" name="selected_hosts"
-                value="{{ r.node }}:{{ r.vmid }}:{{ r.type }}:{{ r.name }}:{{ r.ip or '' }}"
-                class="w-4 h-4 rounded accent-blue-500 flex-shrink-0">
-              <div class="min-w-0">
-                <span class="text-sm text-slate-200 font-medium">{{ r.name }}</span>
-                <span class="text-xs text-slate-500 ml-2">LXC {{ r.vmid }} · {{ r.node }}{% if r.ip %} · {{ r.ip }}{% endif %}</span>
-              </div>
-              <span class="ml-auto text-xs px-2 py-0.5 rounded-full flex-shrink-0
-                {% if r.status == 'running' %}bg-green-900/40 text-green-400
-                {% else %}bg-slate-700 text-slate-400{% endif %}">
-                {{ r.status }}
-              </span>
-            </label>
-            {% endfor %}
-          </div>
-        </div>
-        {% endif %}
-
-        <div class="flex gap-2 items-center flex-wrap">
-          <button type="submit"
-            class="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-sm font-medium text-white transition-colors">
-            Queue selected for SSH setup
-          </button>
-          <button type="button"
-            hx-post="/setup/connect/proxmox/select-hosts"
-            hx-target="#proxmox-select-result"
-            hx-vals='{"selected_hosts": ""}'
-            class="px-4 py-2 rounded-lg bg-slate-700 hover:bg-slate-600 text-sm font-medium text-slate-300 transition-colors">
-            Skip SSH setup
-          </button>
-        </div>
-      </form>
-      <div id="proxmox-select-result"></div>
-      {% else %}
-      <p class="text-xs text-slate-500 italic">No VMs or LXC containers found.</p>
-      {% endif %}
-
-    {% elif proxmox_connected %}
-
-      <!-- Connected state: offer discovery -->
-      <p class="text-xs text-slate-400">
-        Credentials saved. Discover VMs and LXC containers to optionally set up SSH monitoring for them.
-      </p>
-      <button
-        hx-post="/setup/connect/proxmox/discover"
-        hx-target="#proxmox-section"
-        hx-swap="outerHTML"
-        class="px-4 py-2 rounded-lg bg-slate-600 hover:bg-slate-500 text-sm font-medium text-slate-200 transition-colors">
-        Discover VMs &amp; LXCs
+  <!-- SSH panel — shown when ≥1 LXC is checked -->
+  <div id="proxmox-lxc-ssh-panel" class="hidden rounded-xl border border-slate-600 bg-slate-700/30 px-4 py-3 space-y-3">
+    <div>
+      <p class="text-xs font-medium text-slate-300">One more thing</p>
+      <p class="text-xs text-slate-500 mt-0.5">To check updates on LXC containers, Keepup needs to connect to your Proxmox server directly. This one-time setup covers all your LXCs.</p>
+    </div>
+    <div class="flex gap-3">
+      <div class="flex-1">
+        <label class="block text-xs font-medium text-slate-400 mb-1">Login user</label>
+        <input type="text" id="proxmox-lxc-ssh-user" name="proxmox_ssh_user" value="root"
+               class="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-blue-500">
+        <p class="text-xs text-slate-500 mt-1">A dedicated user is recommended, but root may be used.</p>
+      </div>
+      <div class="flex-1">
+        <label class="block text-xs font-medium text-slate-400 mb-1">Auth method</label>
+        <select id="proxmox-lxc-ssh-auth" name="proxmox_ssh_auth"
+                onchange="proxmoxToggleSshAuth()"
+                class="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-blue-500">
+          <option value="key">SSH key</option>
+          <option value="password">Password</option>
+        </select>
+      </div>
+    </div>
+    <div id="proxmox-lxc-key-row">
+      <label class="block text-xs font-medium text-slate-400 mb-1">Key file</label>
+      <select id="proxmox-lxc-ssh-key" name="proxmox_ssh_key"
+              class="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-blue-500">
+        <option value="">— select key —</option>
+        {% for k in available_keys %}
+        <option value="{{ k }}">{{ k }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div id="proxmox-lxc-pass-row" class="hidden">
+      <label class="block text-xs font-medium text-slate-400 mb-1">Password</label>
+      <input type="password" id="proxmox-lxc-ssh-pass" name="proxmox_ssh_password"
+             placeholder="Proxmox server login password"
+             class="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-blue-500">
+    </div>
+    <div class="flex items-center gap-3">
+      <button type="button"
+        hx-post="/setup/connect/proxmox/test-ssh"
+        hx-include="#proxmox-lxc-ssh-user,#proxmox-lxc-ssh-auth,#proxmox-lxc-ssh-key,#proxmox-lxc-ssh-pass"
+        hx-target="#proxmox-lxc-test-result"
+        class="px-3 py-1.5 rounded-lg bg-slate-600 hover:bg-slate-500 text-xs font-medium text-slate-200 transition-colors">
+        Test connection
       </button>
+      <div id="proxmox-lxc-test-result"></div>
+    </div>
+  </div>
 
-    {% else %}
+  <div class="flex gap-2 items-center flex-wrap">
+    <button id="proxmox-add-lxcs-btn" type="button" disabled
+      hx-post="/setup/connect/proxmox/save-lxcs"
+      hx-include=".proxmox-lxc-check,#proxmox-lxc-ssh-user,#proxmox-lxc-ssh-auth,#proxmox-lxc-ssh-key,#proxmox-lxc-ssh-pass"
+      hx-target="#proxmox-section"
+      hx-swap="outerHTML"
+      class="px-4 py-2 rounded-lg bg-blue-600 text-sm font-medium text-white transition-colors opacity-50 cursor-not-allowed">
+      Add selected LXCs
+    </button>
+    <button type="button"
+      hx-post="/setup/connect/proxmox/skip-lxcs"
+      hx-target="#proxmox-section"
+      hx-swap="outerHTML"
+      class="px-4 py-2 rounded-lg bg-slate-700 hover:bg-slate-600 text-sm font-medium text-slate-300 transition-colors">
+      Skip
+    </button>
+  </div>
 
-      <!-- Initial form -->
-      <div id="proxmox-test-result"></div>
-      <div>
-        <label class="block text-xs font-medium text-slate-400 mb-1">Proxmox URL</label>
-        <input type="url" name="proxmox_url" value="{{ proxmox_url or '' }}"
-          placeholder="https://192.168.1.10:8006"
-          class="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-blue-500 placeholder:text-slate-500">
-      </div>
-      <div>
-        <label class="block text-xs font-medium text-slate-400 mb-1">API user</label>
-        <input type="text" name="proxmox_api_user" placeholder="root@pam"
-          class="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-blue-500 placeholder:text-slate-500">
-        <p class="text-xs text-slate-500 mt-1">Datacenter → Permissions → Users</p>
-      </div>
-      <div class="flex gap-3">
-        <div class="flex-1">
-          <label class="block text-xs font-medium text-slate-400 mb-1">Token ID</label>
-          <input type="text" name="proxmox_token_id" placeholder="root@pam!Keepup"
-            class="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-blue-500 placeholder:text-slate-500">
-          <p class="text-xs text-slate-500 mt-1">Datacenter → Permissions → API Tokens → Token ID</p>
+  <script>
+  function proxmoxUpdateLxcPanel() {
+    const anyChecked = document.querySelectorAll('.proxmox-lxc-check:checked').length > 0;
+    document.getElementById('proxmox-lxc-ssh-panel').classList.toggle('hidden', !anyChecked);
+    proxmoxUpdateAddBtn();
+  }
+  function proxmoxToggleSshAuth() {
+    const val = document.getElementById('proxmox-lxc-ssh-auth').value;
+    document.getElementById('proxmox-lxc-key-row').classList.toggle('hidden', val !== 'key');
+    document.getElementById('proxmox-lxc-pass-row').classList.toggle('hidden', val !== 'password');
+    window._proxmoxSshTested = false;
+    proxmoxUpdateAddBtn();
+  }
+  function proxmoxSshTestPassed() {
+    window._proxmoxSshTested = true;
+    proxmoxUpdateAddBtn();
+  }
+  function proxmoxUpdateAddBtn() {
+    const anyChecked = document.querySelectorAll('.proxmox-lxc-check:checked').length > 0;
+    const btn = document.getElementById('proxmox-add-lxcs-btn');
+    if (!btn) return;
+    const ok = anyChecked && window._proxmoxSshTested;
+    btn.disabled = !ok;
+    btn.classList.toggle('opacity-50', !ok);
+    btn.classList.toggle('cursor-not-allowed', !ok);
+    btn.classList.toggle('hover:bg-blue-500', ok);
+  }
+  window._proxmoxSshTested = false;
+  </script>
+
+  {% elif proxmox_step == 'vms' %}
+  <!-- ── Step 4: Virtual machines ── -->
+  {% set vms = proxmox_resources | selectattr('type', 'equalto', 'qemu') | list %}
+  <p class="text-xs text-slate-400">VMs are independent machines. Keepup will add them to your host list — you'll set up a login for each one separately.</p>
+  <form id="proxmox-vm-form" class="space-y-1.5">
+    {% for r in vms %}
+    <div class="px-3 py-2 rounded-lg bg-slate-700/50">
+      <label class="flex items-center gap-3 cursor-pointer">
+        <input type="checkbox" name="selected_vms"
+               value="{{ r.node }}:{{ r.vmid }}:{{ r.name }}"
+               class="w-4 h-4 rounded accent-blue-500 flex-shrink-0">
+        <div class="min-w-0 flex-1">
+          <span class="text-sm text-slate-200 font-medium">{{ r.name }}</span>
+          <span class="text-xs text-slate-500 ml-2">VM {{ r.vmid }} · {{ r.node }}{% if r.ip %} · {{ r.ip }}{% endif %}</span>
         </div>
-        <div class="flex-1">
-          <label class="block text-xs font-medium text-slate-400 mb-1">Secret</label>
-          <input type="password" name="proxmox_secret" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
-            class="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-blue-500 placeholder:text-slate-500">
-          <p class="text-xs text-slate-500 mt-1">Datacenter → Permissions → API Tokens → Secret</p>
-        </div>
-      </div>
-      <label class="flex items-center gap-2 cursor-pointer select-none">
-        <input type="checkbox" name="proxmox_verify_ssl" value="on" class="w-4 h-4 rounded accent-blue-500">
-        <span class="text-sm text-slate-300">Verify SSL certificate</span>
+        <span class="ml-auto text-xs px-2 py-0.5 rounded-full flex-shrink-0
+          {% if r.status == 'running' %}bg-green-900/40 text-green-400
+          {% else %}bg-slate-700 text-slate-400{% endif %}">
+          {{ r.status }}
+        </span>
       </label>
-      <div class="flex gap-2 items-center flex-wrap">
-        <button
-          hx-post="/setup/connect/proxmox/test"
-          hx-include="[name='proxmox_url'],[name='proxmox_api_user'],[name='proxmox_token_id'],[name='proxmox_secret'],[name='proxmox_verify_ssl']"
-          hx-target="#proxmox-test-result"
-          class="px-4 py-2 rounded-lg bg-slate-600 hover:bg-slate-500 text-sm font-medium text-slate-200 transition-colors">
-          Test connection
-        </button>
-        <button
-          hx-post="/setup/connect/proxmox/save"
-          hx-include="[name='proxmox_url'],[name='proxmox_api_user'],[name='proxmox_token_id'],[name='proxmox_secret'],[name='proxmox_verify_ssl']"
-          hx-target="#proxmox-section"
-          hx-swap="outerHTML"
-          class="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-sm font-medium text-white transition-colors">
-          Save
-        </button>
+      {% if r.ip %}
+      <input type="hidden" name="vm_ip_{{ r.vmid }}" value="{{ r.ip }}">
+      {% else %}
+      <div class="mt-2 ml-7">
+        <input type="text" name="vm_ip_{{ r.vmid }}" placeholder="Enter IP address"
+               class="w-48 bg-slate-700 border border-slate-600 rounded px-2 py-1 text-xs text-slate-200 focus:outline-none focus:border-blue-500 placeholder:text-slate-500">
+        <span class="text-xs text-slate-500 ml-2">IP not auto-detected</span>
       </div>
+      {% endif %}
+    </div>
+    {% endfor %}
+  </form>
+  <div class="flex flex-col gap-2 items-start pt-1">
+    <button type="button"
+      hx-post="/setup/connect/proxmox/save-vms"
+      hx-include="#proxmox-vm-form"
+      hx-vals='{"vm_action": "now"}'
+      hx-target="#proxmox-section"
+      hx-swap="outerHTML"
+      class="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-sm font-medium text-white transition-colors">
+      Set up logins now
+    </button>
+    <button type="button"
+      hx-post="/setup/connect/proxmox/save-vms"
+      hx-include="#proxmox-vm-form"
+      hx-vals='{"vm_action": "later"}'
+      hx-target="#proxmox-section"
+      hx-swap="outerHTML"
+      class="px-4 py-2 rounded-lg bg-slate-700 hover:bg-slate-600 text-sm font-medium text-slate-300 transition-colors">
+      Save to set up later
+    </button>
+    <button type="button"
+      hx-post="/setup/connect/proxmox/skip-vms"
+      hx-target="#proxmox-section"
+      hx-swap="outerHTML"
+      class="text-xs text-slate-500 hover:text-slate-400 transition-colors px-1 py-1">
+      Skip
+    </button>
+  </div>
 
-    {% endif %}
+  {% elif proxmox_step == 'done' %}
+  <!-- ── Done ── -->
+  <p class="text-sm text-green-400">&#10003; Proxmox setup complete.</p>
+  {% if proxmox_added_summary %}
+  <p class="text-xs text-slate-400">{{ proxmox_added_summary }}</p>
+  {% endif %}
+
+  {% elif proxmox_connected %}
+  <!-- Already connected — offer to continue setup -->
+  <p class="text-xs text-slate-400">
+    Credentials saved. Continue to discover and add your VMs and LXC containers.
+  </p>
+  <button
+    hx-post="/setup/connect/proxmox/discover"
+    hx-target="#proxmox-section"
+    hx-swap="outerHTML"
+    class="px-4 py-2 rounded-lg bg-slate-600 hover:bg-slate-500 text-sm font-medium text-slate-200 transition-colors">
+    Discover VMs &amp; LXCs
+  </button>
+
+  {% else %}
+  <!-- ── Step 1: API credentials ── -->
+  <div id="proxmox-test-result"></div>
+  <div>
+    <label class="block text-xs font-medium text-slate-400 mb-1">Proxmox URL</label>
+    <input type="url" name="proxmox_url" value="{{ proxmox_url or '' }}"
+      placeholder="https://192.168.1.10:8006"
+      class="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-blue-500 placeholder:text-slate-500">
+  </div>
+  <div>
+    <label class="block text-xs font-medium text-slate-400 mb-1">API user</label>
+    <input type="text" name="proxmox_api_user" placeholder="root@pam"
+      class="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-blue-500 placeholder:text-slate-500">
+    <p class="text-xs text-slate-500 mt-1">Datacenter → Permissions → Users</p>
+  </div>
+  <div class="flex gap-3">
+    <div class="flex-1">
+      <label class="block text-xs font-medium text-slate-400 mb-1">Token ID</label>
+      <input type="text" name="proxmox_token_id" placeholder="root@pam!Keepup"
+        class="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-blue-500 placeholder:text-slate-500">
+      <p class="text-xs text-slate-500 mt-1">Datacenter → Permissions → API Tokens → Token ID</p>
+    </div>
+    <div class="flex-1">
+      <label class="block text-xs font-medium text-slate-400 mb-1">Secret</label>
+      <input type="password" name="proxmox_secret" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+        class="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-blue-500 placeholder:text-slate-500">
+      <p class="text-xs text-slate-500 mt-1">Datacenter → Permissions → API Tokens → Secret</p>
+    </div>
+  </div>
+  <label class="flex items-center gap-2 cursor-pointer select-none">
+    <input type="checkbox" name="proxmox_verify_ssl" value="on" class="w-4 h-4 rounded accent-blue-500">
+    <span class="text-sm text-slate-300">Verify SSL certificate</span>
+  </label>
+  <div class="flex gap-2 items-center flex-wrap">
+    <button
+      hx-post="/setup/connect/proxmox/test"
+      hx-include="[name='proxmox_url'],[name='proxmox_api_user'],[name='proxmox_token_id'],[name='proxmox_secret'],[name='proxmox_verify_ssl']"
+      hx-target="#proxmox-test-result"
+      class="px-4 py-2 rounded-lg bg-slate-600 hover:bg-slate-500 text-sm font-medium text-slate-200 transition-colors">
+      Test connection
+    </button>
+    <button
+      hx-post="/setup/connect/proxmox/save"
+      hx-include="[name='proxmox_url'],[name='proxmox_api_user'],[name='proxmox_token_id'],[name='proxmox_secret'],[name='proxmox_verify_ssl']"
+      hx-target="#proxmox-section"
+      hx-swap="outerHTML"
+      class="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-sm font-medium text-white transition-colors">
+      Save
+    </button>
+  </div>
+
+  {% endif %}
 
   </div>
 </div>
