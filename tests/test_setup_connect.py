@@ -126,6 +126,69 @@ def test_proxmox_save_derives_api_user_from_token_id(setup_client, data_dir):
     assert creds.get("token_id") == "root@pam!Keepup"
 
 
+def test_proxmox_save_auto_adds_node(setup_client, data_dir, config_file):
+    """Proxmox node is added automatically on save — no manual prompt needed."""
+    import yaml
+    _create_admin()
+    with patch("app.auth_router.ProxmoxClient") as MockClient:
+        instance = AsyncMock()
+        instance.get_nodes = AsyncMock(return_value=["pve"])
+        instance.discover_resources = AsyncMock(return_value=[])
+        MockClient.return_value = instance
+        setup_client.post(
+            "/setup/connect/proxmox/save",
+            data={
+                "proxmox_url": "https://192.168.5.226:8006",
+                "proxmox_token_id": "root@pam!Keepup",
+                "proxmox_secret": "abc123",
+            },
+        )
+    raw = yaml.safe_load(config_file.read_text())
+    hosts = raw.get("hosts", [])
+    assert any(h["host"] == "192.168.5.226" and h.get("proxmox_node") == "pve" for h in hosts)
+
+
+def test_proxmox_save_node_not_duplicated(setup_client, data_dir, config_file):
+    """Proxmox node is not added twice if already present."""
+    import yaml
+    _create_admin()
+    with patch("app.auth_router.ProxmoxClient") as MockClient:
+        instance = AsyncMock()
+        instance.get_nodes = AsyncMock(return_value=["pve"])
+        instance.discover_resources = AsyncMock(return_value=[])
+        MockClient.return_value = instance
+        for _ in range(2):
+            setup_client.post(
+                "/setup/connect/proxmox/save",
+                data={
+                    "proxmox_url": "https://192.168.5.226:8006",
+                    "proxmox_token_id": "root@pam!Keepup",
+                    "proxmox_secret": "abc123",
+                },
+            )
+    raw = yaml.safe_load(config_file.read_text())
+    node_hosts = [h for h in raw.get("hosts", []) if h.get("host") == "192.168.5.226"]
+    assert len(node_hosts) == 1
+
+
+def test_proxmox_discover_auto_adds_node(setup_client, data_dir, config_file):
+    """discover endpoint also auto-adds the node."""
+    import yaml
+    _create_admin()
+    from app.config_manager import save_proxmox_config
+    from app.credentials import save_integration_credentials
+    save_proxmox_config(url="https://192.168.5.227:8006", verify_ssl=False)
+    save_integration_credentials("proxmox", token_id="root@pam!t", secret="s", api_user="root@pam")
+    with patch("app.auth_router.ProxmoxClient") as MockClient:
+        instance = AsyncMock()
+        instance.get_nodes = AsyncMock(return_value=["pve"])
+        instance.discover_resources = AsyncMock(return_value=[])
+        MockClient.return_value = instance
+        setup_client.post("/setup/connect/proxmox/discover")
+    raw = yaml.safe_load(config_file.read_text())
+    assert any(h["host"] == "192.168.5.227" and h.get("proxmox_node") == "pve" for h in raw.get("hosts", []))
+
+
 def test_proxmox_existing_api_user_in_config_still_readable(data_dir):
     """Existing configs with api_user stored explicitly continue to work."""
     from app.credentials import save_integration_credentials, get_integration_credentials
@@ -243,8 +306,8 @@ def test_proxmox_discover_success(setup_client, data_dir):
         response = setup_client.post("/setup/connect/proxmox/discover")
 
     assert response.status_code == 200
-    # Discover now returns the node step
-    assert "pve" in response.text or "Proxmox node" in response.text or "Add Proxmox node" in response.text
+    # Discover auto-adds the node and proceeds to LXC/done step
+    assert "proxmox-section" in response.text
 
 
 def test_proxmox_discover_failure(setup_client, data_dir):
@@ -271,31 +334,6 @@ def test_proxmox_discover_failure(setup_client, data_dir):
 # ---------------------------------------------------------------------------
 
 
-def test_proxmox_add_node(setup_client, data_dir):
-    _create_admin()
-    from app.config_manager import save_proxmox_config
-    from app.credentials import save_integration_credentials
-
-    save_proxmox_config(url="https://192.168.1.10:8006", verify_ssl=False)
-    save_integration_credentials("proxmox", token_id="user@pam!token", secret="abc")
-
-    with patch("app.auth_router.ProxmoxClient") as MockClient:
-        instance = AsyncMock()
-        instance.get_nodes = AsyncMock(return_value=["pve"])
-        MockClient.return_value = instance
-        response = setup_client.post("/setup/connect/proxmox/add-node")
-
-    assert response.status_code == 200
-    # Proceeds to LXC step (or done if no resources in session)
-    assert "proxmox-section" in response.text
-
-
-def test_proxmox_skip_node(setup_client, data_dir):
-    _create_admin()
-    response = setup_client.post("/setup/connect/proxmox/skip-node")
-    assert response.status_code == 200
-    # No LXCs in session → skips to done or VMs
-    assert "proxmox-section" in response.text
 
 
 def test_proxmox_test_ssh_no_config(setup_client, data_dir):

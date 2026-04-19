@@ -464,33 +464,37 @@ async def setup_save_proxmox(
         save_integration_credentials("proxmox", **cred_kwargs)
     _queue_integration_host(request, "proxmox", "Proxmox VE", url)
 
-    nodes: list[str] = []
     resources: list[dict] = []
     if url and token_id and secret:
         try:
+            import urllib.parse
             token = f"{token_id}={secret}"
             client = ProxmoxClient(url=url, api_token=token, verify_ssl=verify_ssl)
             nodes = await client.get_nodes()
             resources = await client.discover_resources()
             request.session["setup_proxmox_resources"] = resources
+            px_host = urllib.parse.urlparse(url).hostname or ""
+            existing = {h["host"] for h in get_hosts()}
+            for node in nodes:
+                if px_host and px_host not in existing:
+                    add_host(
+                        name=f"Proxmox VE ({node})",
+                        host=px_host,
+                        user=None,
+                        port=None,
+                        proxmox_node=node,
+                    )
+                    existing.add(px_host)
         except Exception:
             pass
 
-    return templates.TemplateResponse(
-        "partials/setup_proxmox_section.html",
-        {
-            "request": request,
-            "proxmox_connected": True,
-            "proxmox_step": "node",
-            "proxmox_nodes": nodes,
-            "proxmox_url": url,
-        },
-    )
+    return _proxmox_lxc_step(request, resources)
 
 
 @router.post("/setup/connect/proxmox/discover", response_class=HTMLResponse)
 async def setup_proxmox_discover(request: Request) -> HTMLResponse:
     """For already-connected Proxmox: discover resources and enter the guided flow."""
+    import urllib.parse
     url, token, verify_ssl = _setup_proxmox_client_parts()
     if not url or not token:
         return HTMLResponse('<p class="text-sm text-red-400">Proxmox not configured.</p>')
@@ -499,51 +503,22 @@ async def setup_proxmox_discover(request: Request) -> HTMLResponse:
         nodes = await client.get_nodes()
         resources = await client.discover_resources()
         request.session["setup_proxmox_resources"] = resources
-        return templates.TemplateResponse(
-            "partials/setup_proxmox_section.html",
-            {
-                "request": request,
-                "proxmox_connected": True,
-                "proxmox_step": "node",
-                "proxmox_nodes": nodes,
-                "proxmox_url": url,
-            },
-        )
+        px_host = urllib.parse.urlparse(url).hostname or ""
+        existing = {h["host"] for h in get_hosts()}
+        for node in nodes:
+            if px_host and px_host not in existing:
+                add_host(
+                    name=f"Proxmox VE ({node})",
+                    host=px_host,
+                    user=None,
+                    port=None,
+                    proxmox_node=node,
+                )
+                existing.add(px_host)
+        return _proxmox_lxc_step(request, resources)
     except Exception as exc:
         return HTMLResponse(f'<p class="text-sm text-red-400">Discovery failed: {exc}</p>')
 
-
-@router.post("/setup/connect/proxmox/add-node", response_class=HTMLResponse)
-async def setup_proxmox_add_node(request: Request) -> HTMLResponse:
-    import urllib.parse
-    url, token, verify_ssl = _setup_proxmox_client_parts()
-    px_host = urllib.parse.urlparse(url).hostname or ""
-    try:
-        client = ProxmoxClient(url=url, api_token=token, verify_ssl=verify_ssl)
-        nodes = await client.get_nodes()
-    except Exception as exc:
-        return HTMLResponse(
-            f'<p class="text-sm text-red-400">Could not reach Proxmox API: {exc}</p>'
-        )
-    existing = {h["host"] for h in get_hosts()}
-    for node in nodes:
-        if px_host and px_host not in existing:
-            add_host(
-                name=f"Proxmox VE ({node})",
-                host=px_host,
-                user=None,
-                port=None,
-                proxmox_node=node,
-            )
-            existing.add(px_host)
-    resources = request.session.get("setup_proxmox_resources", [])
-    return _proxmox_lxc_step(request, resources)
-
-
-@router.post("/setup/connect/proxmox/skip-node", response_class=HTMLResponse)
-async def setup_proxmox_skip_node(request: Request) -> HTMLResponse:
-    resources = request.session.get("setup_proxmox_resources", [])
-    return _proxmox_lxc_step(request, resources)
 
 
 @router.post("/setup/connect/proxmox/test-ssh", response_class=HTMLResponse)
