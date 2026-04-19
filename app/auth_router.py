@@ -623,7 +623,7 @@ async def setup_proxmox_save_lxcs(
             continue
         vmid = int(vmid_str) if vmid_str.isdigit() else None
         if vmid is not None:
-            add_host(name=name, host=ip, user=None, port=None, proxmox_node=node, proxmox_vmid=vmid)
+            add_host(name=name, host=ip, user=None, port=None, proxmox_node=node, proxmox_vmid=vmid, docker_mode="all")
             existing.add(ip)
 
     resources = request.session.get("setup_proxmox_resources", [])

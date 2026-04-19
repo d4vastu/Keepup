@@ -323,7 +323,10 @@ def test_proxmox_save_lxcs(setup_client, data_dir):
     )
     assert response.status_code == 200
     from app.config_manager import get_hosts
-    assert any(h.get("proxmox_vmid") == 100 for h in get_hosts())
+    hosts = get_hosts()
+    lxc = next((h for h in hosts if h.get("proxmox_vmid") == 100), None)
+    assert lxc is not None
+    assert lxc.get("docker_mode") == "all"
 
 
 def test_proxmox_skip_lxcs(setup_client, data_dir):
