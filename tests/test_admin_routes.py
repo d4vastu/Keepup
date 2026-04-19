@@ -659,6 +659,8 @@ def test_admin_integrations_test_portainer_generic_error(client):
 
 def test_admin_proxmox_select_hosts_correct_format(client, data_dir, config_file):
     """selected_hosts field uses node:vmid:type:name:ip format."""
+    import yaml
+
     response = client.post(
         "/admin/integrations/proxmox/select-hosts",
         data={
@@ -670,6 +672,23 @@ def test_admin_proxmox_select_hosts_correct_format(client, data_dir, config_file
     )
     assert response.status_code == 200
     assert "added" in response.text.lower()
+    raw = yaml.safe_load(config_file.read_text())
+    lxc = next(h for h in raw["hosts"] if h["host"] == "192.168.1.21")
+    assert lxc.get("docker_mode") == "all"
+
+
+def test_admin_proxmox_select_hosts_lxc_docker_mode_special_chars(client, data_dir, config_file):
+    """LXC names with special chars still get docker_mode=all."""
+    import yaml
+
+    response = client.post(
+        "/admin/integrations/proxmox/select-hosts",
+        data={"selected_hosts": ["pve:101:lxc:My CT (test):192.168.1.55"]},
+    )
+    assert response.status_code == 200
+    raw = yaml.safe_load(config_file.read_text())
+    lxc = next(h for h in raw["hosts"] if h["host"] == "192.168.1.55")
+    assert lxc.get("docker_mode") == "all"
 
 
 def test_admin_proxmox_select_hosts_skips_no_ip(client):

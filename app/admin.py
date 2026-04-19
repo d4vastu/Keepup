@@ -318,6 +318,7 @@ async def admin_proxmox_select_hosts(request: Request) -> HTMLResponse:
                 proxmox_node=node,
                 proxmox_vmid=vmid,
                 proxmox_type="lxc",
+                docker_mode="all",
             )
             lxc_added.append(name)
         else:
