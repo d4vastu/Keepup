@@ -76,7 +76,11 @@ The setup wizard runs automatically the first time (when no admin account exists
 1. **Create account** — set a username and password; optionally enroll TOTP 2FA
 2. **Save your backup key** — a one-time recovery key is displayed; **copy it and store it somewhere safe** — this is the only way to reset your password if you lose access
 3. **Connect infrastructure** — configure Proxmox VE, Proxmox Backup Server, OPNsense, pfSense, Home Assistant, Portainer, and Docker Hub
-4. **Discover Proxmox hosts** — if Proxmox is connected, select VMs and LXC containers to set up SSH monitoring for
+4. **Discover Proxmox hosts** — if Proxmox is connected, a guided multi-step flow walks through:
+   - Selecting LXC containers to monitor (updates run via `pct exec` — no SSH agent required inside the container)
+   - Generating an SSH key pair for Keepup (`keepup_proxmox_ed25519`) with a one-click copy command to authorise it on your nodes
+   - Selecting VMs to monitor via SSH
+   - The dashboard groups discovered resources by Proxmox node with type badges (Node, LXC, VM)
 5. **SSH hosts** — add the Linux hosts you want to monitor; each gets a connection test
 6. **SSH hosts (pre-populated)** — if Proxmox discovery was used, queued hosts appear here pre-filled
 7. **Container monitoring** — choose which Docker containers to monitor for image updates on each host
@@ -182,7 +186,7 @@ Configure integrations from the setup wizard (step 3) or **Admin → Connections
 
 | Integration | What it enables |
 |---|---|
-| **Proxmox VE** | Discover VMs and LXC containers; queue them for SSH host setup |
+| **Proxmox VE** | Discover VMs and LXC containers; guided setup with SSH key generation; LXC updates via `pct exec`; resources grouped by node on the dashboard |
 | **Proxmox Backup Server** | Connected for future monitoring features |
 | **OPNsense** | Connected for future monitoring features |
 | **pfSense** | Connected for future monitoring features |
@@ -190,7 +194,9 @@ Configure integrations from the setup wizard (step 3) or **Admin → Connections
 | **Portainer** | Use as a Docker backend instead of or alongside SSH |
 | **Docker Hub** | Higher rate limits for image digest lookups (free account + access token) |
 
-For Proxmox VE and PBS, credentials are entered as two separate fields: **API user** (e.g. `root@pam`) and **API token** (e.g. `tokenname=uuid`). Find these in Proxmox under **Datacenter → Permissions → API Tokens**.
+For Proxmox VE, credentials are entered as a **Token ID** (e.g. `root@pam!mytoken`) and **Token Secret** (the UUID). The API user is derived automatically from the Token ID — no separate field needed. Find these in Proxmox under **Datacenter → Permissions → API Tokens**.
+
+For Proxmox Backup Server, the same Token ID + Secret format applies.
 
 ---
 
