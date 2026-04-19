@@ -252,17 +252,19 @@ async def _job_run_host_update(job_id: str, host: dict, creds: dict) -> None:
         _jobs[job_id]["done"] = True
 
 
-async def _job_run_proxmox_node_upgrade(job_id: str, node: str) -> None:
+async def _job_run_proxmox_node_upgrade(job_id: str, slug: str) -> None:
     try:
-        client = await _proxmox_client_from_config()
-        lines = await client.upgrade_node(node)
+        host = _get_host(slug)
+        ssh_cfg = get_ssh_config()
+        creds = get_credentials(slug)
+        lines = await run_host_update_buffered(host, ssh_cfg, creds)
         _jobs[job_id]["lines"] = lines
         _jobs[job_id]["status"] = "done"
-        log.info("Proxmox node upgrade complete: %s", node)
+        log.info("Proxmox node upgrade complete: %s", slug)
     except Exception as exc:
         _jobs[job_id]["status"] = "error"
         _jobs[job_id]["error"] = str(exc)
-        log.error("Proxmox node upgrade failed on %s: %s", node, exc)
+        log.error("Proxmox node upgrade failed on %s: %s", slug, exc)
     finally:
         _jobs[job_id]["done"] = True
 
@@ -560,7 +562,7 @@ async def host_update(
                 "label": host_name,
                 "sub": proxmox_node,
             }
-            background_tasks.add_task(_job_run_proxmox_node_upgrade, job_id, proxmox_node)
+            background_tasks.add_task(_job_run_proxmox_node_upgrade, job_id, slug)
             return templates.TemplateResponse(
                 "partials/job_poll.html",
                 {"request": request, "job_id": job_id, "job": _jobs[job_id]},

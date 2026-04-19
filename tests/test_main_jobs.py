@@ -646,11 +646,12 @@ async def test_job_run_proxmox_node_upgrade_success(config_file, data_dir):
     job_id = "pxjob1"
     m._jobs[job_id] = {"done": False, "status": "running", "error": None, "lines": []}
 
-    mock_client = AsyncMock()
-    mock_client.upgrade_node = AsyncMock(return_value=["5 upgraded", "done"])
-
-    with patch("app.main._proxmox_client_from_config", new=AsyncMock(return_value=mock_client)):
-        await m._job_run_proxmox_node_upgrade(job_id, "pve")
+    px_host = {"name": "PVE Node", "host": "10.0.0.5", "proxmox_node": "pve"}
+    with (
+        patch("app.main._get_host", return_value=px_host),
+        patch("app.main.run_host_update_buffered", new=AsyncMock(return_value=["5 upgraded", "done"])),
+    ):
+        await m._job_run_proxmox_node_upgrade(job_id, "pve-node")
 
     assert m._jobs[job_id]["done"] is True
     assert m._jobs[job_id]["status"] == "done"
@@ -664,15 +665,16 @@ async def test_job_run_proxmox_node_upgrade_failure(config_file, data_dir):
     job_id = "pxjob2"
     m._jobs[job_id] = {"done": False, "status": "running", "error": None, "lines": []}
 
-    with patch(
-        "app.main._proxmox_client_from_config",
-        new=AsyncMock(side_effect=Exception("Proxmox API unreachable")),
+    px_host = {"name": "PVE Node", "host": "10.0.0.5", "proxmox_node": "pve"}
+    with (
+        patch("app.main._get_host", return_value=px_host),
+        patch("app.main.run_host_update_buffered", new=AsyncMock(side_effect=Exception("SSH connection refused"))),
     ):
-        await m._job_run_proxmox_node_upgrade(job_id, "pve")
+        await m._job_run_proxmox_node_upgrade(job_id, "pve-node")
 
     assert m._jobs[job_id]["done"] is True
     assert m._jobs[job_id]["status"] == "error"
-    assert "Proxmox API unreachable" in m._jobs[job_id]["error"]
+    assert "SSH connection refused" in m._jobs[job_id]["error"]
 
 
 # ---------------------------------------------------------------------------
@@ -698,15 +700,12 @@ def test_host_update_proxmox_node_dispatches_job(client):
 
 
 def test_host_update_proxmox_node_job_completes(client):
-    """Proxmox node upgrade: end-to-end with mocked client."""
-    mock_client = AsyncMock()
-    mock_client.upgrade_node = AsyncMock(return_value=["5 upgraded"])
-
+    """Proxmox node upgrade: end-to-end via SSH."""
     px_host = {"name": "PVE Node", "host": "10.0.0.5", "proxmox_node": "pve"}
 
     with (
         patch("app.main._get_host", return_value=px_host),
-        patch("app.main._proxmox_client_from_config", new=AsyncMock(return_value=mock_client)),
+        patch("app.main.run_host_update_buffered", new=AsyncMock(return_value=["5 upgraded"])),
     ):
         response = client.post("/api/host/pve-node/update")
 
