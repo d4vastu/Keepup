@@ -153,6 +153,7 @@
             <div class="text-[13px] font-medium text-slate-100">{{ host.name }}</div>
             <div class="text-[11px] text-slate-500 font-mono mt-0.5">{{ host.host }}</div>
             <span class="inline-flex items-center mt-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-orange-950/50 text-orange-400 border border-orange-900/40">Node</span>
+            <span class="inline-flex items-center mt-1 ml-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-slate-800 text-slate-400 border border-slate-700">Proxmox API</span>
           </div>
           <div id="host-{{ host.slug }}-status"
             data-check
@@ -173,6 +174,7 @@
             <div class="text-[13px] font-medium text-slate-100">{{ host.name }}</div>
             <div class="text-[11px] text-slate-500 font-mono mt-0.5">{{ host.host }}</div>
             <span class="inline-flex items-center mt-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-orange-950/50 text-orange-400 border border-orange-900/40">LXC {{ host.proxmox_vmid }}</span>
+            <span class="inline-flex items-center mt-1 ml-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-slate-800 text-slate-400 border border-slate-700">pct exec</span>
           </div>
           <div id="host-{{ host.slug }}-status"
             data-check
@@ -193,6 +195,7 @@
             <div class="text-[13px] font-medium text-slate-100">{{ host.name }}</div>
             <div class="text-[11px] text-slate-500 font-mono mt-0.5">{{ host.host }}</div>
             <span class="inline-flex items-center mt-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-orange-950/50 text-orange-400 border border-orange-900/40">VM {{ host.proxmox_vmid }}</span>
+            <span class="inline-flex items-center mt-1 ml-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-slate-800 text-slate-400 border border-slate-700">SSH</span>
           </div>
           <div id="host-{{ host.slug }}-status"
             data-check
