@@ -22,6 +22,7 @@ from .auth import (
 from .config_manager import (
     add_host,
     delete_host,
+    derive_api_user,
     get_available_ssh_keys,
     get_dockerhub_config,
     get_email_config,
@@ -406,7 +407,6 @@ def _proxmox_vm_step(request: Request, resources: list[dict]) -> HTMLResponse:
 async def setup_test_proxmox(
     request: Request,
     proxmox_url: str = Form(""),
-    proxmox_api_user: str = Form(""),
     proxmox_token_id: str = Form(""),
     proxmox_secret: str = Form(""),
     proxmox_verify_ssl: str = Form(""),
@@ -444,22 +444,19 @@ async def setup_test_proxmox(
 async def setup_save_proxmox(
     request: Request,
     proxmox_url: str = Form(""),
-    proxmox_api_user: str = Form(""),
     proxmox_token_id: str = Form(""),
     proxmox_secret: str = Form(""),
     proxmox_verify_ssl: str = Form(""),
 ) -> HTMLResponse:
     url = proxmox_url.strip().rstrip("/")
-    api_user = proxmox_api_user.strip()
     token_id = proxmox_token_id.strip()
     secret = proxmox_secret.strip()
     verify_ssl = proxmox_verify_ssl == "on"
     save_proxmox_config(url=url, verify_ssl=verify_ssl)
     cred_kwargs: dict = {}
-    if api_user:
-        cred_kwargs["api_user"] = api_user
     if token_id:
         cred_kwargs["token_id"] = token_id
+        cred_kwargs["api_user"] = derive_api_user(token_id)
     if secret:
         cred_kwargs["secret"] = secret
     if cred_kwargs:

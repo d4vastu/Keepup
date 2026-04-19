@@ -8,6 +8,11 @@ _CONFIG_PATH = Path(os.getenv("CONFIG_PATH", "/app/config/config.yml"))
 _lock = threading.Lock()
 
 
+def derive_api_user(token_id: str) -> str:
+    """Derive the Proxmox API user from a Token ID (format: user@realm!token_name)."""
+    return token_id.split("!")[0] if "!" in token_id else token_id
+
+
 def slugify(name: str) -> str:
     import re
     slug = name.lower().replace(" ", "-").replace("_", "-")

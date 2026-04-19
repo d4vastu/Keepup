@@ -100,6 +100,41 @@ def test_setup_security_correct_totp_enrolls_mfa(setup_client):
 
 
 # ---------------------------------------------------------------------------
+# derive_api_user — backwards compat via saved credentials
+# ---------------------------------------------------------------------------
+
+
+def test_proxmox_save_derives_api_user_from_token_id(setup_client, data_dir):
+    """Saving Proxmox credentials derives api_user from token_id automatically."""
+    _create_admin()
+    with patch("app.auth_router.ProxmoxClient") as MockClient:
+        instance = AsyncMock()
+        instance.get_nodes = AsyncMock(return_value=[])
+        instance.discover_resources = AsyncMock(return_value=[])
+        MockClient.return_value = instance
+        setup_client.post(
+            "/setup/connect/proxmox/save",
+            data={
+                "proxmox_url": "https://192.168.1.10:8006",
+                "proxmox_token_id": "root@pam!Keepup",
+                "proxmox_secret": "abc123",
+            },
+        )
+    from app.credentials import get_integration_credentials
+    creds = get_integration_credentials("proxmox")
+    assert creds.get("api_user") == "root@pam"
+    assert creds.get("token_id") == "root@pam!Keepup"
+
+
+def test_proxmox_existing_api_user_in_config_still_readable(data_dir):
+    """Existing configs with api_user stored explicitly continue to work."""
+    from app.credentials import save_integration_credentials, get_integration_credentials
+    save_integration_credentials("proxmox", api_user="root@pam", token_id="root@pam!old", secret="s")
+    creds = get_integration_credentials("proxmox")
+    assert creds.get("api_user") == "root@pam"
+
+
+# ---------------------------------------------------------------------------
 # POST /setup/connect/proxmox/test
 # ---------------------------------------------------------------------------
 
@@ -114,7 +149,6 @@ def test_proxmox_test_success(setup_client, data_dir):
             "/setup/connect/proxmox/test",
             data={
                 "proxmox_url": "https://192.168.1.10:8006",
-                "proxmox_api_user": "user@pam",
                 "proxmox_token_id": "user@pam!token",
                 "proxmox_secret": "abc",
             },
@@ -133,7 +167,6 @@ def test_proxmox_test_auth_error(setup_client, data_dir):
             "/setup/connect/proxmox/test",
             data={
                 "proxmox_url": "https://192.168.1.10:8006",
-                "proxmox_api_user": "user@pam",
                 "proxmox_token_id": "user@pam!badtoken",
                 "proxmox_secret": "bad",
             },
@@ -154,7 +187,6 @@ def test_proxmox_test_connect_error(setup_client, data_dir):
             "/setup/connect/proxmox/test",
             data={
                 "proxmox_url": "https://192.0.2.1:8006",
-                "proxmox_api_user": "user@pam",
                 "proxmox_token_id": "user@pam!token",
                 "proxmox_secret": "abc",
             },
@@ -175,7 +207,6 @@ def test_proxmox_test_ssl_error(setup_client, data_dir):
             "/setup/connect/proxmox/test",
             data={
                 "proxmox_url": "https://192.168.1.10:8006",
-                "proxmox_api_user": "user@pam",
                 "proxmox_token_id": "user@pam!token",
                 "proxmox_secret": "abc",
             },
