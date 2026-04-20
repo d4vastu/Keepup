@@ -1,4 +1,4 @@
-<div id="proxmox-section" class="bg-slate-800/60 border border-slate-700 rounded-2xl overflow-hidden">
+<div id="proxmox-section" class="bg-slate-800/60 border border-slate-700 rounded-2xl overflow-hidden" data-step="{{ proxmox_step or '' }}">
   <div class="flex items-center justify-between px-5 py-4 border-b border-slate-700">
     <div>
       <h2 class="text-sm font-semibold text-slate-200">Proxmox VE</h2>
@@ -65,12 +65,18 @@
   {% set lxcs = proxmox_resources | selectattr('type', 'equalto', 'lxc') | list %}
   <p class="text-xs text-slate-400">Select the LXC containers you want Keepup to monitor.</p>
   <div class="space-y-1.5">
+    <label class="flex items-center gap-3 px-3 py-2 rounded-lg bg-slate-700/50 cursor-pointer hover:bg-slate-700 transition-colors">
+      <input type="checkbox" id="proxmox-lxc-select-all"
+             class="w-4 h-4 rounded accent-blue-500"
+             onchange="proxmoxLxcToggleAll(this.checked)">
+      <span class="text-sm font-medium text-slate-200">Select all / none</span>
+    </label>
     {% for r in lxcs %}
     <label class="flex items-center gap-3 px-3 py-2 rounded-lg bg-slate-700/50 cursor-pointer hover:bg-slate-700 transition-colors">
       <input type="checkbox" name="selected_lxcs"
              value="{{ r.node }}:{{ r.vmid }}:{{ r.name }}:{{ r.ip or '' }}"
              class="proxmox-lxc-check w-4 h-4 rounded accent-blue-500 flex-shrink-0"
-             onchange="proxmoxUpdateLxcPanel()">
+             onchange="proxmoxUpdateLxcPanel(); proxmoxUpdateLxcSelectAll()">
       <div class="min-w-0">
         <span class="text-sm text-slate-200 font-medium">{{ r.name }}</span>
         <span class="text-xs text-slate-500 ml-2">LXC {{ r.vmid }} · {{ r.node }}{% if r.ip %} · {{ r.ip }}{% endif %}</span>
@@ -164,9 +170,20 @@
   </div>
 
   <script>
+  function proxmoxLxcToggleAll(checked) {
+    document.querySelectorAll('.proxmox-lxc-check').forEach(cb => cb.checked = checked);
+    proxmoxUpdateLxcPanel();
+  }
+  function proxmoxUpdateLxcSelectAll() {
+    const all = document.querySelectorAll('.proxmox-lxc-check');
+    const checked = document.querySelectorAll('.proxmox-lxc-check:checked');
+    const sa = document.getElementById('proxmox-lxc-select-all');
+    if (sa) sa.checked = all.length > 0 && all.length === checked.length;
+  }
   function proxmoxUpdateLxcPanel() {
     const anyChecked = document.querySelectorAll('.proxmox-lxc-check:checked').length > 0;
     document.getElementById('proxmox-lxc-ssh-panel').classList.toggle('hidden', !anyChecked);
+    proxmoxUpdateLxcSelectAll();
     proxmoxUpdateAddBtn();
   }
   function proxmoxToggleSshAuth() {

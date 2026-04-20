@@ -487,6 +487,10 @@ async def setup_save_proxmox(
                         proxmox_node=node,
                     )
                     existing.add(px_host)
+            # Node auto-added — remove from SSH wizard queue to avoid duplicate
+            pending = request.session.get("setup_integration_pending", [])
+            pending = [h for h in pending if h.get("integration") != "proxmox"]
+            request.session["setup_integration_pending"] = pending
         except Exception:
             pass
 
@@ -517,6 +521,10 @@ async def setup_proxmox_discover(request: Request) -> HTMLResponse:
                     proxmox_node=node,
                 )
                 existing.add(px_host)
+        # Node auto-added — remove from SSH wizard queue to avoid duplicate
+        pending = request.session.get("setup_integration_pending", [])
+        pending = [h for h in pending if h.get("integration") != "proxmox"]
+        request.session["setup_integration_pending"] = pending
         return _proxmox_lxc_step(request, resources)
     except Exception as exc:
         return HTMLResponse(f'<p class="text-sm text-red-400">Discovery failed: {exc}</p>')
@@ -1646,9 +1654,13 @@ async def setup_containers_page(request: Request) -> HTMLResponse:
     ssh_cfg = get_ssh_config()
 
     host_data = []
+    pct_exec_count = 0
     for h in hosts:
         from .credentials import get_credentials
 
+        if h.get("proxmox_vmid") is not None:
+            pct_exec_count += 1
+            continue
         creds = get_credentials(h["slug"])
         containers = await discover_containers(h, ssh_cfg, creds)
         host_data.append(
@@ -1665,6 +1677,7 @@ async def setup_containers_page(request: Request) -> HTMLResponse:
         {
             "request": request,
             "hosts": host_data,
+            "pct_exec_count": pct_exec_count,
         },
     )
 

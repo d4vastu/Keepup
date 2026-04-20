@@ -771,3 +771,72 @@ def test_generate_ssh_key_public_key_valid_format(setup_client, data_dir, tmp_pa
     assert response.status_code == 200
     assert "ssh-ed25519" in response.text
     assert "authorized_keys" in response.text
+
+
+# ---------------------------------------------------------------------------
+# OP#100 — Wizard UX fixes
+# ---------------------------------------------------------------------------
+
+
+def test_proxmox_save_removes_proxmox_from_integration_pending(setup_client, data_dir):
+    """After node auto-add, _queue_integration_host entry is cleared for proxmox."""
+    _create_admin()
+    with patch("app.auth_router.ProxmoxClient") as MockClient:
+        instance = AsyncMock()
+        instance.get_nodes = AsyncMock(return_value=["pve"])
+        instance.discover_resources = AsyncMock(return_value=[])
+        MockClient.return_value = instance
+        setup_client.post(
+            "/setup/connect/proxmox/save",
+            data={
+                "proxmox_url": "https://192.168.5.228:8006",
+                "proxmox_token_id": "root@pam!Keepup",
+                "proxmox_secret": "abc123",
+            },
+        )
+    hosts_resp = setup_client.get("/setup/hosts")
+    # "hosts detected" banner only renders when proxmox_pending is non-empty
+    assert "hosts detected" not in hosts_resp.text
+
+
+def test_proxmox_discover_removes_proxmox_from_integration_pending(setup_client, data_dir):
+    """discover endpoint also removes Proxmox from SSH Hosts pending queue."""
+    from app.config_manager import save_proxmox_config
+    from app.credentials import save_integration_credentials
+    _create_admin()
+    save_proxmox_config(url="https://192.168.5.229:8006", verify_ssl=False)
+    save_integration_credentials("proxmox", token_id="root@pam!t", secret="s", api_user="root@pam")
+    with patch("app.auth_router.ProxmoxClient") as MockClient:
+        instance = AsyncMock()
+        instance.get_nodes = AsyncMock(return_value=["pve"])
+        instance.discover_resources = AsyncMock(return_value=[])
+        MockClient.return_value = instance
+        setup_client.post("/setup/connect/proxmox/discover")
+    hosts_resp = setup_client.get("/setup/hosts")
+    assert "hosts detected" not in hosts_resp.text
+
+
+def test_setup_containers_excludes_pct_exec_hosts(setup_client, data_dir, config_file):
+    """Container monitoring step skips hosts with proxmox_vmid (pct exec)."""
+    from app.config_manager import add_host
+    _create_admin()
+    add_host(name="My LXC", host="192.168.5.50", user=None, port=None,
+             proxmox_node="pve", proxmox_vmid=101)
+    with patch("app.auth_router.discover_containers", new=AsyncMock(return_value=[])):
+        response = setup_client.get("/setup/containers")
+    assert response.status_code == 200
+    # LXC host should not appear as a discoverable SSH Docker host
+    assert "My LXC" not in response.text
+
+
+def test_setup_containers_pct_exec_count_passed_to_template(setup_client, data_dir, config_file):
+    """pct exec hosts are not shown as discoverable SSH hosts in container step."""
+    from app.config_manager import add_host
+    _create_admin()
+    add_host(name="LXC 101", host="192.168.5.51", user=None, port=None,
+             proxmox_node="pve", proxmox_vmid=101)
+    with patch("app.auth_router.discover_containers", new=AsyncMock(return_value=[])):
+        response = setup_client.get("/setup/containers")
+    assert response.status_code == 200
+    # LXC host should not appear as a discoverable SSH host
+    assert "LXC 101" not in response.text

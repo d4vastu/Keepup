@@ -515,7 +515,7 @@
     </div>
 
     <!-- Navigation -->
-    <div class="flex justify-between items-center pt-4">
+    <div id="wizard-nav" class="flex justify-between items-center pt-4">
       <a href="/setup/hosts" class="text-sm text-slate-500 hover:text-slate-300">Skip — configure later</a>
       <a href="/setup/hosts"
         class="px-6 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-sm font-semibold text-white transition-colors">
@@ -560,6 +560,21 @@
     tile.classList.add('active');
     section.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   }
+
+  // Hide the continue nav while a Proxmox sub-step is active
+  const PROXMOX_ACTIVE_STEPS = ['lxcs', 'vms', 'docker'];
+  function syncWizardNav() {
+    const section = document.getElementById('proxmox-section');
+    const nav = document.getElementById('wizard-nav');
+    if (!section || !nav) return;
+    const step = section.dataset.step || '';
+    nav.classList.toggle('hidden', PROXMOX_ACTIVE_STEPS.includes(step));
+  }
+  document.addEventListener('htmx:afterSwap', function(e) {
+    if (e.detail && e.detail.target && e.detail.target.id === 'proxmox-section') {
+      syncWizardNav();
+    }
+  });
 
   // Auto-open config sections for already-connected integrations
   document.addEventListener('DOMContentLoaded', function() {
