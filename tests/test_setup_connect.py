@@ -881,15 +881,19 @@ def test_setup_containers_excludes_proxmox_node(setup_client, data_dir, config_f
     assert "192.168.5.226" not in called_hosts
 
 
-def test_setup_containers_includes_lxc_with_docker_mode(setup_client, data_dir, config_file):
-    """LXC hosts with docker_mode set are included in container discovery."""
+def test_setup_containers_shows_proxmox_docker_hosts(setup_client, data_dir, config_file):
+    """LXC hosts with docker_mode are shown as pre-configured without SSH discovery."""
     from app.config_manager import add_host
     _create_admin()
     add_host(name="NGINX", host="192.168.5.235", user=None, port=None,
              proxmox_node="pve", proxmox_vmid=102, docker_mode="all")
-    fake_containers = [{"id": "nginx", "name": "nginx", "image": "nginx:latest"}]
-    with patch("app.auth_router.discover_containers", new=AsyncMock(return_value=fake_containers)):
+    mock_discover = AsyncMock(return_value=[])
+    with patch("app.auth_router.discover_containers", new=mock_discover):
         response = setup_client.get("/setup/containers")
     assert response.status_code == 200
+    # LXC host should appear in the pre-configured section, not via SSH discovery
     assert "NGINX" in response.text
-    assert "nginx:latest" in response.text
+    assert "Docker monitoring configured" in response.text
+    # discover_containers should NOT be called for LXC hosts
+    called_hosts = [call.args[0].get("host") for call in mock_discover.call_args_list]
+    assert "192.168.5.235" not in called_hosts

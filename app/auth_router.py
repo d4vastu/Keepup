@@ -1658,6 +1658,7 @@ async def setup_containers_page(request: Request) -> HTMLResponse:
 
     host_data = []
     pct_exec_count = 0
+    proxmox_docker_hosts: list[dict] = []
     for h in hosts:
         from .credentials import get_credentials
 
@@ -1666,9 +1667,12 @@ async def setup_containers_page(request: Request) -> HTMLResponse:
         # Skip the Proxmox hypervisor node itself — it doesn't run Docker
         if proxmox_node and proxmox_vmid is None:
             continue
-        # Skip LXC/VM hosts that don't have Docker monitoring enabled
-        if proxmox_vmid is not None and not h.get("docker_mode"):
-            pct_exec_count += 1
+        if proxmox_vmid is not None:
+            if h.get("docker_mode"):
+                # Pre-configured via the Proxmox wizard — don't attempt SSH
+                proxmox_docker_hosts.append({"name": h["name"], "ip": h.get("host", "")})
+            else:
+                pct_exec_count += 1
             continue
         creds = get_credentials(h["slug"])
         containers = await discover_containers(h, ssh_cfg, creds)
@@ -1687,6 +1691,7 @@ async def setup_containers_page(request: Request) -> HTMLResponse:
             "request": request,
             "hosts": host_data,
             "pct_exec_count": pct_exec_count,
+            "proxmox_docker_hosts": proxmox_docker_hosts,
         },
     )
 
