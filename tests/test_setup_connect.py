@@ -395,8 +395,7 @@ def test_proxmox_save_lxcs(setup_client, data_dir):
     hosts = get_hosts()
     lxc = next((h for h in hosts if h.get("proxmox_vmid") == 100), None)
     assert lxc is not None
-    # docker_mode is not set at this stage — user is prompted next
-    assert lxc.get("docker_mode") is None
+    assert lxc.get("docker_mode") == "all"
 
 
 def test_proxmox_save_lxcs_shows_docker_step(setup_client, data_dir):
@@ -443,8 +442,8 @@ def test_proxmox_save_docker_sets_monitoring(setup_client, data_dir, config_file
     assert lxc.get("docker_mode") == "all"
 
 
-def test_proxmox_skip_docker_sets_no_monitoring(setup_client, data_dir, config_file):
-    """Skipping docker step leaves docker_mode unset."""
+def test_proxmox_skip_docker_retains_monitoring(setup_client, data_dir, config_file):
+    """Skipping the docker step leaves docker_mode=all set by add_host()."""
     import yaml
     _create_admin()
     setup_client.post(
@@ -461,7 +460,35 @@ def test_proxmox_skip_docker_sets_no_monitoring(setup_client, data_dir, config_f
     raw = yaml.safe_load(config_file.read_text())
     lxc = next((h for h in raw["hosts"] if h.get("proxmox_vmid") == 100), None)
     assert lxc is not None
-    assert lxc.get("docker_mode") is None
+    assert lxc.get("docker_mode") == "all"
+
+
+def test_proxmox_save_docker_opt_out(setup_client, data_dir, config_file):
+    """Unchecking an LXC in save-docker removes docker_mode (explicit opt-out)."""
+    import yaml
+    _create_admin()
+    setup_client.post(
+        "/setup/connect/proxmox/save-lxcs",
+        data={
+            "selected_lxcs": ["pve:100:debian:192.168.1.100", "pve:101:alpine:192.168.1.101"],
+            "proxmox_ssh_user": "root",
+            "proxmox_ssh_auth": "password",
+            "proxmox_ssh_password": "secret",
+        },
+    )
+    # Only check debian; alpine is unchecked (opt-out)
+    response = setup_client.post(
+        "/setup/connect/proxmox/save-docker",
+        data={"docker_lxcs": ["debian"]},
+    )
+    assert response.status_code == 200
+    raw = yaml.safe_load(config_file.read_text())
+    debian = next((h for h in raw["hosts"] if h.get("proxmox_vmid") == 100), None)
+    alpine = next((h for h in raw["hosts"] if h.get("proxmox_vmid") == 101), None)
+    assert debian is not None
+    assert debian.get("docker_mode") == "all"
+    assert alpine is not None
+    assert alpine.get("docker_mode") is None
 
 
 def test_proxmox_skip_lxcs(setup_client, data_dir):
