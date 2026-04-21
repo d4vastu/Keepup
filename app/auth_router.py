@@ -658,7 +658,7 @@ async def setup_proxmox_save_lxcs(
             continue
         vmid = int(vmid_str) if vmid_str.isdigit() else None
         if vmid is not None:
-            add_host(name=name, host=ip, user=None, port=None, proxmox_node=node, proxmox_vmid=vmid)
+            add_host(name=name, host=ip, user=None, port=None, proxmox_node=node, proxmox_vmid=vmid, docker_mode="all")
             existing.add(ip)
             added_lxcs.append({"name": name, "slug": slugify(name)})
 
@@ -692,9 +692,12 @@ def _proxmox_docker_step(
 @router.post("/setup/connect/proxmox/save-docker", response_class=HTMLResponse)
 async def setup_proxmox_save_docker(request: Request) -> HTMLResponse:
     form = await request.form()
-    selected_slugs = form.getlist("docker_lxcs")
-    for slug in selected_slugs:
-        set_docker_monitoring(slug=slug, mode="all")
+    checked_slugs = set(form.getlist("docker_lxcs"))
+    all_lxcs = request.session.get("setup_proxmox_docker_lxcs") or []
+    for lxc in all_lxcs:
+        slug = lxc.get("slug", "")
+        if slug not in checked_slugs:
+            set_docker_monitoring(slug=slug, mode="none")
     resources = request.session.get("setup_proxmox_resources", [])
     return _proxmox_vm_step(request, resources)
 
