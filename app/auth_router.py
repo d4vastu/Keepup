@@ -1661,7 +1661,13 @@ async def setup_containers_page(request: Request) -> HTMLResponse:
     for h in hosts:
         from .credentials import get_credentials
 
-        if h.get("proxmox_vmid") is not None:
+        proxmox_node = h.get("proxmox_node")
+        proxmox_vmid = h.get("proxmox_vmid")
+        # Skip the Proxmox hypervisor node itself — it doesn't run Docker
+        if proxmox_node and proxmox_vmid is None:
+            continue
+        # Skip LXC/VM hosts that don't have Docker monitoring enabled
+        if proxmox_vmid is not None and not h.get("docker_mode"):
             pct_exec_count += 1
             continue
         creds = get_credentials(h["slug"])

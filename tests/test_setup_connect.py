@@ -844,7 +844,7 @@ def test_proxmox_discover_removes_proxmox_from_integration_pending(setup_client,
 
 
 def test_setup_containers_excludes_pct_exec_hosts(setup_client, data_dir, config_file):
-    """Container monitoring step skips hosts with proxmox_vmid (pct exec)."""
+    """LXC hosts without docker_mode are skipped in container discovery."""
     from app.config_manager import add_host
     _create_admin()
     add_host(name="My LXC", host="192.168.5.50", user=None, port=None,
@@ -852,12 +852,11 @@ def test_setup_containers_excludes_pct_exec_hosts(setup_client, data_dir, config
     with patch("app.auth_router.discover_containers", new=AsyncMock(return_value=[])):
         response = setup_client.get("/setup/containers")
     assert response.status_code == 200
-    # LXC host should not appear as a discoverable SSH Docker host
     assert "My LXC" not in response.text
 
 
 def test_setup_containers_pct_exec_count_passed_to_template(setup_client, data_dir, config_file):
-    """pct exec hosts are not shown as discoverable SSH hosts in container step."""
+    """LXC hosts without docker_mode increment pct_exec_count."""
     from app.config_manager import add_host
     _create_admin()
     add_host(name="LXC 101", host="192.168.5.51", user=None, port=None,
@@ -865,5 +864,32 @@ def test_setup_containers_pct_exec_count_passed_to_template(setup_client, data_d
     with patch("app.auth_router.discover_containers", new=AsyncMock(return_value=[])):
         response = setup_client.get("/setup/containers")
     assert response.status_code == 200
-    # LXC host should not appear as a discoverable SSH host
     assert "LXC 101" not in response.text
+
+
+def test_setup_containers_excludes_proxmox_node(setup_client, data_dir, config_file):
+    """Proxmox hypervisor node (proxmox_node set, no vmid) is excluded from container discovery."""
+    from app.config_manager import add_host
+    _create_admin()
+    add_host(name="Proxmox VE", host="192.168.5.226", user=None, port=None,
+             proxmox_node="pve")
+    mock_discover = AsyncMock(return_value=[])
+    with patch("app.auth_router.discover_containers", new=mock_discover):
+        response = setup_client.get("/setup/containers")
+    assert response.status_code == 200
+    called_hosts = [call.args[0]["host"] for call in mock_discover.call_args_list]
+    assert "192.168.5.226" not in called_hosts
+
+
+def test_setup_containers_includes_lxc_with_docker_mode(setup_client, data_dir, config_file):
+    """LXC hosts with docker_mode set are included in container discovery."""
+    from app.config_manager import add_host
+    _create_admin()
+    add_host(name="NGINX", host="192.168.5.235", user=None, port=None,
+             proxmox_node="pve", proxmox_vmid=102, docker_mode="all")
+    fake_containers = [{"id": "nginx", "name": "nginx", "image": "nginx:latest"}]
+    with patch("app.auth_router.discover_containers", new=AsyncMock(return_value=fake_containers)):
+        response = setup_client.get("/setup/containers")
+    assert response.status_code == 200
+    assert "NGINX" in response.text
+    assert "nginx:latest" in response.text
