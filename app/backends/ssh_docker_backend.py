@@ -105,22 +105,24 @@ class SSHDockerBackend:
     # ------------------------------------------------------------------
 
     async def discover_stacks(self, host: dict) -> list[dict]:
-        """Return all Compose projects on the host (for admin discovery only)."""
+        """Return all Compose projects on the host (for admin discovery only).
+
+        Reads `docker ps -a` labels instead of `docker compose ls`, so
+        hosts running legacy `docker-compose` v1 (no v2 plugin) are also
+        supported. Also routes through `_ssh_params_for` so Proxmox LXC
+        hosts are reached via `pct exec`.
+        """
         ssh_cfg = get_ssh_config()
-        creds = get_credentials(host["slug"])
+        host_entry, ssh_creds, wrap = self._ssh_params_for(host)
         try:
-            async with await _connect(host, ssh_cfg, creds) as conn:
+            async with await _connect(host_entry, ssh_cfg, ssh_creds) as conn:
                 result = await conn.run(
-                    "docker compose ls --all --format json", check=False
+                    wrap("docker ps -a --format '{{json .}}'"), check=False
                 )
-                if result.returncode != 0 or not result.stdout.strip():
+                if result.returncode != 0:
                     return []
-                rows = _parse_json_output(result.stdout)
-                return [
-                    {"name": r["Name"], "config_file": r.get("ConfigFiles", "")}
-                    for r in rows
-                    if r.get("Name")
-                ]
+                containers = _parse_json_output(result.stdout)
+                return _compose_projects_from_ps(containers)
         except Exception:
             return []
 
@@ -306,11 +308,42 @@ class SSHDockerBackend:
         project_name: str,
         wrap: Callable[[str], str] | None = None,
     ) -> str:
+        """Look up the compose config file for a project via container labels.
+
+        Version-agnostic: reads `com.docker.compose.project.config_files`
+        from `docker ps -a` labels, which both compose v1 and v2 write.
+        Relative paths (common on v1) are normalized against the
+        `working_dir` label by `_compose_projects_from_ps`.
+        """
         wrap = wrap or (lambda c: c)
-        result = await conn.run(wrap("docker compose ls --all --format json"), check=False)
-        rows = _parse_json_output(result.stdout)
-        match = next((r for r in rows if r.get("Name") == project_name), None)
-        return match.get("ConfigFiles", "") if match else ""
+        result = await conn.run(
+            wrap("docker ps -a --format '{{json .}}'"), check=False
+        )
+        projects = _compose_projects_from_ps(_parse_json_output(result.stdout))
+        match = next((p for p in projects if p["name"] == project_name), None)
+        return match["config_file"] if match else ""
+
+    async def _detect_compose_binary(
+        self,
+        conn,
+        wrap: Callable[[str], str],
+        host_label: str,
+    ) -> str:
+        """Return the compose binary command (`docker compose` or `docker-compose`).
+
+        Raises RuntimeError if neither is available on the host.
+        """
+        result = await conn.run(wrap(_COMPOSE_PROBE), check=False)
+        lines = (result.stdout or "").strip().splitlines()
+        flavour = lines[-1].strip() if lines else ""
+        if flavour == "v2":
+            return "docker compose"
+        if flavour == "v1":
+            return "docker-compose"
+        raise RuntimeError(
+            f"Neither 'docker compose' (v2) nor 'docker-compose' (v1) "
+            f"is available on {host_label}"
+        )
 
     # ------------------------------------------------------------------
     # Internals — updates
@@ -323,16 +356,17 @@ class SSHDockerBackend:
         ssh_cfg = get_ssh_config()
         host_entry, ssh_creds, wrap = self._ssh_params_for(host)
         async with await _connect(host_entry, ssh_cfg, ssh_creds) as conn:
+            binary = await self._detect_compose_binary(conn, wrap, h)
             config_file = await self._get_config_file(conn, project_name, wrap)
             args = f"-f {config_file}" if config_file else f"-p {shlex.quote(project_name)}"
-            pull = await conn.run(wrap(f"docker compose {args} pull 2>&1"), check=False)
+            pull = await conn.run(wrap(f"{binary} {args} pull 2>&1"), check=False)
             if pull.returncode != 0:
                 log.error("Docker SSH: pull failed for %s on %s", project_name, h)
-                raise RuntimeError(f"docker compose pull failed:\n{pull.stdout}")
-            up = await conn.run(wrap(f"docker compose {args} up -d 2>&1"), check=False)
+                raise RuntimeError(f"{binary} pull failed:\n{pull.stdout}")
+            up = await conn.run(wrap(f"{binary} {args} up -d 2>&1"), check=False)
             if up.returncode != 0:
                 log.error("Docker SSH: up -d failed for %s on %s", project_name, h)
-                raise RuntimeError(f"docker compose up -d failed:\n{up.stdout}")
+                raise RuntimeError(f"{binary} up -d failed:\n{up.stdout}")
         log.info("Docker SSH: %s on %s — compose update complete", project_name, h)
 
     async def _update_standalone_container(self, host: dict, container_name: str) -> None:
@@ -373,6 +407,46 @@ class SSHDockerBackend:
 # ------------------------------------------------------------------
 # Helpers
 # ------------------------------------------------------------------
+
+
+# One-shot probe that prints exactly one line: v2 | v1 | none
+_COMPOSE_PROBE = (
+    "docker compose version >/dev/null 2>&1 && echo v2 "
+    "|| { docker-compose --version >/dev/null 2>&1 && echo v1 || echo none; }"
+)
+
+
+def _compose_projects_from_ps(containers: list[dict]) -> list[dict]:
+    """
+    Group `docker ps -a --format json` output by compose project.
+
+    Returns `[{'name': project, 'config_file': path_or_empty}, ...]` using
+    the `com.docker.compose.project` and `com.docker.compose.project.config_files`
+    labels. Both compose v1 and v2 write these labels, so the result is
+    the same whether the host runs the legacy standalone or the v2 plugin.
+
+    v1 stores `config_files` as the literal value originally passed to the
+    CLI — often a bare filename like `docker-compose.yaml`. When relative,
+    it's joined with `com.docker.compose.project.working_dir` so the
+    returned path is always absolute (v2 already normalizes this).
+    """
+    by_project: dict[str, str] = {}
+    for c in containers:
+        labels = _parse_docker_ps_labels(c.get("Labels", "") or "")
+        name = labels.get("com.docker.compose.project", "")
+        if not name:
+            continue
+        cf = labels.get(
+            "com.docker.compose.project.config_files", ""
+        ).split(",")[0].strip()
+        if cf and not cf.startswith("/"):
+            wd = labels.get(
+                "com.docker.compose.project.working_dir", ""
+            ).strip().rstrip("/")
+            cf = f"{wd}/{cf}" if wd else ""
+        if name not in by_project or (cf and not by_project[name]):
+            by_project[name] = cf
+    return [{"name": n, "config_file": f} for n, f in by_project.items()]
 
 
 def _parse_json_output(text: str) -> list[dict]:

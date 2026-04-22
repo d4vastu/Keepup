@@ -8,6 +8,7 @@ import pytest
 from app.backends import ContainerBackend, PortainerBackend, SSHDockerBackend
 from app.backends.ssh_docker_backend import (
     _build_docker_run_cmd,
+    _compose_projects_from_ps,
     _parse_docker_ps_labels,
     _parse_json_output,
     _rollup_status,
@@ -173,18 +174,29 @@ def _make_ssh_conn(stdout: str = "", returncode: int = 0) -> MagicMock:
 
 @pytest.mark.asyncio
 async def test_discover_stacks_returns_projects(config_file, data_dir):
-    output = json.dumps(
+    # Label-based discovery from `docker ps -a` — works on v1 and v2.
+    output = "\n".join(
         [
-            {
-                "Name": "sonarr",
-                "Status": "running(1)",
-                "ConfigFiles": "/opt/stacks/sonarr/docker-compose.yml",
-            },
-            {
-                "Name": "radarr",
-                "Status": "running(1)",
-                "ConfigFiles": "/opt/stacks/radarr/docker-compose.yml",
-            },
+            json.dumps(
+                {
+                    "Names": "/sonarr",
+                    "Image": "sonarr:latest",
+                    "Labels": (
+                        "com.docker.compose.project=sonarr,"
+                        "com.docker.compose.project.config_files=/opt/stacks/sonarr/docker-compose.yml"
+                    ),
+                }
+            ),
+            json.dumps(
+                {
+                    "Names": "/radarr",
+                    "Image": "radarr:latest",
+                    "Labels": (
+                        "com.docker.compose.project=radarr,"
+                        "com.docker.compose.project.config_files=/opt/stacks/radarr/docker-compose.yml"
+                    ),
+                }
+            ),
         ]
     )
     conn = _make_ssh_conn(stdout=output)
@@ -196,9 +208,12 @@ async def test_discover_stacks_returns_projects(config_file, data_dir):
         backend = SSHDockerBackend()
         stacks = await backend.discover_stacks(host)
 
-    assert len(stacks) == 2
-    assert stacks[0]["name"] == "sonarr"
-    assert stacks[1]["name"] == "radarr"
+    names = {s["name"] for s in stacks}
+    assert names == {"sonarr", "radarr"}
+    by_name = {s["name"]: s["config_file"] for s in stacks}
+    assert by_name["sonarr"] == "/opt/stacks/sonarr/docker-compose.yml"
+    # Probe command must be the version-agnostic `docker ps -a`.
+    assert "docker ps -a" in conn.run.call_args_list[0].args[0]
 
 
 @pytest.mark.asyncio
@@ -216,6 +231,40 @@ async def test_discover_stacks_empty_returns_empty(config_file, data_dir):
 
 
 @pytest.mark.asyncio
+async def test_discover_stacks_skips_standalone_containers(config_file, data_dir):
+    """Containers without a compose project label are excluded from discovery."""
+    output = "\n".join(
+        [
+            json.dumps(
+                {
+                    "Names": "/standalone",
+                    "Image": "standalone:latest",
+                    "Labels": "",
+                }
+            ),
+            json.dumps(
+                {
+                    "Names": "/sonarr",
+                    "Image": "sonarr:latest",
+                    "Labels": (
+                        "com.docker.compose.project=sonarr,"
+                        "com.docker.compose.project.config_files=/opt/stacks/sonarr/dc.yml"
+                    ),
+                }
+            ),
+        ]
+    )
+    conn = _make_ssh_conn(stdout=output)
+    host = {"name": "Test Host", "host": "192.168.1.10", "slug": "test-host"}
+    with patch(
+        "app.backends.ssh_docker_backend._connect", new=AsyncMock(return_value=conn)
+    ):
+        backend = SSHDockerBackend()
+        stacks = await backend.discover_stacks(host)
+    assert [s["name"] for s in stacks] == ["sonarr"]
+
+
+@pytest.mark.asyncio
 async def test_discover_stacks_ssh_error_returns_empty(config_file, data_dir):
     host = {"name": "Test Host", "host": "192.168.1.10", "slug": "test-host"}
 
@@ -227,6 +276,58 @@ async def test_discover_stacks_ssh_error_returns_empty(config_file, data_dir):
         stacks = await backend.discover_stacks(host)
 
     assert stacks == []
+
+
+@pytest.mark.asyncio
+async def test_discover_stacks_returncode_nonzero_returns_empty(config_file, data_dir):
+    conn = _make_ssh_conn(stdout="error", returncode=1)
+    host = {"name": "Test Host", "host": "192.168.1.10", "slug": "test-host"}
+    with patch(
+        "app.backends.ssh_docker_backend._connect", new=AsyncMock(return_value=conn)
+    ):
+        backend = SSHDockerBackend()
+        stacks = await backend.discover_stacks(host)
+    assert stacks == []
+
+
+@pytest.mark.asyncio
+async def test_discover_stacks_pct_host_uses_pct_exec(config_file, data_dir):
+    """Discovery on a Proxmox LXC host routes through `pct exec`."""
+    import yaml
+    from app.config_manager import save_proxmox_config
+    from app.credentials import save_integration_credentials
+
+    save_proxmox_config(url="https://pve.example:8006", verify_ssl=False)
+    save_integration_credentials("proxmox", ssh_user="root", ssh_key="id_proxmox")
+
+    raw = yaml.safe_load(config_file.read_text())
+    raw["hosts"][0]["docker_mode"] = "all"
+    raw["hosts"][0]["proxmox_node"] = "pve"
+    raw["hosts"][0]["proxmox_vmid"] = 707
+    config_file.write_text(yaml.dump(raw))
+
+    output = json.dumps(
+        {
+            "Names": "/sonarr",
+            "Image": "sonarr:latest",
+            "Labels": (
+                "com.docker.compose.project=sonarr,"
+                "com.docker.compose.project.config_files=/opt/sonarr/dc.yml"
+            ),
+        }
+    )
+    conn = _make_ssh_conn(stdout=output)
+    host = dict(raw["hosts"][0])
+    with patch(
+        "app.backends.ssh_docker_backend._connect", new=AsyncMock(return_value=conn)
+    ):
+        backend = SSHDockerBackend()
+        stacks = await backend.discover_stacks(host)
+
+    assert [s["name"] for s in stacks] == ["sonarr"]
+    cmd = conn.run.call_args_list[0].args[0]
+    assert cmd.startswith("pct exec 707 -- sh -c ")
+    assert "docker ps -a" in cmd
 
 
 # ---------------------------------------------------------------------------
@@ -251,9 +352,16 @@ async def test_update_stack_runs_pull_and_up(config_file, data_dir, monkeypatch)
     raw["hosts"][0]["docker_mode"] = "all"
     config_file.write_text(yaml.dump(raw))
 
-    ls_output = json.dumps(
-        [{"Name": "sonarr", "ConfigFiles": "/opt/sonarr/docker-compose.yml"}]
+    ps_output = json.dumps(
+        {
+            "Names": "/sonarr",
+            "Labels": (
+                "com.docker.compose.project=sonarr,"
+                "com.docker.compose.project.config_files=/opt/sonarr/docker-compose.yml"
+            ),
+        }
     )
+    probe = MagicMock(stdout="v2\n", returncode=0)
     pull_result = MagicMock(stdout="Pulled", returncode=0)
     up_result = MagicMock(stdout="Started", returncode=0)
 
@@ -262,7 +370,8 @@ async def test_update_stack_runs_pull_and_up(config_file, data_dir, monkeypatch)
     conn.__aexit__ = AsyncMock(return_value=False)
     conn.run = AsyncMock(
         side_effect=[
-            MagicMock(stdout=ls_output, returncode=0),  # ls for config file
+            probe,                                              # compose version probe
+            MagicMock(stdout=ps_output, returncode=0),          # docker ps -a (config file lookup)
             pull_result,
             up_result,
         ]
@@ -474,10 +583,19 @@ async def test_update_stack_pull_failure_raises(config_file, data_dir):
     raw["hosts"][0]["docker_mode"] = "all"
     config_file.write_text(yaml.dump(raw))
 
-    ls_output = json.dumps([{"Name": "sonarr", "ConfigFiles": "/opt/sonarr/dc.yml"}])
+    ps_output = json.dumps(
+        {
+            "Names": "/sonarr",
+            "Labels": (
+                "com.docker.compose.project=sonarr,"
+                "com.docker.compose.project.config_files=/opt/sonarr/dc.yml"
+            ),
+        }
+    )
     conn = _make_multi_conn(
         [
-            MagicMock(stdout=ls_output, returncode=0),
+            MagicMock(stdout="v2\n", returncode=0),
+            MagicMock(stdout=ps_output, returncode=0),
             MagicMock(stdout="error output", returncode=1),  # pull fails
         ]
     )
@@ -498,10 +616,19 @@ async def test_update_stack_up_failure_raises(config_file, data_dir):
     raw["hosts"][0]["docker_mode"] = "all"
     config_file.write_text(yaml.dump(raw))
 
-    ls_output = json.dumps([{"Name": "sonarr", "ConfigFiles": "/opt/sonarr/dc.yml"}])
+    ps_output = json.dumps(
+        {
+            "Names": "/sonarr",
+            "Labels": (
+                "com.docker.compose.project=sonarr,"
+                "com.docker.compose.project.config_files=/opt/sonarr/dc.yml"
+            ),
+        }
+    )
     conn = _make_multi_conn(
         [
-            MagicMock(stdout=ls_output, returncode=0),
+            MagicMock(stdout="v2\n", returncode=0),
+            MagicMock(stdout=ps_output, returncode=0),
             MagicMock(stdout="Pulled", returncode=0),  # pull succeeds
             MagicMock(stdout="error output", returncode=1),  # up fails
         ]
@@ -748,10 +875,19 @@ async def test_update_compose_ref_triggers_compose_update(config_file, data_dir)
     raw["hosts"][0]["docker_mode"] = "all"
     config_file.write_text(yaml.dump(raw))
 
-    ls_output = json.dumps([{"Name": "mystack", "ConfigFiles": "/opt/mystack/dc.yml"}])
+    ps_output = json.dumps(
+        {
+            "Names": "/mystack-myapp",
+            "Labels": (
+                "com.docker.compose.project=mystack,"
+                "com.docker.compose.project.config_files=/opt/mystack/dc.yml"
+            ),
+        }
+    )
     conn = _make_multi_conn(
         [
-            MagicMock(stdout=ls_output, returncode=0),     # compose ls (get config file)
+            MagicMock(stdout="v2\n", returncode=0),        # compose binary probe
+            MagicMock(stdout=ps_output, returncode=0),     # docker ps -a (config file lookup)
             MagicMock(stdout="Pulled", returncode=0),      # compose pull
             MagicMock(stdout="Started", returncode=0),     # compose up -d
         ]
@@ -763,8 +899,8 @@ async def test_update_compose_ref_triggers_compose_update(config_file, data_dir)
         await backend.update_stack("test-host/mystack:myapp")
 
     calls = [call.args[0] for call in conn.run.call_args_list]
-    assert any("compose" in c and "pull" in c for c in calls)
-    assert any("compose" in c and "up" in c and "-d" in c for c in calls)
+    assert any("docker compose" in c and "pull" in c for c in calls)
+    assert any("docker compose" in c and "up" in c and "-d" in c for c in calls)
 
 
 @pytest.mark.asyncio
@@ -1291,10 +1427,19 @@ async def test_update_compose_pct_wraps_commands(config_file, data_dir):
     raw["hosts"][0]["proxmox_vmid"] = 202
     config_file.write_text(yaml.dump(raw))
 
-    ls_output = json.dumps([{"Name": "sonarr", "ConfigFiles": "/opt/sonarr/dc.yml"}])
+    ps_output = json.dumps(
+        {
+            "Names": "/sonarr",
+            "Labels": (
+                "com.docker.compose.project=sonarr,"
+                "com.docker.compose.project.config_files=/opt/sonarr/dc.yml"
+            ),
+        }
+    )
     conn = _make_multi_conn(
         [
-            MagicMock(stdout=ls_output, returncode=0),
+            MagicMock(stdout="v2\n", returncode=0),
+            MagicMock(stdout=ps_output, returncode=0),
             MagicMock(stdout="Pulled", returncode=0),
             MagicMock(stdout="Started", returncode=0),
         ]
@@ -1426,3 +1571,346 @@ async def test_get_stacks_proxmox_node_connection_badge(config_file, data_dir):
         stacks = await backend.get_stacks_with_update_status()
 
     assert stacks[0]["connection_badge"] == "Node · Proxmox API"
+
+
+# ---------------------------------------------------------------------------
+# Compose v1/v2 detection (OP#103)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_update_compose_v1_uses_legacy_binary(config_file, data_dir):
+    """When the probe reports v1, updates must invoke `docker-compose` (no space)."""
+    import yaml
+
+    raw = yaml.safe_load(config_file.read_text())
+    raw["hosts"][0]["docker_mode"] = "all"
+    config_file.write_text(yaml.dump(raw))
+
+    ps_output = json.dumps(
+        {
+            "Names": "/sonarr",
+            "Labels": (
+                "com.docker.compose.project=sonarr,"
+                "com.docker.compose.project.config_files=/opt/sonarr/dc.yml"
+            ),
+        }
+    )
+    conn = _make_multi_conn(
+        [
+            MagicMock(stdout="v1\n", returncode=0),     # probe → v1
+            MagicMock(stdout=ps_output, returncode=0),  # docker ps -a
+            MagicMock(stdout="Pulled", returncode=0),
+            MagicMock(stdout="Started", returncode=0),
+        ]
+    )
+    with patch(
+        "app.backends.ssh_docker_backend._connect", new=AsyncMock(return_value=conn)
+    ):
+        backend = SSHDockerBackend()
+        await backend.update_stack("test-host/sonarr:sonarr")
+
+    calls = [c.args[0] for c in conn.run.call_args_list]
+    assert any("docker-compose" in c and "pull" in c for c in calls)
+    assert any("docker-compose" in c and "up -d" in c for c in calls)
+    # Must NOT fall back to the v2 `docker compose` form.
+    assert not any(
+        " docker compose " in f" {c} " and "pull" in c for c in calls
+    )
+
+
+@pytest.mark.asyncio
+async def test_update_compose_v2_uses_plugin_binary(config_file, data_dir):
+    """When the probe reports v2, updates invoke `docker compose` (space, plugin form)."""
+    import yaml
+
+    raw = yaml.safe_load(config_file.read_text())
+    raw["hosts"][0]["docker_mode"] = "all"
+    config_file.write_text(yaml.dump(raw))
+
+    ps_output = json.dumps(
+        {
+            "Names": "/sonarr",
+            "Labels": (
+                "com.docker.compose.project=sonarr,"
+                "com.docker.compose.project.config_files=/opt/sonarr/dc.yml"
+            ),
+        }
+    )
+    conn = _make_multi_conn(
+        [
+            MagicMock(stdout="v2\n", returncode=0),
+            MagicMock(stdout=ps_output, returncode=0),
+            MagicMock(stdout="Pulled", returncode=0),
+            MagicMock(stdout="Started", returncode=0),
+        ]
+    )
+    with patch(
+        "app.backends.ssh_docker_backend._connect", new=AsyncMock(return_value=conn)
+    ):
+        backend = SSHDockerBackend()
+        await backend.update_stack("test-host/sonarr:sonarr")
+
+    calls = [c.args[0] for c in conn.run.call_args_list]
+    # Exclude the probe command itself — it mentions both binaries by design.
+    update_calls = [c for c in calls if "pull" in c or "up -d" in c]
+    assert update_calls and all("docker compose" in c for c in update_calls)
+    assert not any("docker-compose" in c for c in update_calls)
+
+
+@pytest.mark.asyncio
+async def test_update_compose_no_binary_raises_clear_error(config_file, data_dir):
+    """When neither binary is available, the probe reports `none` and we raise."""
+    import yaml
+
+    raw = yaml.safe_load(config_file.read_text())
+    raw["hosts"][0]["docker_mode"] = "all"
+    config_file.write_text(yaml.dump(raw))
+
+    conn = _make_multi_conn(
+        [
+            MagicMock(stdout="none\n", returncode=0),  # probe → none
+        ]
+    )
+    with patch(
+        "app.backends.ssh_docker_backend._connect", new=AsyncMock(return_value=conn)
+    ):
+        backend = SSHDockerBackend()
+        with pytest.raises(RuntimeError, match="Neither 'docker compose'"):
+            await backend.update_stack("test-host/sonarr:sonarr")
+
+
+@pytest.mark.asyncio
+async def test_update_compose_probe_empty_output_raises(config_file, data_dir):
+    """A blank/garbled probe output is treated as `none` and raises."""
+    import yaml
+
+    raw = yaml.safe_load(config_file.read_text())
+    raw["hosts"][0]["docker_mode"] = "all"
+    config_file.write_text(yaml.dump(raw))
+
+    conn = _make_multi_conn(
+        [
+            MagicMock(stdout="", returncode=0),
+        ]
+    )
+    with patch(
+        "app.backends.ssh_docker_backend._connect", new=AsyncMock(return_value=conn)
+    ):
+        backend = SSHDockerBackend()
+        with pytest.raises(RuntimeError, match="Neither 'docker compose'"):
+            await backend.update_stack("test-host/sonarr:sonarr")
+
+
+@pytest.mark.asyncio
+async def test_update_compose_v1_fallback_uses_project_flag(config_file, data_dir):
+    """When labels don't carry a config_files path, the v1 binary falls back to `-p`."""
+    import yaml
+
+    raw = yaml.safe_load(config_file.read_text())
+    raw["hosts"][0]["docker_mode"] = "all"
+    config_file.write_text(yaml.dump(raw))
+
+    ps_output = json.dumps(
+        {
+            "Names": "/sonarr",
+            # No project.config_files label — older v1 containers.
+            "Labels": "com.docker.compose.project=sonarr",
+        }
+    )
+    conn = _make_multi_conn(
+        [
+            MagicMock(stdout="v1\n", returncode=0),
+            MagicMock(stdout=ps_output, returncode=0),
+            MagicMock(stdout="Pulled", returncode=0),
+            MagicMock(stdout="Started", returncode=0),
+        ]
+    )
+    with patch(
+        "app.backends.ssh_docker_backend._connect", new=AsyncMock(return_value=conn)
+    ):
+        backend = SSHDockerBackend()
+        await backend.update_stack("test-host/sonarr:sonarr")
+
+    calls = [c.args[0] for c in conn.run.call_args_list]
+    pull_call = next(c for c in calls if "pull" in c)
+    assert "docker-compose" in pull_call
+    assert "-p sonarr" in pull_call
+    assert "-f " not in pull_call
+
+
+# ---------------------------------------------------------------------------
+# _compose_projects_from_ps helper
+# ---------------------------------------------------------------------------
+
+
+def test_compose_projects_from_ps_groups_by_project():
+    containers = [
+        {
+            "Names": "/sonarr",
+            "Labels": (
+                "com.docker.compose.project=media,"
+                "com.docker.compose.project.config_files=/opt/media/dc.yml"
+            ),
+        },
+        {
+            "Names": "/radarr",
+            "Labels": (
+                "com.docker.compose.project=media,"
+                "com.docker.compose.project.config_files=/opt/media/dc.yml"
+            ),
+        },
+        {
+            "Names": "/db",
+            "Labels": (
+                "com.docker.compose.project=infra,"
+                "com.docker.compose.project.config_files=/opt/infra/dc.yml"
+            ),
+        },
+    ]
+    result = _compose_projects_from_ps(containers)
+    by_name = {r["name"]: r["config_file"] for r in result}
+    assert by_name == {
+        "media": "/opt/media/dc.yml",
+        "infra": "/opt/infra/dc.yml",
+    }
+
+
+def test_compose_projects_from_ps_prefers_non_empty_config_file():
+    """If one container has an empty config_files label and another has it set, keep the set one."""
+    containers = [
+        {
+            "Names": "/a",
+            "Labels": "com.docker.compose.project=proj",
+        },
+        {
+            "Names": "/b",
+            "Labels": (
+                "com.docker.compose.project=proj,"
+                "com.docker.compose.project.config_files=/srv/proj/dc.yml"
+            ),
+        },
+    ]
+    result = _compose_projects_from_ps(containers)
+    assert result == [{"name": "proj", "config_file": "/srv/proj/dc.yml"}]
+
+
+def test_compose_projects_from_ps_skips_unlabeled():
+    containers = [{"Names": "/nolabel", "Labels": ""}]
+    assert _compose_projects_from_ps(containers) == []
+
+
+def test_compose_projects_from_ps_multifile_takes_first():
+    """The config_files label can be comma-separated — take the first path."""
+    containers = [
+        {
+            "Names": "/a",
+            "Labels": (
+                "com.docker.compose.project=proj,"
+                "com.docker.compose.project.config_files=/one.yml,/override.yml"
+            ),
+        }
+    ]
+    result = _compose_projects_from_ps(containers)
+    assert result == [{"name": "proj", "config_file": "/one.yml"}]
+
+
+def test_compose_projects_from_ps_joins_relative_config_files_with_working_dir():
+    """v1 often stores a relative `config_files` — join with `working_dir` to absolutize."""
+    containers = [
+        {
+            "Names": "/nginx",
+            "Labels": (
+                "com.docker.compose.project=nginx,"
+                "com.docker.compose.project.config_files=docker-compose.yaml,"
+                "com.docker.compose.project.working_dir=/root/NGINX"
+            ),
+        }
+    ]
+    result = _compose_projects_from_ps(containers)
+    assert result == [{"name": "nginx", "config_file": "/root/NGINX/docker-compose.yaml"}]
+
+
+def test_compose_projects_from_ps_strips_trailing_slash_from_working_dir():
+    """Joining must not emit a double slash when working_dir ends with `/`."""
+    containers = [
+        {
+            "Names": "/svc",
+            "Labels": (
+                "com.docker.compose.project=svc,"
+                "com.docker.compose.project.config_files=dc.yml,"
+                "com.docker.compose.project.working_dir=/srv/svc/"
+            ),
+        }
+    ]
+    result = _compose_projects_from_ps(containers)
+    assert result == [{"name": "svc", "config_file": "/srv/svc/dc.yml"}]
+
+
+def test_compose_projects_from_ps_relative_without_working_dir_is_empty():
+    """Relative config_files with no working_dir label falls back to empty (→ `-p` fallback)."""
+    containers = [
+        {
+            "Names": "/orphan",
+            "Labels": (
+                "com.docker.compose.project=orphan,"
+                "com.docker.compose.project.config_files=docker-compose.yml"
+            ),
+        }
+    ]
+    result = _compose_projects_from_ps(containers)
+    assert result == [{"name": "orphan", "config_file": ""}]
+
+
+def test_compose_projects_from_ps_absolute_path_unchanged():
+    """Absolute paths (v2 normal case) are passed through as-is."""
+    containers = [
+        {
+            "Names": "/app",
+            "Labels": (
+                "com.docker.compose.project=app,"
+                "com.docker.compose.project.config_files=/opt/app/dc.yml,"
+                "com.docker.compose.project.working_dir=/opt/app"
+            ),
+        }
+    ]
+    result = _compose_projects_from_ps(containers)
+    assert result == [{"name": "app", "config_file": "/opt/app/dc.yml"}]
+
+
+@pytest.mark.asyncio
+async def test_update_compose_v1_relative_path_resolved(config_file, data_dir):
+    """End-to-end: v1 project with a relative config_files label gets an absolute `-f` path."""
+    import yaml
+
+    raw = yaml.safe_load(config_file.read_text())
+    raw["hosts"][0]["docker_mode"] = "all"
+    config_file.write_text(yaml.dump(raw))
+
+    ps_output = json.dumps(
+        {
+            "Names": "/nginx_app_1",
+            "Labels": (
+                "com.docker.compose.project=nginx,"
+                "com.docker.compose.project.config_files=docker-compose.yaml,"
+                "com.docker.compose.project.working_dir=/root/NGINX"
+            ),
+        }
+    )
+    conn = _make_multi_conn(
+        [
+            MagicMock(stdout="v1\n", returncode=0),
+            MagicMock(stdout=ps_output, returncode=0),
+            MagicMock(stdout="Pulled", returncode=0),
+            MagicMock(stdout="Started", returncode=0),
+        ]
+    )
+    with patch(
+        "app.backends.ssh_docker_backend._connect", new=AsyncMock(return_value=conn)
+    ):
+        backend = SSHDockerBackend()
+        await backend.update_stack("test-host/nginx:nginx_app_1")
+
+    calls = [c.args[0] for c in conn.run.call_args_list]
+    pull_call = next(c for c in calls if "pull" in c)
+    assert "docker-compose -f /root/NGINX/docker-compose.yaml pull" in pull_call
