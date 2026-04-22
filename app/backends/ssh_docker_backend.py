@@ -312,22 +312,16 @@ class SSHDockerBackend:
 
         Version-agnostic: reads `com.docker.compose.project.config_files`
         from `docker ps -a` labels, which both compose v1 and v2 write.
+        Relative paths (common on v1) are normalized against the
+        `working_dir` label by `_compose_projects_from_ps`.
         """
         wrap = wrap or (lambda c: c)
         result = await conn.run(
             wrap("docker ps -a --format '{{json .}}'"), check=False
         )
-        containers = _parse_json_output(result.stdout)
-        for c in containers:
-            labels = _parse_docker_ps_labels(c.get("Labels", "") or "")
-            if labels.get("com.docker.compose.project", "") != project_name:
-                continue
-            cf = labels.get(
-                "com.docker.compose.project.config_files", ""
-            ).split(",")[0].strip()
-            if cf:
-                return cf
-        return ""
+        projects = _compose_projects_from_ps(_parse_json_output(result.stdout))
+        match = next((p for p in projects if p["name"] == project_name), None)
+        return match["config_file"] if match else ""
 
     async def _detect_compose_binary(
         self,
@@ -430,6 +424,11 @@ def _compose_projects_from_ps(containers: list[dict]) -> list[dict]:
     the `com.docker.compose.project` and `com.docker.compose.project.config_files`
     labels. Both compose v1 and v2 write these labels, so the result is
     the same whether the host runs the legacy standalone or the v2 plugin.
+
+    v1 stores `config_files` as the literal value originally passed to the
+    CLI — often a bare filename like `docker-compose.yaml`. When relative,
+    it's joined with `com.docker.compose.project.working_dir` so the
+    returned path is always absolute (v2 already normalizes this).
     """
     by_project: dict[str, str] = {}
     for c in containers:
@@ -440,6 +439,11 @@ def _compose_projects_from_ps(containers: list[dict]) -> list[dict]:
         cf = labels.get(
             "com.docker.compose.project.config_files", ""
         ).split(",")[0].strip()
+        if cf and not cf.startswith("/"):
+            wd = labels.get(
+                "com.docker.compose.project.working_dir", ""
+            ).strip().rstrip("/")
+            cf = f"{wd}/{cf}" if wd else ""
         if name not in by_project or (cf and not by_project[name]):
             by_project[name] = cf
     return [{"name": n, "config_file": f} for n, f in by_project.items()]

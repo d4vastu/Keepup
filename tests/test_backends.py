@@ -1813,3 +1813,104 @@ def test_compose_projects_from_ps_multifile_takes_first():
     ]
     result = _compose_projects_from_ps(containers)
     assert result == [{"name": "proj", "config_file": "/one.yml"}]
+
+
+def test_compose_projects_from_ps_joins_relative_config_files_with_working_dir():
+    """v1 often stores a relative `config_files` — join with `working_dir` to absolutize."""
+    containers = [
+        {
+            "Names": "/nginx",
+            "Labels": (
+                "com.docker.compose.project=nginx,"
+                "com.docker.compose.project.config_files=docker-compose.yaml,"
+                "com.docker.compose.project.working_dir=/root/NGINX"
+            ),
+        }
+    ]
+    result = _compose_projects_from_ps(containers)
+    assert result == [{"name": "nginx", "config_file": "/root/NGINX/docker-compose.yaml"}]
+
+
+def test_compose_projects_from_ps_strips_trailing_slash_from_working_dir():
+    """Joining must not emit a double slash when working_dir ends with `/`."""
+    containers = [
+        {
+            "Names": "/svc",
+            "Labels": (
+                "com.docker.compose.project=svc,"
+                "com.docker.compose.project.config_files=dc.yml,"
+                "com.docker.compose.project.working_dir=/srv/svc/"
+            ),
+        }
+    ]
+    result = _compose_projects_from_ps(containers)
+    assert result == [{"name": "svc", "config_file": "/srv/svc/dc.yml"}]
+
+
+def test_compose_projects_from_ps_relative_without_working_dir_is_empty():
+    """Relative config_files with no working_dir label falls back to empty (→ `-p` fallback)."""
+    containers = [
+        {
+            "Names": "/orphan",
+            "Labels": (
+                "com.docker.compose.project=orphan,"
+                "com.docker.compose.project.config_files=docker-compose.yml"
+            ),
+        }
+    ]
+    result = _compose_projects_from_ps(containers)
+    assert result == [{"name": "orphan", "config_file": ""}]
+
+
+def test_compose_projects_from_ps_absolute_path_unchanged():
+    """Absolute paths (v2 normal case) are passed through as-is."""
+    containers = [
+        {
+            "Names": "/app",
+            "Labels": (
+                "com.docker.compose.project=app,"
+                "com.docker.compose.project.config_files=/opt/app/dc.yml,"
+                "com.docker.compose.project.working_dir=/opt/app"
+            ),
+        }
+    ]
+    result = _compose_projects_from_ps(containers)
+    assert result == [{"name": "app", "config_file": "/opt/app/dc.yml"}]
+
+
+@pytest.mark.asyncio
+async def test_update_compose_v1_relative_path_resolved(config_file, data_dir):
+    """End-to-end: v1 project with a relative config_files label gets an absolute `-f` path."""
+    import yaml
+
+    raw = yaml.safe_load(config_file.read_text())
+    raw["hosts"][0]["docker_mode"] = "all"
+    config_file.write_text(yaml.dump(raw))
+
+    ps_output = json.dumps(
+        {
+            "Names": "/nginx_app_1",
+            "Labels": (
+                "com.docker.compose.project=nginx,"
+                "com.docker.compose.project.config_files=docker-compose.yaml,"
+                "com.docker.compose.project.working_dir=/root/NGINX"
+            ),
+        }
+    )
+    conn = _make_multi_conn(
+        [
+            MagicMock(stdout="v1\n", returncode=0),
+            MagicMock(stdout=ps_output, returncode=0),
+            MagicMock(stdout="Pulled", returncode=0),
+            MagicMock(stdout="Started", returncode=0),
+        ]
+    )
+    with patch(
+        "app.backends.ssh_docker_backend._connect", new=AsyncMock(return_value=conn)
+    ):
+        backend = SSHDockerBackend()
+        await backend.update_stack("test-host/nginx:nginx_app_1")
+
+    calls = [c.args[0] for c in conn.run.call_args_list]
+    pull_call = next(c for c in calls if "pull" in c)
+    assert "docker-compose -f /root/NGINX/docker-compose.yaml pull" in pull_call
