@@ -13,12 +13,13 @@ import asyncio
 import json
 import logging
 import shlex
-from urllib.parse import quote, unquote
+from typing import Callable
+from urllib.parse import quote, unquote, urlparse
 
 from ..ssh_client import _connect
 from ..registry_client import check_image_update, extract_local_digest
-from ..credentials import get_credentials
-from ..config_manager import get_hosts, get_ssh_config
+from ..credentials import get_credentials, get_integration_credentials
+from ..config_manager import get_hosts, get_ssh_config, get_proxmox_config
 
 log = logging.getLogger(__name__)
 
@@ -45,6 +46,45 @@ class SSHDockerBackend:
         elif proxmox_node and proxmox_type == "vm":
             return f"VM {proxmox_vmid} · SSH"
         return "SSH"
+
+    def _is_pct_host(self, host: dict) -> bool:
+        """True when this host's docker daemon is reached via `pct exec` on a Proxmox node."""
+        if not host.get("proxmox_node"):
+            return False
+        if host.get("proxmox_vmid") is None:
+            return False
+        return (host.get("proxmox_type") or "lxc") == "lxc"
+
+    def _ssh_params_for(self, host: dict) -> tuple[dict, dict, Callable[[str], str]]:
+        """
+        Resolve `(host_entry, ssh_creds, wrap)` for Docker I/O against this host.
+
+        For Proxmox LXCs, SSH targets the Proxmox node and every docker command
+        is wrapped as `pct exec {vmid} -- sh -c '<cmd>'`. For everything else,
+        the existing direct-SSH parameters are returned and `wrap` is identity.
+        """
+        if not self._is_pct_host(host):
+            return host, get_credentials(host["slug"]), lambda c: c
+
+        vmid = host["proxmox_vmid"]
+        px_cfg = get_proxmox_config()
+        px_creds = get_integration_credentials("proxmox")
+        px_host = urlparse(px_cfg.get("url", "")).hostname or host.get("host", "")
+        ssh_user = px_creds.get("ssh_user") or "root"
+        ssh_key = px_creds.get("ssh_key") or ""
+        ssh_password = px_creds.get("ssh_password") or ""
+
+        host_entry: dict = {"host": px_host, "user": ssh_user, "port": 22}
+        if ssh_key:
+            host_entry["key"] = f"/app/keys/{ssh_key}"
+        ssh_creds: dict = {}
+        if not ssh_key and ssh_password:
+            ssh_creds["ssh_password"] = ssh_password
+
+        def wrap(cmd: str) -> str:
+            return f"pct exec {vmid} -- sh -c {shlex.quote(cmd)}"
+
+        return host_entry, ssh_creds, wrap
 
     def _make_compose_ref(self, slug: str, project: str, container: str) -> str:
         return f"{slug}/{quote(project, safe='')}:{quote(container, safe='')}"
@@ -98,9 +138,18 @@ class SSHDockerBackend:
         all_entries = []
         for host, r in zip(hosts, results):
             if isinstance(r, Exception):
-                log.warning(
-                    "Docker SSH: skipping %s — %s", host.get("host", host["slug"]), r
-                )
+                if self._is_pct_host(host):
+                    log.error(
+                        "Docker SSH: pct exec failed for %s (node %s vmid %s) — %s",
+                        host.get("host", host["slug"]),
+                        host.get("proxmox_node"),
+                        host.get("proxmox_vmid"),
+                        r,
+                    )
+                else:
+                    log.warning(
+                        "Docker SSH: skipping %s — %s", host.get("host", host["slug"]), r
+                    )
             elif isinstance(r, list):
                 all_entries.extend(r)
         return sorted(all_entries, key=lambda s: (s["endpoint_name"], s["name"]))
@@ -138,12 +187,12 @@ class SSHDockerBackend:
         if docker_mode == "selected":
             allowed_projects = set(host.get("docker_stacks") or [])
 
-        creds = get_credentials(slug)
+        host_entry, ssh_creds, wrap = self._ssh_params_for(host)
         entries = []
 
-        async with await _connect(host, ssh_cfg, creds) as conn:
+        async with await _connect(host_entry, ssh_cfg, ssh_creds) as conn:
             ps_result = await conn.run(
-                "docker ps -a --format '{{json .}}'", check=False
+                wrap("docker ps -a --format '{{json .}}'"), check=False
             )
             containers = _parse_json_output(ps_result.stdout)
 
@@ -169,7 +218,7 @@ class SSHDockerBackend:
             # Check all unique images concurrently (deduplicates registry lookups)
             unique_images = list({image for _, image, _ in raw})
             statuses = await asyncio.gather(
-                *[self._check_image_status(conn, img, dockerhub_creds) for img in unique_images],
+                *[self._check_image_status(conn, img, dockerhub_creds, wrap) for img in unique_images],
                 return_exceptions=True,
             )
             image_status: dict[str, str] = {
@@ -211,10 +260,14 @@ class SSHDockerBackend:
         conn,
         image_name: str,
         dockerhub_creds: dict | None,
+        wrap: Callable[[str], str] | None = None,
     ) -> str:
+        wrap = wrap or (lambda c: c)
         try:
             inspect = await conn.run(
-                f"docker image inspect {shlex.quote(image_name)} --format '{{{{json .RepoDigests}}}}'",
+                wrap(
+                    f"docker image inspect {shlex.quote(image_name)} --format '{{{{json .RepoDigests}}}}'"
+                ),
                 check=False,
             )
             repo_digests: list[str] = []
@@ -247,8 +300,14 @@ class SSHDockerBackend:
         checked = await asyncio.gather(*tasks, return_exceptions=True)
         return [{"name": img, "status": r} for img, r in zip(seen, checked) if isinstance(r, str)]
 
-    async def _get_config_file(self, conn, project_name: str) -> str:
-        result = await conn.run("docker compose ls --all --format json", check=False)
+    async def _get_config_file(
+        self,
+        conn,
+        project_name: str,
+        wrap: Callable[[str], str] | None = None,
+    ) -> str:
+        wrap = wrap or (lambda c: c)
+        result = await conn.run(wrap("docker compose ls --all --format json"), check=False)
         rows = _parse_json_output(result.stdout)
         match = next((r for r in rows if r.get("Name") == project_name), None)
         return match.get("ConfigFiles", "") if match else ""
@@ -262,15 +321,15 @@ class SSHDockerBackend:
         h = host.get("host", slug)
         log.info("Docker SSH: updating compose project %s on %s", project_name, h)
         ssh_cfg = get_ssh_config()
-        creds = get_credentials(slug)
-        async with await _connect(host, ssh_cfg, creds) as conn:
-            config_file = await self._get_config_file(conn, project_name)
+        host_entry, ssh_creds, wrap = self._ssh_params_for(host)
+        async with await _connect(host_entry, ssh_cfg, ssh_creds) as conn:
+            config_file = await self._get_config_file(conn, project_name, wrap)
             args = f"-f {config_file}" if config_file else f"-p {shlex.quote(project_name)}"
-            pull = await conn.run(f"docker compose {args} pull 2>&1", check=False)
+            pull = await conn.run(wrap(f"docker compose {args} pull 2>&1"), check=False)
             if pull.returncode != 0:
                 log.error("Docker SSH: pull failed for %s on %s", project_name, h)
                 raise RuntimeError(f"docker compose pull failed:\n{pull.stdout}")
-            up = await conn.run(f"docker compose {args} up -d 2>&1", check=False)
+            up = await conn.run(wrap(f"docker compose {args} up -d 2>&1"), check=False)
             if up.returncode != 0:
                 log.error("Docker SSH: up -d failed for %s on %s", project_name, h)
                 raise RuntimeError(f"docker compose up -d failed:\n{up.stdout}")
@@ -281,10 +340,10 @@ class SSHDockerBackend:
         h = host.get("host", slug)
         log.info("Docker SSH: updating standalone container %s on %s", container_name, h)
         ssh_cfg = get_ssh_config()
-        creds = get_credentials(slug)
-        async with await _connect(host, ssh_cfg, creds) as conn:
+        host_entry, ssh_creds, wrap = self._ssh_params_for(host)
+        async with await _connect(host_entry, ssh_cfg, ssh_creds) as conn:
             inspect_result = await conn.run(
-                f"docker inspect {shlex.quote(container_name)}", check=False
+                wrap(f"docker inspect {shlex.quote(container_name)}"), check=False
             )
             if inspect_result.returncode != 0 or not inspect_result.stdout.strip():
                 raise RuntimeError(f"Container {container_name!r} not found")
@@ -292,18 +351,18 @@ class SSHDockerBackend:
 
             image = inspect_data["Config"]["Image"]
             log.info("Docker SSH: pulling %s for container %s", image, container_name)
-            pull = await conn.run(f"docker pull {shlex.quote(image)} 2>&1", check=False)
+            pull = await conn.run(wrap(f"docker pull {shlex.quote(image)} 2>&1"), check=False)
             if pull.returncode != 0:
                 log.error("Docker SSH: pull failed for %s on %s", container_name, h)
                 raise RuntimeError(f"docker pull failed:\n{pull.stdout}")
 
             log.info("Docker SSH: stopping and removing %s", container_name)
-            await conn.run(f"docker stop {shlex.quote(container_name)}", check=False)
-            await conn.run(f"docker rm {shlex.quote(container_name)}", check=False)
+            await conn.run(wrap(f"docker stop {shlex.quote(container_name)}"), check=False)
+            await conn.run(wrap(f"docker rm {shlex.quote(container_name)}"), check=False)
 
             run_cmd = _build_docker_run_cmd(inspect_data)
             log.info("Docker SSH: recreating %s", container_name)
-            run = await conn.run(f"{run_cmd} 2>&1", check=False)
+            run = await conn.run(wrap(f"{run_cmd} 2>&1"), check=False)
             if run.returncode != 0:
                 log.error("Docker SSH: recreate failed for %s on %s", container_name, h)
                 raise RuntimeError(f"docker run failed:\n{run.stdout}")

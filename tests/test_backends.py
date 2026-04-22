@@ -1156,6 +1156,245 @@ async def test_get_stacks_includes_connection_badge(config_file, data_dir):
     assert stacks[0]["connection_badge"] == "SSH"
 
 
+def test_is_pct_host_matrix():
+    b = SSHDockerBackend()
+    assert b._is_pct_host({}) is False
+    assert b._is_pct_host({"proxmox_node": "pve"}) is False
+    assert b._is_pct_host({"proxmox_vmid": 101}) is False
+    assert b._is_pct_host({"proxmox_node": "pve", "proxmox_vmid": 101}) is True
+    assert (
+        b._is_pct_host({"proxmox_node": "pve", "proxmox_vmid": 101, "proxmox_type": "lxc"})
+        is True
+    )
+    assert (
+        b._is_pct_host({"proxmox_node": "pve", "proxmox_vmid": 101, "proxmox_type": "vm"})
+        is False
+    )
+
+
+def test_ssh_params_for_non_pct_host_returns_identity_wrap(config_file, data_dir):
+    b = SSHDockerBackend()
+    host = {"name": "Test Host", "host": "192.168.1.10", "slug": "test-host"}
+    host_entry, ssh_creds, wrap = b._ssh_params_for(host)
+    assert host_entry is host
+    assert wrap("docker ps -a") == "docker ps -a"
+
+
+def test_ssh_params_for_pct_host_wraps_with_pct_exec(config_file, data_dir):
+    from app.config_manager import save_proxmox_config
+    from app.credentials import save_integration_credentials
+
+    save_proxmox_config(url="https://pve.example:8006", verify_ssl=False)
+    save_integration_credentials(
+        "proxmox", ssh_user="root", ssh_key="id_proxmox", ssh_password=""
+    )
+
+    b = SSHDockerBackend()
+    host = {
+        "name": "LXC 101",
+        "host": "10.0.0.10",
+        "slug": "lxc-101",
+        "proxmox_node": "pve",
+        "proxmox_vmid": 101,
+        "proxmox_type": "lxc",
+    }
+    host_entry, ssh_creds, wrap = b._ssh_params_for(host)
+    assert host_entry["host"] == "pve.example"
+    assert host_entry["user"] == "root"
+    assert host_entry["port"] == 22
+    assert host_entry["key"] == "/app/keys/id_proxmox"
+    # Command wrapping: shell-quote the inner docker cmd so pipes/redirects work
+    wrapped = wrap("docker ps -a --format '{{json .}}'")
+    assert wrapped.startswith("pct exec 101 -- sh -c ")
+    assert "docker ps -a" in wrapped
+
+
+def test_ssh_params_for_pct_host_password_auth(config_file, data_dir):
+    from app.config_manager import save_proxmox_config
+    from app.credentials import save_integration_credentials
+
+    save_proxmox_config(url="https://pve.example:8006", verify_ssl=False)
+    save_integration_credentials(
+        "proxmox", ssh_user="root", ssh_key="", ssh_password="hunter2"
+    )
+
+    b = SSHDockerBackend()
+    host = {
+        "name": "LXC 101",
+        "host": "10.0.0.10",
+        "slug": "lxc-101",
+        "proxmox_node": "pve",
+        "proxmox_vmid": 101,
+    }
+    host_entry, ssh_creds, _wrap = b._ssh_params_for(host)
+    assert "key" not in host_entry
+    assert ssh_creds["ssh_password"] == "hunter2"
+
+
+@pytest.mark.asyncio
+async def test_containers_for_host_pct_wraps_docker_ps(config_file, data_dir):
+    """pct hosts: docker ps and image inspect are executed via `pct exec VMID -- sh -c`."""
+    import yaml
+    from app.config_manager import save_proxmox_config
+    from app.credentials import save_integration_credentials
+
+    save_proxmox_config(url="https://pve.example:8006", verify_ssl=False)
+    save_integration_credentials("proxmox", ssh_user="root", ssh_key="id_proxmox")
+
+    raw = yaml.safe_load(config_file.read_text())
+    raw["hosts"][0]["docker_mode"] = "all"
+    raw["hosts"][0]["proxmox_node"] = "pve"
+    raw["hosts"][0]["proxmox_vmid"] = 101
+    raw["hosts"][0]["proxmox_type"] = "lxc"
+    config_file.write_text(yaml.dump(raw))
+
+    docker_ps_output = json.dumps(
+        {"Names": "/app", "Image": "app:latest", "Labels": ""}
+    )
+    inspect_output = '["app@sha256:abc"]'
+    conn = _make_multi_conn(
+        [
+            MagicMock(stdout=docker_ps_output, returncode=0),
+            MagicMock(stdout=inspect_output, returncode=0),
+        ]
+    )
+
+    with (
+        patch("app.backends.ssh_docker_backend._connect", new=AsyncMock(return_value=conn)),
+        patch("app.backends.ssh_docker_backend.check_image_update",
+              new=AsyncMock(return_value="up_to_date")),
+    ):
+        backend = SSHDockerBackend()
+        stacks = await backend.get_stacks_with_update_status()
+
+    assert len(stacks) == 1
+    calls = [call.args[0] for call in conn.run.call_args_list]
+    assert all(c.startswith("pct exec 101 -- sh -c ") for c in calls)
+    assert any("docker ps -a" in c for c in calls)
+    assert any("docker image inspect" in c for c in calls)
+    assert stacks[0]["connection_badge"] == "LXC 101 · pct exec"
+
+
+@pytest.mark.asyncio
+async def test_update_compose_pct_wraps_commands(config_file, data_dir):
+    """Compose updates on pct hosts wrap every docker command with pct exec."""
+    import yaml
+    from app.config_manager import save_proxmox_config
+    from app.credentials import save_integration_credentials
+
+    save_proxmox_config(url="https://pve.example:8006", verify_ssl=False)
+    save_integration_credentials("proxmox", ssh_user="root", ssh_key="id_proxmox")
+
+    raw = yaml.safe_load(config_file.read_text())
+    raw["hosts"][0]["docker_mode"] = "all"
+    raw["hosts"][0]["proxmox_node"] = "pve"
+    raw["hosts"][0]["proxmox_vmid"] = 202
+    config_file.write_text(yaml.dump(raw))
+
+    ls_output = json.dumps([{"Name": "sonarr", "ConfigFiles": "/opt/sonarr/dc.yml"}])
+    conn = _make_multi_conn(
+        [
+            MagicMock(stdout=ls_output, returncode=0),
+            MagicMock(stdout="Pulled", returncode=0),
+            MagicMock(stdout="Started", returncode=0),
+        ]
+    )
+
+    with patch(
+        "app.backends.ssh_docker_backend._connect", new=AsyncMock(return_value=conn)
+    ):
+        backend = SSHDockerBackend()
+        await backend.update_stack("test-host/sonarr:sonarr")
+
+    calls = [call.args[0] for call in conn.run.call_args_list]
+    assert all(c.startswith("pct exec 202 -- sh -c ") for c in calls)
+    assert any("docker compose" in c and "pull" in c for c in calls)
+    assert any("docker compose" in c and "up -d" in c for c in calls)
+
+
+@pytest.mark.asyncio
+async def test_update_standalone_pct_wraps_commands(config_file, data_dir):
+    """Standalone updates on pct hosts wrap inspect/pull/stop/rm/run with pct exec."""
+    import yaml
+    from app.config_manager import save_proxmox_config
+    from app.credentials import save_integration_credentials
+
+    save_proxmox_config(url="https://pve.example:8006", verify_ssl=False)
+    save_integration_credentials("proxmox", ssh_user="root", ssh_key="id_proxmox")
+
+    raw = yaml.safe_load(config_file.read_text())
+    raw["hosts"][0]["docker_mode"] = "all"
+    raw["hosts"][0]["proxmox_node"] = "pve"
+    raw["hosts"][0]["proxmox_vmid"] = 303
+    config_file.write_text(yaml.dump(raw))
+
+    inspect_data = json.dumps([{
+        "Name": "/myapp", "Id": "abc123",
+        "Config": {"Image": "myimage:latest", "Env": [], "Cmd": None,
+                   "Entrypoint": None, "Labels": {}, "Hostname": "myapp"},
+        "HostConfig": {
+            "RestartPolicy": {"Name": "no", "MaximumRetryCount": 0},
+            "NetworkMode": "bridge", "Privileged": False,
+            "Binds": None, "PortBindings": {}, "Devices": None,
+            "CapAdd": None, "CapDrop": None, "Dns": None,
+            "ExtraHosts": None, "Tmpfs": None, "PidMode": "",
+            "IpcMode": "private", "LogConfig": {"Type": "json-file", "Config": {}},
+        },
+        "NetworkSettings": {"Networks": {}},
+    }])
+    conn = _make_multi_conn(
+        [
+            MagicMock(stdout=inspect_data, returncode=0),
+            MagicMock(stdout="Pulled", returncode=0),
+            MagicMock(stdout="", returncode=0),
+            MagicMock(stdout="", returncode=0),
+            MagicMock(stdout="new-id", returncode=0),
+        ]
+    )
+
+    with patch(
+        "app.backends.ssh_docker_backend._connect", new=AsyncMock(return_value=conn)
+    ):
+        backend = SSHDockerBackend()
+        await backend.update_stack("test-host/~myapp")
+
+    calls = [call.args[0] for call in conn.run.call_args_list]
+    assert all(c.startswith("pct exec 303 -- sh -c ") for c in calls)
+    assert any("docker inspect" in c for c in calls)
+    assert any("docker pull" in c for c in calls)
+    assert any("docker stop" in c for c in calls)
+    assert any("docker rm" in c for c in calls)
+    assert any("docker run" in c for c in calls)
+
+
+@pytest.mark.asyncio
+async def test_pct_host_connection_error_logs_at_error_level(
+    config_file, data_dir, caplog
+):
+    """pct host failures must surface at ERROR (not WARNING) so they're not silent."""
+    import logging
+    import yaml
+
+    raw = yaml.safe_load(config_file.read_text())
+    raw["hosts"][0]["docker_mode"] = "all"
+    raw["hosts"][0]["proxmox_node"] = "pve"
+    raw["hosts"][0]["proxmox_vmid"] = 404
+    config_file.write_text(yaml.dump(raw))
+
+    with patch(
+        "app.backends.ssh_docker_backend._connect",
+        new=AsyncMock(side_effect=ConnectionError("refused")),
+    ):
+        backend = SSHDockerBackend()
+        with caplog.at_level(logging.ERROR, logger="app.backends.ssh_docker_backend"):
+            stacks = await backend.get_stacks_with_update_status()
+
+    assert stacks == []
+    error_records = [r for r in caplog.records if r.levelno == logging.ERROR]
+    assert any("pct exec failed" in r.getMessage() for r in error_records)
+    assert any("404" in r.getMessage() for r in error_records)
+
+
 @pytest.mark.asyncio
 async def test_get_stacks_proxmox_node_connection_badge(config_file, data_dir):
     """A host flagged as a Proxmox node gets the Node · Proxmox API badge."""
