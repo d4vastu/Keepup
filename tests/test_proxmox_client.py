@@ -528,3 +528,182 @@ async def test_discover_resources_cluster_failure_falls_back_to_node_lxc(mock_cl
         result = await mock_client.discover_resources()
 
     assert any(r["name"] == "fallback-ct" for r in result)
+
+
+# ---------------------------------------------------------------------------
+# get_running_guests
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_get_running_guests_returns_only_running(mock_client):
+    qemu_data = [
+        {"vmid": 100, "name": "vm-running", "status": "running"},
+        {"vmid": 101, "name": "vm-stopped", "status": "stopped"},
+    ]
+    lxc_data = [
+        {"vmid": 200, "name": "lxc-running", "status": "running"},
+    ]
+
+    async def fake_get(path, **kwargs):
+        if "/qemu" in path:
+            return _make_response(qemu_data)
+        if "/lxc" in path:
+            return _make_response(lxc_data)
+        return _make_response([])
+
+    with patch("httpx.AsyncClient.get", new_callable=AsyncMock, side_effect=fake_get):
+        guests = await mock_client.get_running_guests("pve")
+
+    assert len(guests) == 2
+    names = {g["name"] for g in guests}
+    assert "vm-running" in names
+    assert "lxc-running" in names
+    assert "vm-stopped" not in names
+
+
+@pytest.mark.asyncio
+async def test_get_running_guests_handles_endpoint_failure(mock_client):
+    async def fake_get(path, **kwargs):
+        if "/qemu" in path:
+            raise httpx.HTTPError("forbidden")
+        return _make_response([{"vmid": 200, "name": "ct", "status": "running"}])
+
+    with patch("httpx.AsyncClient.get", new_callable=AsyncMock, side_effect=fake_get):
+        guests = await mock_client.get_running_guests("pve")
+
+    assert len(guests) == 1
+    assert guests[0]["type"] == "lxc"
+
+
+@pytest.mark.asyncio
+async def test_get_running_guests_empty_node(mock_client):
+    with patch("httpx.AsyncClient.get", new_callable=AsyncMock,
+               return_value=_make_response([])):
+        guests = await mock_client.get_running_guests("pve")
+    assert guests == []
+
+
+# ---------------------------------------------------------------------------
+# stop_guest
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_stop_guest_returns_stopped(mock_client):
+    post_resp = _make_response("")
+    stopped_resp = _make_response({"status": "stopped"})
+
+    async def fake_get(path, **kwargs):
+        return stopped_resp
+
+    with patch("httpx.AsyncClient.post", new_callable=AsyncMock, return_value=post_resp), \
+         patch("httpx.AsyncClient.get", new_callable=AsyncMock, side_effect=fake_get):
+        result = await mock_client.stop_guest("pve", 100, "qemu", timeout=10)
+
+    assert result == "stopped"
+
+
+@pytest.mark.asyncio
+async def test_stop_guest_returns_timed_out(mock_client):
+    post_resp = _make_response("")
+    running_resp = _make_response({"status": "running"})
+
+    with patch("httpx.AsyncClient.post", new_callable=AsyncMock, return_value=post_resp), \
+         patch("httpx.AsyncClient.get", new_callable=AsyncMock, return_value=running_resp), \
+         patch("asyncio.sleep", new_callable=AsyncMock):
+        result = await mock_client.stop_guest("pve", 100, "lxc", timeout=4)
+
+    assert result == "timed_out"
+
+
+# ---------------------------------------------------------------------------
+# force_stop_guest
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_force_stop_guest_posts_stop(mock_client):
+    post_resp = _make_response("")
+    with patch("httpx.AsyncClient.post", new_callable=AsyncMock, return_value=post_resp) as mock_post:
+        await mock_client.force_stop_guest("pve", 100, "qemu")
+    mock_post.assert_called_once()
+    assert "/status/stop" in mock_post.call_args[0][0]
+
+
+@pytest.mark.asyncio
+async def test_force_stop_guest_lxc_path(mock_client):
+    post_resp = _make_response("")
+    with patch("httpx.AsyncClient.post", new_callable=AsyncMock, return_value=post_resp) as mock_post:
+        await mock_client.force_stop_guest("pve", 200, "lxc")
+    url = mock_post.call_args[0][0]
+    assert "lxc/200/status/stop" in url
+
+
+# ---------------------------------------------------------------------------
+# get_node_kernel
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_get_node_kernel_returns_release(mock_client):
+    status_data = {"uname_info": {"release": "6.8.4-2-pve", "sysname": "Linux"}}
+    with patch("httpx.AsyncClient.get", new_callable=AsyncMock,
+               return_value=_make_response(status_data)):
+        kernel = await mock_client.get_node_kernel("pve")
+    assert kernel == "6.8.4-2-pve"
+
+
+@pytest.mark.asyncio
+async def test_get_node_kernel_missing_uname_info(mock_client):
+    with patch("httpx.AsyncClient.get", new_callable=AsyncMock,
+               return_value=_make_response({})):
+        kernel = await mock_client.get_node_kernel("pve")
+    assert kernel == "unknown"
+
+
+# ---------------------------------------------------------------------------
+# wait_for_node
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_wait_for_node_returns_true_when_node_up(mock_client):
+    ok_resp = MagicMock(spec=httpx.Response)
+    ok_resp.status_code = 200
+
+    with patch("httpx.AsyncClient.get", new_callable=AsyncMock, return_value=ok_resp), \
+         patch("asyncio.sleep", new_callable=AsyncMock):
+        result = await mock_client.wait_for_node("pve", timeout=30)
+
+    assert result is True
+
+
+@pytest.mark.asyncio
+async def test_wait_for_node_returns_false_on_timeout(mock_client):
+    with patch("httpx.AsyncClient.get", new_callable=AsyncMock,
+               side_effect=httpx.ConnectError("refused")), \
+         patch("asyncio.sleep", new_callable=AsyncMock):
+        result = await mock_client.wait_for_node("pve", timeout=10)
+
+    assert result is False
+
+
+@pytest.mark.asyncio
+async def test_wait_for_node_recovers_after_transient_failures(mock_client):
+    call_count = 0
+
+    async def fake_get(path, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        if call_count < 3:
+            raise httpx.ConnectError("not yet up")
+        resp = MagicMock(spec=httpx.Response)
+        resp.status_code = 200
+        return resp
+
+    with patch("httpx.AsyncClient.get", new_callable=AsyncMock, side_effect=fake_get), \
+         patch("asyncio.sleep", new_callable=AsyncMock):
+        result = await mock_client.wait_for_node("pve", timeout=60)
+
+    assert result is True

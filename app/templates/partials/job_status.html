@@ -1,5 +1,31 @@
 {% if job.done %}
-  {% if job.status == "error" %}
+  {% if job.status == "needs_force_confirm" %}
+  <div class="space-y-1.5">
+    <div class="text-[12px] text-amber-400">Some guests timed out and are still running:</div>
+    {% for guest in job.timed_out_guests %}
+    <div class="text-[12px] text-slate-400">{{ guest.name }} ({{ guest.type }} {{ guest.vmid }})</div>
+    {% endfor %}
+    <div class="flex flex-wrap gap-2 pt-1">
+      <form hx-post="/api/host/{{ job.slug }}/restart"
+            hx-target="#host-{{ job.slug }}-action"
+            hx-swap="innerHTML">
+        <input type="hidden" name="confirmed" value="true">
+        <input type="hidden" name="force_stop" value="true">
+        <button type="submit"
+                class="text-[12px] font-medium px-3 py-1 rounded-md border border-red-800 text-red-400 hover:bg-red-900/20 transition-colors">
+          Force stop &amp; continue
+        </button>
+      </form>
+      <button type="button"
+              hx-get="/api/host/{{ job.slug }}/check"
+              hx-target="#host-{{ job.slug }}-action"
+              hx-swap="innerHTML"
+              class="text-[12px] font-medium px-3 py-1 rounded-md border border-slate-700 text-slate-400 hover:bg-slate-800/40 transition-colors">
+        Cancel
+      </button>
+    </div>
+  </div>
+  {% elif job.status == "error" %}
   <div class="job-action-group">
     <span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[12px] font-medium bg-red-950/50 text-red-400 border border-red-900/50">
       <span class="w-1.5 h-1.5 rounded-full bg-current flex-shrink-0"></span>

@@ -273,6 +273,274 @@ def test_host_restart_nonroot_sudo_saved_automatically(client, data_dir):
     assert get_credentials("test-host").get("sudo_password") == "mysudo"
 
 
+# ---------------------------------------------------------------------------
+# GET /api/host/{slug}/reboot-preview
+# ---------------------------------------------------------------------------
+
+
+def test_reboot_preview_non_proxmox_host(client):
+    """Non-Proxmox host returns a simple confirm form."""
+    response = client.get("/api/host/test-host/reboot-preview")
+    assert response.status_code == 200
+    assert "confirmed" in response.text
+
+
+def test_reboot_preview_proxmox_node_lists_guests(client):
+    """Proxmox node preview lists running guests."""
+    mock_client = AsyncMock()
+    mock_client.get_running_guests = AsyncMock(return_value=[
+        {"vmid": 100, "name": "my-vm", "type": "qemu"},
+        {"vmid": 101, "name": "my-ct", "type": "lxc"},
+    ])
+    node_host = {
+        "name": "PVE Node",
+        "host": "10.0.0.1",
+        "slug": "pve-node",
+        "proxmox_node": "pve",
+    }
+    with (
+        patch("app.main._get_host", return_value=node_host),
+        patch("app.main._proxmox_client_from_config", new=AsyncMock(return_value=mock_client)),
+        patch("app.main.is_self_on_proxmox_node", return_value=False),
+    ):
+        response = client.get("/api/host/pve-node/reboot-preview")
+    assert response.status_code == 200
+    assert "my-vm" in response.text
+    assert "my-ct" in response.text
+    assert "will be stopped" in response.text
+
+
+def test_reboot_preview_proxmox_node_self_on_node(client):
+    """Self-on-node returns refusal message without guest list."""
+    mock_client = AsyncMock()
+    node_host = {
+        "name": "PVE Node",
+        "host": "10.0.0.1",
+        "slug": "pve-node",
+        "proxmox_node": "pve",
+    }
+    with (
+        patch("app.main._get_host", return_value=node_host),
+        patch("app.main._proxmox_client_from_config", new=AsyncMock(return_value=mock_client)),
+        patch("app.main.is_self_on_proxmox_node", return_value=True),
+    ):
+        response = client.get("/api/host/pve-node/reboot-preview")
+    assert response.status_code == 200
+    assert "different host" in response.text
+    mock_client.get_running_guests.assert_not_called()
+
+
+def test_reboot_preview_proxmox_node_no_guests(client):
+    """Proxmox node with no running guests shows appropriate message."""
+    mock_client = AsyncMock()
+    mock_client.get_running_guests = AsyncMock(return_value=[])
+    node_host = {
+        "name": "PVE Node",
+        "host": "10.0.0.1",
+        "slug": "pve-node",
+        "proxmox_node": "pve",
+    }
+    with (
+        patch("app.main._get_host", return_value=node_host),
+        patch("app.main._proxmox_client_from_config", new=AsyncMock(return_value=mock_client)),
+        patch("app.main.is_self_on_proxmox_node", return_value=False),
+    ):
+        response = client.get("/api/host/pve-node/reboot-preview")
+    assert response.status_code == 200
+    assert "No running guests" in response.text
+
+
+# ---------------------------------------------------------------------------
+# POST /api/host/{slug}/restart — Proxmox node path
+# ---------------------------------------------------------------------------
+
+
+def test_host_restart_proxmox_node_starts_job(client):
+    """Proxmox node restart with confirmed=true starts a background job."""
+    import app.main as m
+
+    node_host = {
+        "name": "PVE Node",
+        "host": "10.0.0.1",
+        "slug": "pve-node",
+        "proxmox_node": "pve",
+    }
+    with (
+        patch("app.main._get_host", return_value=node_host),
+        patch("app.main._job_run_proxmox_node_restart", new=AsyncMock()),
+    ):
+        response = client.post(
+            "/api/host/pve-node/restart",
+            data={"confirmed": "true"},
+        )
+    assert response.status_code == 200
+    assert any(j.get("sub") == "pve" for j in m._jobs.values())
+
+
+def test_host_restart_proxmox_node_force_stop_flag(client):
+    """force_stop=true is passed through to the background job."""
+    import app.main as m
+
+    node_host = {
+        "name": "PVE Node",
+        "host": "10.0.0.1",
+        "slug": "pve-node",
+        "proxmox_node": "pve",
+    }
+    with (
+        patch("app.main._get_host", return_value=node_host),
+        patch("app.main._job_run_proxmox_node_restart", new=AsyncMock()),
+    ):
+        response = client.post(
+            "/api/host/pve-node/restart",
+            data={"confirmed": "true", "force_stop": "true"},
+        )
+    assert response.status_code == 200
+
+
+def test_host_restart_non_proxmox_unchanged(client):
+    """Non-Proxmox restart still works via existing SSH flow."""
+    with patch("app.main.reboot_host", new=AsyncMock(return_value=[])):
+        response = client.post("/api/host/test-host/restart")
+    assert response.status_code == 200
+    assert "sudo" not in response.text.lower()
+
+
+# ---------------------------------------------------------------------------
+# _job_run_proxmox_node_restart
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_job_proxmox_node_restart_all_stopped(config_file, data_dir):
+    """Happy path: all guests stop, node reboots, comes back with new kernel."""
+    import app.main as m
+
+    mock_client = AsyncMock()
+    mock_client.get_running_guests = AsyncMock(return_value=[
+        {"vmid": 100, "name": "vm1", "type": "qemu"},
+    ])
+    mock_client.stop_guest = AsyncMock(return_value="stopped")
+    mock_client.wait_for_node = AsyncMock(return_value=True)
+    mock_client.get_node_kernel = AsyncMock(return_value="6.8.4-2-pve")
+
+    node_host = {"name": "PVE", "host": "10.0.0.1", "slug": "pve-node", "proxmox_node": "pve"}
+    job_id = "testpxreboot1"
+    m._jobs[job_id] = {
+        "done": False, "status": "running", "error": None, "lines": [],
+        "type": "os_restart", "label": "PVE", "sub": "pve",
+        "slug": "pve-node", "timed_out_guests": [],
+    }
+
+    with (
+        patch("app.main._proxmox_client_from_config", new=AsyncMock(return_value=mock_client)),
+        patch("app.main._get_host", return_value=node_host),
+        patch("app.main.get_credentials", return_value={}),
+        patch("app.main.reboot_host", new=AsyncMock(return_value=[])),
+    ):
+        await m._job_run_proxmox_node_restart(job_id, "pve-node", "pve", False)
+
+    assert m._jobs[job_id]["done"] is True
+    assert m._jobs[job_id]["status"] == "done"
+    assert any("Stopped" in line for line in m._jobs[job_id]["lines"])
+    assert any("kernel" in line for line in m._jobs[job_id]["lines"])
+
+
+@pytest.mark.asyncio
+async def test_job_proxmox_node_restart_needs_force_confirm(config_file, data_dir):
+    """Timed-out guests without force_stop → needs_force_confirm state."""
+    import app.main as m
+
+    guest = {"vmid": 100, "name": "vm1", "type": "qemu"}
+    mock_client = AsyncMock()
+    mock_client.get_running_guests = AsyncMock(return_value=[guest])
+    mock_client.stop_guest = AsyncMock(return_value="timed_out")
+
+    node_host = {"name": "PVE", "host": "10.0.0.1", "slug": "pve-node", "proxmox_node": "pve"}
+    job_id = "testpxreboot2"
+    m._jobs[job_id] = {
+        "done": False, "status": "running", "error": None, "lines": [],
+        "type": "os_restart", "label": "PVE", "sub": "pve",
+        "slug": "pve-node", "timed_out_guests": [],
+    }
+
+    with (
+        patch("app.main._proxmox_client_from_config", new=AsyncMock(return_value=mock_client)),
+        patch("app.main._get_host", return_value=node_host),
+        patch("app.main.get_credentials", return_value={}),
+    ):
+        await m._job_run_proxmox_node_restart(job_id, "pve-node", "pve", False)
+
+    assert m._jobs[job_id]["done"] is True
+    assert m._jobs[job_id]["status"] == "needs_force_confirm"
+    assert len(m._jobs[job_id]["timed_out_guests"]) == 1
+    mock_client.force_stop_guest.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_job_proxmox_node_restart_force_stop_continues(config_file, data_dir):
+    """force_stop=True force-kills timed-out guests and proceeds with reboot."""
+    import app.main as m
+
+    guest = {"vmid": 100, "name": "vm1", "type": "qemu"}
+    mock_client = AsyncMock()
+    mock_client.get_running_guests = AsyncMock(return_value=[guest])
+    mock_client.stop_guest = AsyncMock(return_value="timed_out")
+    mock_client.force_stop_guest = AsyncMock()
+    mock_client.wait_for_node = AsyncMock(return_value=True)
+    mock_client.get_node_kernel = AsyncMock(return_value="6.8.4-2-pve")
+
+    node_host = {"name": "PVE", "host": "10.0.0.1", "slug": "pve-node", "proxmox_node": "pve"}
+    job_id = "testpxreboot3"
+    m._jobs[job_id] = {
+        "done": False, "status": "running", "error": None, "lines": [],
+        "type": "os_restart", "label": "PVE", "sub": "pve",
+        "slug": "pve-node", "timed_out_guests": [],
+    }
+
+    with (
+        patch("app.main._proxmox_client_from_config", new=AsyncMock(return_value=mock_client)),
+        patch("app.main._get_host", return_value=node_host),
+        patch("app.main.get_credentials", return_value={}),
+        patch("app.main.reboot_host", new=AsyncMock(return_value=[])),
+    ):
+        await m._job_run_proxmox_node_restart(job_id, "pve-node", "pve", True)
+
+    assert m._jobs[job_id]["done"] is True
+    assert m._jobs[job_id]["status"] == "done"
+    mock_client.force_stop_guest.assert_called_once_with("pve", 100, "qemu")
+
+
+@pytest.mark.asyncio
+async def test_job_proxmox_node_restart_node_no_return(config_file, data_dir):
+    """Node not coming back within timeout → error state."""
+    import app.main as m
+
+    mock_client = AsyncMock()
+    mock_client.get_running_guests = AsyncMock(return_value=[])
+    mock_client.wait_for_node = AsyncMock(return_value=False)
+
+    node_host = {"name": "PVE", "host": "10.0.0.1", "slug": "pve-node", "proxmox_node": "pve"}
+    job_id = "testpxreboot4"
+    m._jobs[job_id] = {
+        "done": False, "status": "running", "error": None, "lines": [],
+        "type": "os_restart", "label": "PVE", "sub": "pve",
+        "slug": "pve-node", "timed_out_guests": [],
+    }
+
+    with (
+        patch("app.main._proxmox_client_from_config", new=AsyncMock(return_value=mock_client)),
+        patch("app.main._get_host", return_value=node_host),
+        patch("app.main.get_credentials", return_value={}),
+        patch("app.main.reboot_host", new=AsyncMock(return_value=[])),
+    ):
+        await m._job_run_proxmox_node_restart(job_id, "pve-node", "pve", False)
+
+    assert m._jobs[job_id]["done"] is True
+    assert m._jobs[job_id]["status"] == "error"
+    assert "10 minutes" in m._jobs[job_id]["error"]
+
+
 def test_docker_check_raises_exception(client, monkeypatch):
     """Exception in gather propagates to error template."""
     import app.backend_loader as bl

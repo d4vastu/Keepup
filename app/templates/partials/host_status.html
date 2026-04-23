@@ -14,8 +14,6 @@
   {% endfor %}
 </div>
 <div class="mt-2 flex flex-wrap gap-2">
-  {% if false %}{# placeholder — both node and SSH now use the same button #}
-  {% else %}
   <button
     hx-post="/api/host/{{ slug }}/update"
     hx-target="#host-{{ slug }}-action"
@@ -24,8 +22,15 @@
     class="text-[12px] font-medium px-3 py-1 rounded-md border border-[#2ea043] text-green-400 hover:bg-green-900/20 transition-colors">
     Upgrade
   </button>
-  {% endif %}
-  {% if reboot_required %}
+  {% if is_proxmox_node %}
+  <button
+    hx-get="/api/host/{{ slug }}/reboot-preview"
+    hx-target="#host-{{ slug }}-action"
+    hx-swap="innerHTML"
+    class="text-[12px] font-medium px-3 py-1 rounded-md border border-red-800 text-red-400 hover:bg-red-900/20 transition-colors">
+    Reboot node
+  </button>
+  {% elif reboot_required %}
   <button
     hx-post="/api/host/{{ slug }}/restart"
     hx-target="#host-{{ slug }}-action"
@@ -46,7 +51,17 @@
   <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium bg-orange-950/50 text-orange-400 border border-orange-900/40">Proxmox · {{ proxmox_node }}</span>
   {% endif %}
 </div>
-{% if reboot_required %}
+{% if is_proxmox_node %}
+<div class="mt-2 flex flex-wrap items-center gap-2">
+  <button
+    hx-get="/api/host/{{ slug }}/reboot-preview"
+    hx-target="#host-{{ slug }}-action"
+    hx-swap="innerHTML"
+    class="text-[12px] font-medium px-3 py-1 rounded-md border border-red-800 text-red-400 hover:bg-red-900/20 transition-colors">
+    Reboot node
+  </button>
+</div>
+{% elif reboot_required %}
 <div class="mt-2 flex flex-wrap items-center gap-2">
   <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[12px] font-medium bg-amber-900/40 text-amber-400 border border-amber-800/50">
     Reboot required

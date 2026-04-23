@@ -1,0 +1,72 @@
+{% if not proxmox_node %}
+{# Non-Proxmox or LXC — fall through to a plain confirm-and-reboot #}
+<form hx-post="/api/host/{{ slug }}/restart"
+      hx-target="#host-{{ slug }}-action"
+      hx-swap="innerHTML">
+  <input type="hidden" name="confirmed" value="true">
+  <div class="flex flex-wrap items-center gap-2">
+    <span class="text-[12px] text-slate-400">Reboot {{ slug }}?</span>
+    <button type="submit"
+            class="text-[12px] font-medium px-3 py-1 rounded-md border border-red-800 text-red-400 hover:bg-red-900/20 transition-colors">
+      Confirm reboot
+    </button>
+    <button type="button"
+            hx-get="/api/host/{{ slug }}/check"
+            hx-target="#host-{{ slug }}-action"
+            hx-swap="innerHTML"
+            class="text-[12px] font-medium px-3 py-1 rounded-md border border-slate-700 text-slate-400 hover:bg-slate-800/40 transition-colors">
+      Cancel
+    </button>
+  </div>
+</form>
+{% elif self_on_node %}
+<div class="flex flex-wrap items-center gap-2">
+  <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[12px] font-medium bg-amber-900/40 text-amber-400 border border-amber-800/50">
+    Keepup is running on this node — trigger this reboot from a different host
+  </span>
+  <button type="button"
+          hx-get="/api/host/{{ slug }}/check"
+          hx-target="#host-{{ slug }}-action"
+          hx-swap="innerHTML"
+          class="text-[12px] font-medium px-3 py-1 rounded-md border border-slate-700 text-slate-400 hover:bg-slate-800/40 transition-colors">
+    Cancel
+  </button>
+</div>
+{% else %}
+<div class="space-y-2">
+  <div class="text-[12px] text-slate-400">
+    The following guests on <span class="text-orange-400 font-medium">{{ proxmox_node }}</span> will be stopped before the node reboots:
+  </div>
+  {% if guests %}
+  <div class="space-y-1">
+    {% for guest in guests %}
+    <div class="flex items-center gap-2 text-[12px]">
+      <span class="text-slate-300">{{ guest.name }}</span>
+      <span class="text-slate-600">{{ guest.type }} {{ guest.vmid }}</span>
+      <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-amber-900/30 text-amber-400 border border-amber-800/40">will be stopped</span>
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}
+  <div class="text-[12px] text-slate-500">No running guests found — node can reboot immediately.</div>
+  {% endif %}
+  <form hx-post="/api/host/{{ slug }}/restart"
+        hx-target="#host-{{ slug }}-action"
+        hx-swap="innerHTML">
+    <input type="hidden" name="confirmed" value="true">
+    <div class="flex flex-wrap gap-2 pt-1">
+      <button type="submit"
+              class="text-[12px] font-medium px-3 py-1 rounded-md border border-red-800 text-red-400 hover:bg-red-900/20 transition-colors">
+        Confirm reboot
+      </button>
+      <button type="button"
+              hx-get="/api/host/{{ slug }}/check"
+              hx-target="#host-{{ slug }}-action"
+              hx-swap="innerHTML"
+              class="text-[12px] font-medium px-3 py-1 rounded-md border border-slate-700 text-slate-400 hover:bg-slate-800/40 transition-colors">
+        Cancel
+      </button>
+    </div>
+  </form>
+</div>
+{% endif %}
