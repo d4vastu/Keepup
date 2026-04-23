@@ -1,7 +1,5 @@
 """Tests for app.self_identity."""
 
-import pytest
-
 from app.self_identity import get_self_container_id
 
 
