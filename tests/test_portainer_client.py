@@ -334,3 +334,117 @@ async def test_stacks_sorted_by_endpoint_then_name(client):
 
     assert results[0]["name"] == "app"
     assert results[1]["name"] == "zoo"
+
+
+# ---------------------------------------------------------------------------
+# Portainer — self-container exclusion (OP#105)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_self_stack_excluded_from_discovery(client, monkeypatch):
+    """Stack containing the self-container is excluded from get_stacks_with_update_status."""
+    monkeypatch.setenv("HOSTNAME", "aabbccddeeff")
+
+    self_container = {
+        "Id": "aabbccddeeff112233445566",
+        "Image": "keepup:latest",
+        "ImageID": "sha256:keepup",
+        "Labels": {"com.docker.compose.project": "keepup"},
+    }
+    other_container = {
+        "Id": "112233445566aabbccddeeff",
+        "Image": "linuxserver/sonarr:latest",
+        "ImageID": "sha256:sonarr",
+        "Labels": {"com.docker.compose.project": "sonarr"},
+    }
+    stacks = [
+        {"Id": 20, "Name": "keepup", "EndpointId": 1, "Env": []},
+        {"Id": 21, "Name": "sonarr", "EndpointId": 1, "Env": []},
+    ]
+
+    with (
+        patch.object(client, "get_endpoints", new=AsyncMock(return_value=ENDPOINTS[:1])),
+        patch.object(client, "get_stacks", new=AsyncMock(return_value=stacks)),
+        patch.object(
+            client, "_get_containers",
+            new=AsyncMock(return_value=[self_container, other_container])
+        ),
+        patch.object(client, "_get_image_info", new=AsyncMock(return_value=IMAGE_INFO)),
+        patch("app.portainer_client.check_image_update", new=AsyncMock(return_value="up_to_date")),
+        patch("app.portainer_client.extract_local_digest", return_value="sha256:x"),
+    ):
+        results = await client.get_stacks_with_update_status()
+
+    names = {r["name"] for r in results}
+    assert "keepup" not in names
+    assert "sonarr" in names
+
+
+@pytest.mark.asyncio
+async def test_self_stack_not_excluded_when_not_in_docker(client, monkeypatch):
+    """Non-container HOSTNAME must not exclude any stack."""
+    monkeypatch.setenv("HOSTNAME", "myserver")
+
+    self_container = {
+        "Id": "aabbccddeeff112233445566",
+        "Image": "keepup:latest",
+        "ImageID": "sha256:keepup",
+        "Labels": {"com.docker.compose.project": "keepup"},
+    }
+    stacks = [{"Id": 20, "Name": "keepup", "EndpointId": 1, "Env": []}]
+
+    with (
+        patch.object(client, "get_endpoints", new=AsyncMock(return_value=ENDPOINTS[:1])),
+        patch.object(client, "get_stacks", new=AsyncMock(return_value=stacks)),
+        patch.object(client, "_get_containers", new=AsyncMock(return_value=[self_container])),
+        patch.object(client, "_get_image_info", new=AsyncMock(return_value=IMAGE_INFO)),
+        patch("app.portainer_client.check_image_update", new=AsyncMock(return_value="up_to_date")),
+        patch("app.portainer_client.extract_local_digest", return_value="sha256:x"),
+    ):
+        results = await client.get_stacks_with_update_status()
+
+    assert len(results) == 1
+    assert results[0]["name"] == "keepup"
+
+
+@pytest.mark.asyncio
+async def test_portainer_update_refused_for_self_stack(client, monkeypatch):
+    """update_stack raises ValueError when the stack contains the self-container."""
+    monkeypatch.setenv("HOSTNAME", "aabbccddeeff")
+
+    self_container = {
+        "Id": "aabbccddeeff112233445566",
+        "Image": "keepup:latest",
+        "Labels": {"com.docker.compose.project": "keepup"},
+    }
+    stack_meta = {"Id": 20, "Name": "keepup", "Env": []}
+
+    with (
+        patch.object(client, "_get_containers", new=AsyncMock(return_value=[self_container])),
+        patch.object(client, "get", new=AsyncMock(return_value=stack_meta)),
+    ):
+        with pytest.raises(ValueError, match="Self-update refused"):
+            await client.update_stack(20, 1)
+
+
+@pytest.mark.asyncio
+async def test_portainer_update_proceeds_when_check_fails(client, monkeypatch):
+    """If the safety-net container fetch fails, the update still proceeds (non-fatal check)."""
+    monkeypatch.setenv("HOSTNAME", "aabbccddeeff")
+
+    stack_meta = {"Id": 20, "Name": "keepup", "Env": []}
+    put_mock = AsyncMock(return_value={"Id": 20})
+
+    with (
+        patch.object(
+            client, "_get_containers", new=AsyncMock(side_effect=Exception("network error"))
+        ),
+        patch.object(client, "get", new=AsyncMock(return_value=stack_meta)),
+        patch.object(client, "get_stack_file", new=AsyncMock(return_value="version: '3'")),
+        patch.object(client, "put", new=put_mock),
+    ):
+        result = await client.update_stack(20, 1)
+
+    assert result == {"Id": 20}
+    put_mock.assert_called_once()

@@ -20,6 +20,7 @@ from ..ssh_client import _connect
 from ..registry_client import check_image_update, extract_local_digest
 from ..credentials import get_credentials, get_integration_credentials
 from ..config_manager import get_hosts, get_ssh_config, get_proxmox_config
+from ..self_identity import get_self_container_id
 
 log = logging.getLogger(__name__)
 
@@ -198,6 +199,24 @@ class SSHDockerBackend:
             )
             containers = _parse_json_output(ps_result.stdout)
 
+            # Identify own container and its compose project (if any) so we can
+            # exclude both the container itself and all siblings in the same project.
+            self_id = get_self_container_id()
+            self_projects: set[str] = set()
+            if self_id:
+                for c in containers:
+                    if (c.get("ID", "") or "")[:12] == self_id:
+                        labels = _parse_docker_ps_labels(c.get("Labels", "") or "")
+                        project = labels.get("com.docker.compose.project", "")
+                        name = (c.get("Names", "") or "").split(",")[0].lstrip("/").strip()
+                        log.info(
+                            "Docker SSH: %s — excluding self-container %s"
+                            " (project=%r) from discovery",
+                            h, name, project or "(standalone)",
+                        )
+                        if project:
+                            self_projects.add(project)
+
             # First pass: collect qualifying containers and unique images
             raw: list[tuple[str, str, str]] = []  # (container_name, image, project)
             for c in containers:
@@ -208,6 +227,12 @@ class SSHDockerBackend:
                 image = c.get("Image", "")
 
                 if not container_name or not image:
+                    continue
+
+                # Skip self-container (by ID) and its entire compose project
+                if self_id and (c.get("ID", "") or "")[:12] == self_id:
+                    continue
+                if project and project in self_projects:
                     continue
 
                 # In "selected" mode only include containers from chosen projects
@@ -356,6 +381,18 @@ class SSHDockerBackend:
         ssh_cfg = get_ssh_config()
         host_entry, ssh_creds, wrap = self._ssh_params_for(host)
         async with await _connect(host_entry, ssh_cfg, ssh_creds) as conn:
+            # Safety net: refuse to update a project that contains the self-container.
+            self_id = get_self_container_id()
+            if self_id:
+                ps = await conn.run(wrap("docker ps -a --format '{{json .}}'"), check=False)
+                for c in _parse_json_output(ps.stdout):
+                    if (c.get("ID", "") or "")[:12] == self_id:
+                        labels = _parse_docker_ps_labels(c.get("Labels", "") or "")
+                        if labels.get("com.docker.compose.project", "") == project_name:
+                            raise ValueError(
+                                f"Self-update refused: Keepup is part of"
+                                f" compose project {project_name!r} on {h}"
+                            )
             binary = await self._detect_compose_binary(conn, wrap, h)
             config_file = await self._get_config_file(conn, project_name, wrap)
             args = f"-f {config_file}" if config_file else f"-p {shlex.quote(project_name)}"
@@ -382,6 +419,14 @@ class SSHDockerBackend:
             if inspect_result.returncode != 0 or not inspect_result.stdout.strip():
                 raise RuntimeError(f"Container {container_name!r} not found")
             inspect_data = json.loads(inspect_result.stdout)[0]
+
+            # Safety net: refuse to recreate the self-container.
+            self_id = get_self_container_id()
+            if self_id and (inspect_data.get("Id", "") or "")[:12] == self_id:
+                raise ValueError(
+                    f"Self-update refused: Keepup is standalone container"
+                    f" {container_name!r} on {h}"
+                )
 
             image = inspect_data["Config"]["Image"]
             log.info("Docker SSH: pulling %s for container %s", image, container_name)
