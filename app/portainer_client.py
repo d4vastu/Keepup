@@ -14,6 +14,7 @@ import logging
 import httpx
 
 from .registry_client import extract_local_digest, check_image_update
+from .self_identity import get_self_container_id
 
 log = logging.getLogger(__name__)
 
@@ -69,6 +70,27 @@ class PortainerClient:
 
     async def update_stack(self, stack_id: int, endpoint_id: int) -> dict:
         """Pull latest images and redeploy the stack."""
+        # Safety net: refuse to redeploy a stack that contains the self-container.
+        self_id = get_self_container_id()
+        if self_id:
+            try:
+                containers = await self._get_containers(endpoint_id)
+                stack_meta = await self.get(f"/api/stacks/{stack_id}")
+                stack_name_lower = stack_meta.get("Name", "").lower()
+                stack_containers = [
+                    c for c in containers
+                    if c.get("Labels", {}).get("com.docker.compose.project", "").lower()
+                    == stack_name_lower
+                ]
+                if any((c.get("Id", "") or "")[:12] == self_id for c in stack_containers):
+                    raise ValueError(
+                        f"Self-update refused: Keepup is in Portainer stack {stack_id}"
+                    )
+            except ValueError:
+                raise
+            except Exception as exc:
+                log.warning("Portainer: self-update check failed for stack %s — %s", stack_id, exc)
+
         # Fetch current stack definition
         stack = await self.get(f"/api/stacks/{stack_id}")
         stack_name = stack.get("Name", str(stack_id))
@@ -132,6 +154,8 @@ class PortainerClient:
             except Exception:
                 endpoint_containers[ep["Id"]] = []
 
+        self_id = get_self_container_id()
+
         results = []
         for stack in stacks:
             stack_id = stack["Id"]
@@ -149,6 +173,17 @@ class PortainerClient:
                 if c.get("Labels", {}).get("com.docker.compose.project", "").lower()
                 == stack_name_lower
             ]
+
+            # Skip the stack that contains the running Keepup container.
+            if self_id and any(
+                (c.get("Id", "") or "")[:12] == self_id for c in stack_containers
+            ):
+                endpoint_name = endpoint_map.get(endpoint_id, f"env-{endpoint_id}")
+                log.info(
+                    "Portainer: excluding self-stack %s on %s from discovery",
+                    stack_name, endpoint_name,
+                )
+                continue
 
             # Check each unique image in this stack
             seen_images: set[str] = set()

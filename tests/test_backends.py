@@ -1914,3 +1914,184 @@ async def test_update_compose_v1_relative_path_resolved(config_file, data_dir):
     calls = [c.args[0] for c in conn.run.call_args_list]
     pull_call = next(c for c in calls if "pull" in c)
     assert "docker-compose -f /root/NGINX/docker-compose.yaml pull" in pull_call
+
+
+# ---------------------------------------------------------------------------
+# SSHDockerBackend — self-container exclusion (OP#105)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_self_container_excluded_from_discovery(config_file, data_dir, monkeypatch):
+    """Self-container (matched by HOSTNAME) is excluded from get_stacks_with_update_status."""
+    import yaml
+
+    monkeypatch.setenv("HOSTNAME", "aabbccddeeff")
+
+    raw = yaml.safe_load(config_file.read_text())
+    raw["hosts"][0]["docker_mode"] = "all"
+    config_file.write_text(yaml.dump(raw))
+
+    docker_ps_output = "\n".join([
+        # Self-container — must be excluded
+        json.dumps({"ID": "aabbccddeeff", "Names": "/keepup", "Image": "keepup:latest", "Labels": ""}),
+        # Other container — must appear
+        json.dumps({"ID": "112233445566", "Names": "/sonarr", "Image": "sonarr:latest", "Labels": ""}),
+    ])
+    inspect_output = '["sonarr@sha256:abc"]'
+
+    conn = _make_multi_conn([
+        MagicMock(stdout=docker_ps_output, returncode=0),
+        MagicMock(stdout=inspect_output, returncode=0),
+    ])
+
+    with (
+        patch("app.backends.ssh_docker_backend._connect", new=AsyncMock(return_value=conn)),
+        patch("app.backends.ssh_docker_backend.check_image_update",
+              new=AsyncMock(return_value="up_to_date")),
+    ):
+        backend = SSHDockerBackend()
+        stacks = await backend.get_stacks_with_update_status()
+
+    names = {s["name"] for s in stacks}
+    assert "keepup" not in names
+    assert "sonarr" in names
+
+
+@pytest.mark.asyncio
+async def test_self_compose_project_excluded_from_discovery(config_file, data_dir, monkeypatch):
+    """All containers in the self-container's compose project are excluded."""
+    import yaml
+
+    monkeypatch.setenv("HOSTNAME", "aabbccddeeff")
+
+    raw = yaml.safe_load(config_file.read_text())
+    raw["hosts"][0]["docker_mode"] = "all"
+    config_file.write_text(yaml.dump(raw))
+
+    docker_ps_output = "\n".join([
+        # Self-container in a compose project
+        json.dumps({"ID": "aabbccddeeff", "Names": "/keepup_app_1", "Image": "keepup:latest",
+                    "Labels": "com.docker.compose.project=keepup"}),
+        # Sibling container in same project — also excluded
+        json.dumps({"ID": "ffeeddccbbaa", "Names": "/keepup_db_1", "Image": "postgres:latest",
+                    "Labels": "com.docker.compose.project=keepup"}),
+        # Unrelated container — must appear
+        json.dumps({"ID": "112233445566", "Names": "/sonarr", "Image": "sonarr:latest",
+                    "Labels": "com.docker.compose.project=sonarr"}),
+    ])
+    inspect_output = '["sonarr@sha256:abc"]'
+
+    conn = _make_multi_conn([
+        MagicMock(stdout=docker_ps_output, returncode=0),
+        MagicMock(stdout=inspect_output, returncode=0),
+    ])
+
+    with (
+        patch("app.backends.ssh_docker_backend._connect", new=AsyncMock(return_value=conn)),
+        patch("app.backends.ssh_docker_backend.check_image_update",
+              new=AsyncMock(return_value="up_to_date")),
+    ):
+        backend = SSHDockerBackend()
+        stacks = await backend.get_stacks_with_update_status()
+
+    names = {s["name"] for s in stacks}
+    assert "keepup_app_1" not in names
+    assert "keepup_db_1" not in names
+    assert "sonarr" in names
+
+
+@pytest.mark.asyncio
+async def test_no_self_exclusion_when_not_in_docker(config_file, data_dir, monkeypatch):
+    """Non-container HOSTNAME must not exclude any containers."""
+    import yaml
+
+    monkeypatch.setenv("HOSTNAME", "myserver")
+
+    raw = yaml.safe_load(config_file.read_text())
+    raw["hosts"][0]["docker_mode"] = "all"
+    config_file.write_text(yaml.dump(raw))
+
+    docker_ps_output = json.dumps(
+        {"ID": "aabbccddeeff", "Names": "/keepup", "Image": "keepup:latest", "Labels": ""}
+    )
+    inspect_output = '["keepup@sha256:abc"]'
+
+    conn = _make_multi_conn([
+        MagicMock(stdout=docker_ps_output, returncode=0),
+        MagicMock(stdout=inspect_output, returncode=0),
+    ])
+
+    with (
+        patch("app.backends.ssh_docker_backend._connect", new=AsyncMock(return_value=conn)),
+        patch("app.backends.ssh_docker_backend.check_image_update",
+              new=AsyncMock(return_value="up_to_date")),
+    ):
+        backend = SSHDockerBackend()
+        stacks = await backend.get_stacks_with_update_status()
+
+    assert len(stacks) == 1
+    assert stacks[0]["name"] == "keepup"
+
+
+@pytest.mark.asyncio
+async def test_compose_update_refused_for_self_project(config_file, data_dir, monkeypatch):
+    """_update_compose_project raises ValueError when self-container is in the project."""
+    import yaml
+
+    monkeypatch.setenv("HOSTNAME", "aabbccddeeff")
+
+    raw = yaml.safe_load(config_file.read_text())
+    raw["hosts"][0]["docker_mode"] = "all"
+    config_file.write_text(yaml.dump(raw))
+
+    ps_output = json.dumps({
+        "ID": "aabbccddeeff",
+        "Names": "/keepup_app_1",
+        "Labels": "com.docker.compose.project=keepup",
+    })
+
+    conn = _make_multi_conn([
+        MagicMock(stdout=ps_output, returncode=0),  # safety-net docker ps
+    ])
+
+    with patch("app.backends.ssh_docker_backend._connect", new=AsyncMock(return_value=conn)):
+        backend = SSHDockerBackend()
+        with pytest.raises(ValueError, match="Self-update refused"):
+            await backend.update_stack("test-host/keepup:keepup_app_1")
+
+
+@pytest.mark.asyncio
+async def test_standalone_update_refused_for_self_container(config_file, data_dir, monkeypatch):
+    """_update_standalone_container raises ValueError when the target is the self-container."""
+    import yaml
+
+    monkeypatch.setenv("HOSTNAME", "aabbccddeeff")
+
+    raw = yaml.safe_load(config_file.read_text())
+    raw["hosts"][0]["docker_mode"] = "all"
+    config_file.write_text(yaml.dump(raw))
+
+    inspect_data = json.dumps([{
+        "Name": "/keepup", "Id": "aabbccddeeff112233",
+        "Config": {"Image": "keepup:latest", "Env": [], "Cmd": None,
+                   "Entrypoint": None, "Labels": {}, "Hostname": "keepup"},
+        "HostConfig": {
+            "RestartPolicy": {"Name": "unless-stopped", "MaximumRetryCount": 0},
+            "NetworkMode": "bridge", "Privileged": False,
+            "Binds": None, "PortBindings": {}, "Devices": None,
+            "CapAdd": None, "CapDrop": None, "Dns": None,
+            "ExtraHosts": None, "Tmpfs": None, "PidMode": "",
+            "IpcMode": "private", "LogConfig": {"Type": "json-file", "Config": {}},
+        },
+        "NetworkSettings": {"Networks": {}},
+    }])
+
+    conn = _make_multi_conn([
+        MagicMock(stdout=inspect_data, returncode=0),  # docker inspect
+    ])
+
+    with patch("app.backends.ssh_docker_backend._connect", new=AsyncMock(return_value=conn)):
+        backend = SSHDockerBackend()
+        with pytest.raises(ValueError, match="Self-update refused"):
+            await backend.update_stack("test-host/~keepup")
