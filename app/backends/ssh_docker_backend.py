@@ -198,6 +198,12 @@ class SSHDockerBackend:
                 wrap("docker ps -a --format '{{json .}}'"), check=False
             )
             containers = _parse_json_output(ps_result.stdout)
+            portainer_projects = _portainer_managed_projects(containers)
+            if portainer_projects:
+                log.info(
+                    "Docker SSH: %s — skipping %d Portainer-managed project(s): %s",
+                    h, len(portainer_projects), sorted(portainer_projects),
+                )
 
             # Identify own container and its compose project (if any) so we can
             # exclude both the container itself and all siblings in the same project.
@@ -233,6 +239,10 @@ class SSHDockerBackend:
                 if self_id and (c.get("ID", "") or "")[:12] == self_id:
                     continue
                 if project and project in self_projects:
+                    continue
+
+                # Skip compose projects managed by a Portainer agent on this host
+                if project and project in portainer_projects:
                     continue
 
                 # In "selected" mode only include containers from chosen projects
@@ -492,6 +502,32 @@ def _compose_projects_from_ps(containers: list[dict]) -> list[dict]:
         if name not in by_project or (cf and not by_project[name]):
             by_project[name] = cf
     return [{"name": n, "config_file": f} for n, f in by_project.items()]
+
+
+def _portainer_managed_projects(containers: list[dict]) -> set[str]:
+    """
+    Return compose project names that are managed by a Portainer agent on this host.
+
+    When a portainer/agent container is present, Portainer stores its compose
+    files inside its own data volume (mounted at /data/compose/ by default),
+    not on the host filesystem. Those projects cannot be updated via SSH and
+    should be left to the Portainer backend.
+    """
+    has_agent = any(
+        "portainer/agent" in (c.get("Image") or "").lower()
+        for c in containers
+    )
+    if not has_agent:
+        return set()
+
+    excluded: set[str] = set()
+    for c in containers:
+        labels = _parse_docker_ps_labels(c.get("Labels", "") or "")
+        project = labels.get("com.docker.compose.project", "")
+        config_files = labels.get("com.docker.compose.project.config_files", "")
+        if project and config_files.startswith("/data/compose/"):
+            excluded.add(project)
+    return excluded
 
 
 def _parse_json_output(text: str) -> list[dict]:

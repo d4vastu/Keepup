@@ -11,6 +11,7 @@ from app.backends.ssh_docker_backend import (
     _compose_projects_from_ps,
     _parse_docker_ps_labels,
     _parse_json_output,
+    _portainer_managed_projects,
     _rollup_status,
 )
 
@@ -2095,3 +2096,64 @@ async def test_standalone_update_refused_for_self_container(config_file, data_di
         backend = SSHDockerBackend()
         with pytest.raises(ValueError, match="Self-update refused"):
             await backend.update_stack("test-host/~keepup")
+
+
+# ---------------------------------------------------------------------------
+# _portainer_managed_projects
+# ---------------------------------------------------------------------------
+
+def _make_container(name: str, image: str, project: str = "", config_files: str = "") -> dict:
+    labels = ""
+    if project:
+        labels += f"com.docker.compose.project={project}"
+    if config_files:
+        labels += f",com.docker.compose.project.config_files={config_files}"
+    return {"Names": f"/{name}", "Image": image, "Labels": labels.lstrip(",")}
+
+
+def test_portainer_managed_projects_excludes_portainer_stacks():
+    """Agent present + Portainer stack + manual stack → only manual returned as excluded."""
+    containers = [
+        _make_container("portainer_agent_1", "portainer/agent:latest"),
+        _make_container("actual_server_1", "actualbudget/actual:latest",
+                        project="actualbudget",
+                        config_files="/data/compose/58/docker-compose.yml"),
+        _make_container("nginx_1", "nginx:latest",
+                        project="nginx",
+                        config_files="/home/user/nginx/docker-compose.yml"),
+    ]
+    result = _portainer_managed_projects(containers)
+    assert result == {"actualbudget"}
+
+
+def test_portainer_managed_projects_no_exclusion_when_paths_normal():
+    """Agent present but all stacks have host-accessible paths → nothing excluded."""
+    containers = [
+        _make_container("portainer_agent_1", "portainer/agent:latest"),
+        _make_container("app_1", "myapp:latest",
+                        project="myapp",
+                        config_files="/home/user/myapp/docker-compose.yml"),
+    ]
+    result = _portainer_managed_projects(containers)
+    assert result == set()
+
+
+def test_portainer_managed_projects_no_agent_no_exclusion():
+    """No Portainer agent present → /data/compose/ paths are NOT excluded (no false positive)."""
+    containers = [
+        _make_container("app_1", "myapp:latest",
+                        project="myapp",
+                        config_files="/data/compose/99/docker-compose.yml"),
+    ]
+    result = _portainer_managed_projects(containers)
+    assert result == set()
+
+
+def test_portainer_managed_projects_standalone_unaffected():
+    """Agent present → standalone containers (no project label) are not in the excluded set."""
+    containers = [
+        _make_container("portainer_agent_1", "portainer/agent:latest"),
+        _make_container("standalone", "redis:latest"),
+    ]
+    result = _portainer_managed_projects(containers)
+    assert result == set()
