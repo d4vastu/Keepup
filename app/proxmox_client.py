@@ -266,8 +266,35 @@ class ProxmoxClient:
             )
             r.raise_for_status()
 
+    @staticmethod
+    def _parse_kversion(kversion: str) -> str:
+        """Extract kernel release from kversion string.
+
+        kversion: 'Linux 6.17.13-3-pve #1 SMP ...' → '6.17.13-3-pve'
+        """
+        try:
+            return kversion.split()[1]
+        except IndexError:
+            return ""
+
+    @staticmethod
+    def _kernel_ver_tuple(release: str) -> tuple:
+        """'6.17.13-3-pve' → (6, 17, 13, 3)"""
+        try:
+            release = release.replace("-pve", "")
+            main, *rest = release.split("-", 1)
+            nums = tuple(int(x) for x in main.split("."))
+            build = (int(rest[0]),) if rest else (0,)
+            return nums + build
+        except (ValueError, AttributeError):
+            return (0,)
+
     async def get_node_reboot_required(self, node: str) -> bool:
-        """Return True if a newer pve-kernel is installed than what's currently running."""
+        """Return True if a newer Proxmox kernel is installed than what's running.
+
+        Uses kversion from node/status and proxmox-kernel-*-pve-signed packages
+        from apt/versions (PVE 9+ naming).
+        """
         import asyncio
 
         async with self._client() as c:
@@ -286,33 +313,24 @@ class ProxmoxClient:
         except Exception:
             return False
 
-        running = (
-            status_r.json().get("data", {}).get("uname_info", {}).get("release", "")
-        )
+        kversion = status_r.json().get("data", {}).get("kversion", "")
+        running = self._parse_kversion(kversion)
         if not running:
             return False
 
         packages = versions_r.json().get("data", [])
+        # Package names: "proxmox-kernel-6.17.13-3-pve-signed"
         installed_kernels = [
-            pkg.get("Package", "")[len("pve-kernel"):]
+            pkg["Package"][len("proxmox-kernel-"):-len("-signed")]
             for pkg in packages
-            if pkg.get("Package", "").startswith("pve-kernel-")
+            if pkg.get("Package", "").startswith("proxmox-kernel-")
+            and pkg.get("Package", "").endswith("-pve-signed")
         ]
         if not installed_kernels:
             return False
 
-        def _ver(v: str) -> tuple:
-            try:
-                v = v.lstrip("-").replace("-pve", "")
-                main, *rest = v.split("-", 1)
-                nums = tuple(int(x) for x in main.split("."))
-                build = (int(rest[0]),) if rest else (0,)
-                return nums + build
-            except (ValueError, AttributeError):
-                return (0,)
-
-        running_ver = _ver(running)
-        return any(_ver(k) > running_ver for k in installed_kernels)
+        running_ver = self._kernel_ver_tuple(running)
+        return any(self._kernel_ver_tuple(k) > running_ver for k in installed_kernels)
 
     async def reboot_node(self, node: str) -> None:
         """Issue a node reboot via the Proxmox API (bulk-stops guests, then reboots)."""
@@ -329,8 +347,8 @@ class ProxmoxClient:
         async with self._client() as c:
             r = await c.get(f"/api2/json/nodes/{node}/status")
             r.raise_for_status()
-            uname = r.json().get("data", {}).get("uname_info", {})
-            return uname.get("release", "unknown")
+            kversion = r.json().get("data", {}).get("kversion", "")
+            return self._parse_kversion(kversion) or "unknown"
 
     async def wait_for_node(self, node: str, timeout: int = 600) -> bool:
         """Poll until the node API responds or timeout expires. Returns True if up."""

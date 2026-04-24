@@ -647,10 +647,11 @@ async def test_force_stop_guest_lxc_path(mock_client):
 
 @pytest.mark.asyncio
 async def test_get_node_reboot_required_newer_kernel_installed(mock_client):
-    status_data = {"uname_info": {"release": "6.8.4-2-pve"}}
+    # Running 6.17.13-3-pve but 6.17.13-4-pve is installed → reboot needed
+    status_data = {"kversion": "Linux 6.17.13-3-pve #1 SMP PREEMPT_DYNAMIC PMX 6.17.13-3"}
     versions_data = [
-        {"Package": "pve-kernel-6.8.4-2-pve"},
-        {"Package": "pve-kernel-6.8.12-1-pve"},
+        {"Package": "proxmox-kernel-6.17.13-3-pve-signed"},
+        {"Package": "proxmox-kernel-6.17.13-4-pve-signed"},
     ]
     responses = [_make_response(status_data), _make_response(versions_data)]
     with patch("httpx.AsyncClient.get", new_callable=AsyncMock, side_effect=responses):
@@ -660,10 +661,11 @@ async def test_get_node_reboot_required_newer_kernel_installed(mock_client):
 
 @pytest.mark.asyncio
 async def test_get_node_reboot_required_running_is_latest(mock_client):
-    status_data = {"uname_info": {"release": "6.8.12-1-pve"}}
+    # Running the latest installed kernel → no reboot needed
+    status_data = {"kversion": "Linux 6.17.13-3-pve #1 SMP PREEMPT_DYNAMIC PMX 6.17.13-3"}
     versions_data = [
-        {"Package": "pve-kernel-6.8.4-2-pve"},
-        {"Package": "pve-kernel-6.8.12-1-pve"},
+        {"Package": "proxmox-kernel-6.17.13-2-pve-signed"},
+        {"Package": "proxmox-kernel-6.17.13-3-pve-signed"},
     ]
     responses = [_make_response(status_data), _make_response(versions_data)]
     with patch("httpx.AsyncClient.get", new_callable=AsyncMock, side_effect=responses):
@@ -673,8 +675,8 @@ async def test_get_node_reboot_required_running_is_latest(mock_client):
 
 @pytest.mark.asyncio
 async def test_get_node_reboot_required_no_kernel_packages(mock_client):
-    status_data = {"uname_info": {"release": "6.8.4-2-pve"}}
-    versions_data = [{"Package": "curl"}]
+    status_data = {"kversion": "Linux 6.17.13-3-pve #1 SMP PREEMPT_DYNAMIC PMX 6.17.13-3"}
+    versions_data = [{"Package": "curl"}, {"Package": "proxmox-kernel-6.17"}]
     responses = [_make_response(status_data), _make_response(versions_data)]
     with patch("httpx.AsyncClient.get", new_callable=AsyncMock, side_effect=responses):
         result = await mock_client.get_node_reboot_required("pve")
@@ -704,15 +706,15 @@ async def test_reboot_node_posts_reboot_command(mock_client):
 
 @pytest.mark.asyncio
 async def test_get_node_kernel_returns_release(mock_client):
-    status_data = {"uname_info": {"release": "6.8.4-2-pve", "sysname": "Linux"}}
+    status_data = {"kversion": "Linux 6.17.13-3-pve #1 SMP PREEMPT_DYNAMIC PMX 6.17.13-3"}
     with patch("httpx.AsyncClient.get", new_callable=AsyncMock,
                return_value=_make_response(status_data)):
         kernel = await mock_client.get_node_kernel("pve")
-    assert kernel == "6.8.4-2-pve"
+    assert kernel == "6.17.13-3-pve"
 
 
 @pytest.mark.asyncio
-async def test_get_node_kernel_missing_uname_info(mock_client):
+async def test_get_node_kernel_missing_kversion(mock_client):
     with patch("httpx.AsyncClient.get", new_callable=AsyncMock,
                return_value=_make_response({})):
         kernel = await mock_client.get_node_kernel("pve")
