@@ -384,8 +384,6 @@ def test_host_restart_proxmox_node_starts_job(client):
 
 def test_host_restart_proxmox_node_force_stop_flag(client):
     """force_stop=true is passed through to the background job."""
-    import app.main as m
-
     node_host = {
         "name": "PVE Node",
         "host": "10.0.0.1",
