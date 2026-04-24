@@ -266,6 +266,16 @@ class ProxmoxClient:
             )
             r.raise_for_status()
 
+    async def reboot_node(self, node: str) -> None:
+        """Issue a node reboot via the Proxmox API (bulk-stops guests, then reboots)."""
+        log.info("Proxmox: issuing reboot for node %s", node)
+        async with self._client() as c:
+            r = await c.post(
+                f"/api2/json/nodes/{node}/status",
+                json={"command": "reboot"},
+            )
+            r.raise_for_status()
+
     async def get_node_kernel(self, node: str) -> str:
         """Return the running kernel release string for a node."""
         async with self._client() as c:

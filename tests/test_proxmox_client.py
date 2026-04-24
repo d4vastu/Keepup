@@ -641,6 +641,22 @@ async def test_force_stop_guest_lxc_path(mock_client):
 
 
 # ---------------------------------------------------------------------------
+# reboot_node
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_reboot_node_posts_reboot_command(mock_client):
+    post_resp = _make_response("")
+    with patch("httpx.AsyncClient.post", new_callable=AsyncMock, return_value=post_resp) as mock_post:
+        await mock_client.reboot_node("pve")
+    mock_post.assert_called_once()
+    url = mock_post.call_args[0][0]
+    assert "/nodes/pve/status" in url
+    assert mock_post.call_args[1].get("json", {}).get("command") == "reboot"
+
+
+# ---------------------------------------------------------------------------
 # get_node_kernel
 # ---------------------------------------------------------------------------
 

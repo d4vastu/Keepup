@@ -307,41 +307,13 @@ async def _job_run_host_restart(job_id: str, host: dict, creds: dict) -> None:
 
 
 async def _job_run_proxmox_node_restart(
-    job_id: str, slug: str, proxmox_node: str, force_stop: bool
+    job_id: str, slug: str, proxmox_node: str
 ) -> None:
     try:
         client = await _proxmox_client_from_config()
-        host = _get_host(slug)
-        stop_timeout = host.get("proxmox_node_guest_stop_timeout", 60)
 
-        guests = await client.get_running_guests(proxmox_node)
-        timed_out = []
-        for guest in guests:
-            result = await client.stop_guest(
-                proxmox_node, guest["vmid"], guest["type"], timeout=stop_timeout
-            )
-            label = "Stopped" if result == "stopped" else "Timed out:"
-            _jobs[job_id]["lines"].append(
-                f"{label} {guest['name']} ({guest['type']} {guest['vmid']})"
-            )
-            if result == "timed_out":
-                timed_out.append(guest)
-
-        if timed_out and not force_stop:
-            _jobs[job_id]["status"] = "needs_force_confirm"
-            _jobs[job_id]["timed_out_guests"] = timed_out
-            _jobs[job_id]["done"] = True
-            return
-
-        for guest in timed_out:
-            await client.force_stop_guest(proxmox_node, guest["vmid"], guest["type"])
-            _jobs[job_id]["lines"].append(
-                f"Force-stopped {guest['name']} ({guest['type']} {guest['vmid']})"
-            )
-
-        creds = get_credentials(slug)
         _jobs[job_id]["lines"].append(f"Issuing reboot to node {proxmox_node}…")
-        await reboot_host(host, get_ssh_config(), creds)
+        await client.reboot_node(proxmox_node)
 
         _jobs[job_id]["lines"].append("Waiting for node to return…")
         up = await client.wait_for_node(proxmox_node)
@@ -750,11 +722,10 @@ async def host_restart(
                 "label": host_name,
                 "sub": proxmox_node,
                 "slug": slug,
-                "timed_out_guests": [],
             }
             background_tasks.add_task(
                 _job_run_proxmox_node_restart,
-                job_id, slug, proxmox_node, force_stop == "true",
+                job_id, slug, proxmox_node,
             )
             return templates.TemplateResponse(
                 "partials/job_poll.html",
