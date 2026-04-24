@@ -521,12 +521,16 @@ async def host_check(request: Request, slug: str) -> HTMLResponse:
                 "Checking %s (%s) via Proxmox API (node %s)",
                 host_name, slug, proxmox_node,
             )
+            import asyncio as _asyncio
             client = await _proxmox_client_from_config()
-            packages = await client.get_node_updates(proxmox_node)
+            packages, reboot_required = await _asyncio.gather(
+                client.get_node_updates(proxmox_node),
+                client.get_node_reboot_required(proxmox_node),
+            )
             proxmox_url = get_proxmox_config().get("url", "")
             log.info(
-                "Check complete: %s (%s) — %d update(s) via Proxmox API",
-                host_name, slug, len(packages),
+                "Check complete: %s (%s) — %d update(s), reboot_required=%s via Proxmox API",
+                host_name, slug, len(packages), reboot_required,
             )
             return templates.TemplateResponse(
                 "partials/host_status.html",
@@ -534,7 +538,7 @@ async def host_check(request: Request, slug: str) -> HTMLResponse:
                     "request": request,
                     "slug": slug,
                     "packages": packages,
-                    "reboot_required": False,
+                    "reboot_required": reboot_required,
                     "is_proxmox_node": True,
                     "package_manager": f"apt · Proxmox API ({proxmox_node})",
                     "proxmox_node": proxmox_node,

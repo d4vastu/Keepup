@@ -641,6 +641,47 @@ async def test_force_stop_guest_lxc_path(mock_client):
 
 
 # ---------------------------------------------------------------------------
+# get_node_reboot_required
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_get_node_reboot_required_newer_kernel_installed(mock_client):
+    status_data = {"uname_info": {"release": "6.8.4-2-pve"}}
+    versions_data = [
+        {"Package": "pve-kernel-6.8.4-2-pve"},
+        {"Package": "pve-kernel-6.8.12-1-pve"},
+    ]
+    responses = [_make_response(status_data), _make_response(versions_data)]
+    with patch("httpx.AsyncClient.get", new_callable=AsyncMock, side_effect=responses):
+        result = await mock_client.get_node_reboot_required("pve")
+    assert result is True
+
+
+@pytest.mark.asyncio
+async def test_get_node_reboot_required_running_is_latest(mock_client):
+    status_data = {"uname_info": {"release": "6.8.12-1-pve"}}
+    versions_data = [
+        {"Package": "pve-kernel-6.8.4-2-pve"},
+        {"Package": "pve-kernel-6.8.12-1-pve"},
+    ]
+    responses = [_make_response(status_data), _make_response(versions_data)]
+    with patch("httpx.AsyncClient.get", new_callable=AsyncMock, side_effect=responses):
+        result = await mock_client.get_node_reboot_required("pve")
+    assert result is False
+
+
+@pytest.mark.asyncio
+async def test_get_node_reboot_required_no_kernel_packages(mock_client):
+    status_data = {"uname_info": {"release": "6.8.4-2-pve"}}
+    versions_data = [{"Package": "curl"}]
+    responses = [_make_response(status_data), _make_response(versions_data)]
+    with patch("httpx.AsyncClient.get", new_callable=AsyncMock, side_effect=responses):
+        result = await mock_client.get_node_reboot_required("pve")
+    assert result is False
+
+
+# ---------------------------------------------------------------------------
 # reboot_node
 # ---------------------------------------------------------------------------
 

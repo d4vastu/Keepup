@@ -266,6 +266,54 @@ class ProxmoxClient:
             )
             r.raise_for_status()
 
+    async def get_node_reboot_required(self, node: str) -> bool:
+        """Return True if a newer pve-kernel is installed than what's currently running."""
+        import asyncio
+
+        async with self._client() as c:
+            results = await asyncio.gather(
+                c.get(f"/api2/json/nodes/{node}/status"),
+                c.get(f"/api2/json/nodes/{node}/apt/versions"),
+                return_exceptions=True,
+            )
+
+        if any(isinstance(r, Exception) for r in results):
+            return False
+        status_r, versions_r = results
+        try:
+            status_r.raise_for_status()
+            versions_r.raise_for_status()
+        except Exception:
+            return False
+
+        running = (
+            status_r.json().get("data", {}).get("uname_info", {}).get("release", "")
+        )
+        if not running:
+            return False
+
+        packages = versions_r.json().get("data", [])
+        installed_kernels = [
+            pkg.get("Package", "")[len("pve-kernel"):]
+            for pkg in packages
+            if pkg.get("Package", "").startswith("pve-kernel-")
+        ]
+        if not installed_kernels:
+            return False
+
+        def _ver(v: str) -> tuple:
+            try:
+                v = v.lstrip("-").replace("-pve", "")
+                main, *rest = v.split("-", 1)
+                nums = tuple(int(x) for x in main.split("."))
+                build = (int(rest[0]),) if rest else (0,)
+                return nums + build
+            except (ValueError, AttributeError):
+                return (0,)
+
+        running_ver = _ver(running)
+        return any(_ver(k) > running_ver for k in installed_kernels)
+
     async def reboot_node(self, node: str) -> None:
         """Issue a node reboot via the Proxmox API (bulk-stops guests, then reboots)."""
         log.info("Proxmox: issuing reboot for node %s", node)

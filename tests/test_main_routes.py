@@ -91,6 +91,44 @@ def test_host_check_shows_reboot_required(client):
     assert "reboot" in response.text.lower()
 
 
+def test_proxmox_node_check_shows_reboot_button_when_required(client):
+    """Reboot node button appears when reboot is required."""
+    node_host = {
+        "name": "PVE Node", "host": "10.0.0.1",
+        "slug": "pve-node", "proxmox_node": "pve",
+    }
+    mock_client = AsyncMock()
+    mock_client.get_node_updates = AsyncMock(return_value=[])
+    mock_client.get_node_reboot_required = AsyncMock(return_value=True)
+    with (
+        patch("app.main._get_host", return_value=node_host),
+        patch("app.main._proxmox_client_from_config", new=AsyncMock(return_value=mock_client)),
+        patch("app.main.get_proxmox_config", return_value={"url": ""}),
+    ):
+        response = client.get("/api/host/pve-node/check")
+    assert response.status_code == 200
+    assert "Reboot node" in response.text
+
+
+def test_proxmox_node_check_hides_reboot_button_when_not_required(client):
+    """Reboot node button is absent when no reboot is required."""
+    node_host = {
+        "name": "PVE Node", "host": "10.0.0.1",
+        "slug": "pve-node", "proxmox_node": "pve",
+    }
+    mock_client = AsyncMock()
+    mock_client.get_node_updates = AsyncMock(return_value=[])
+    mock_client.get_node_reboot_required = AsyncMock(return_value=False)
+    with (
+        patch("app.main._get_host", return_value=node_host),
+        patch("app.main._proxmox_client_from_config", new=AsyncMock(return_value=mock_client)),
+        patch("app.main.get_proxmox_config", return_value={"url": ""}),
+    ):
+        response = client.get("/api/host/pve-node/check")
+    assert response.status_code == 200
+    assert "Reboot node" not in response.text
+
+
 # ---------------------------------------------------------------------------
 # /api/docker/check
 # ---------------------------------------------------------------------------

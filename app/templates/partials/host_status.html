@@ -22,7 +22,7 @@
     class="text-[12px] font-medium px-3 py-1 rounded-md border border-[#2ea043] text-green-400 hover:bg-green-900/20 transition-colors">
     Upgrade
   </button>
-  {% if is_proxmox_node %}
+  {% if is_proxmox_node and reboot_required %}
   <button
     hx-get="/api/host/{{ slug }}/reboot-preview"
     hx-target="#host-{{ slug }}-action"
@@ -51,7 +51,7 @@
   <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium bg-orange-950/50 text-orange-400 border border-orange-900/40">Proxmox · {{ proxmox_node }}</span>
   {% endif %}
 </div>
-{% if is_proxmox_node %}
+{% if is_proxmox_node and reboot_required %}
 <div class="mt-2 flex flex-wrap items-center gap-2">
   <button
     hx-get="/api/host/{{ slug }}/reboot-preview"
