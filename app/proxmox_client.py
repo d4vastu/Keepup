@@ -96,9 +96,12 @@ class ProxmoxClient:
             "user": ssh_creds.get("user", "root"),
             "port": ssh_creds.get("port", 22),
         }
-        cmd = f"pct exec {vmid} -- apt list -qq --upgradable 2>/dev/null"
+        cmd = (
+            f"pct exec {vmid} -- sh -c "
+            f"'apt-get update -qq 2>/dev/null; apt list -qq --upgradable 2>/dev/null'"
+        )
         async with await _connect(host_entry, ssh_cfg, ssh_creds) as conn:
-            result = await _run(conn, cmd, sudo_password=None, needs_sudo=False, timeout=30)
+            result = await _run(conn, cmd, sudo_password=None, needs_sudo=False, timeout=90)
 
         packages = []
         for line in result.stdout.splitlines():
