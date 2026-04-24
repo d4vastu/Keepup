@@ -28,6 +28,7 @@ from .ssh_client import (
     run_host_update_buffered,
 )
 from .__version__ import APP_VERSION
+from .self_identity import is_self_on_proxmox_node
 from .templates_env import make_templates
 
 log = logging.getLogger(__name__)
@@ -305,6 +306,61 @@ async def _job_run_host_restart(job_id: str, host: dict, creds: dict) -> None:
         _jobs[job_id]["done"] = True
 
 
+async def _job_run_proxmox_node_restart(
+    job_id: str, slug: str, proxmox_node: str, force_stop: bool
+) -> None:
+    try:
+        client = await _proxmox_client_from_config()
+        host = _get_host(slug)
+        stop_timeout = host.get("proxmox_node_guest_stop_timeout", 60)
+
+        guests = await client.get_running_guests(proxmox_node)
+        timed_out = []
+        for guest in guests:
+            result = await client.stop_guest(
+                proxmox_node, guest["vmid"], guest["type"], timeout=stop_timeout
+            )
+            label = "Stopped" if result == "stopped" else "Timed out:"
+            _jobs[job_id]["lines"].append(
+                f"{label} {guest['name']} ({guest['type']} {guest['vmid']})"
+            )
+            if result == "timed_out":
+                timed_out.append(guest)
+
+        if timed_out and not force_stop:
+            _jobs[job_id]["status"] = "needs_force_confirm"
+            _jobs[job_id]["timed_out_guests"] = timed_out
+            _jobs[job_id]["done"] = True
+            return
+
+        for guest in timed_out:
+            await client.force_stop_guest(proxmox_node, guest["vmid"], guest["type"])
+            _jobs[job_id]["lines"].append(
+                f"Force-stopped {guest['name']} ({guest['type']} {guest['vmid']})"
+            )
+
+        creds = get_credentials(slug)
+        _jobs[job_id]["lines"].append(f"Issuing reboot to node {proxmox_node}…")
+        await reboot_host(host, get_ssh_config(), creds)
+
+        _jobs[job_id]["lines"].append("Waiting for node to return…")
+        up = await client.wait_for_node(proxmox_node)
+        if not up:
+            _jobs[job_id]["lines"].append("Node did not come back within 10 minutes.")
+            _jobs[job_id]["status"] = "error"
+            _jobs[job_id]["error"] = "Node did not come back within 10 minutes"
+        else:
+            kernel = await client.get_node_kernel(proxmox_node)
+            _jobs[job_id]["lines"].append(f"Node up — kernel now {kernel}")
+            _jobs[job_id]["status"] = "done"
+    except Exception as exc:
+        _jobs[job_id]["status"] = "error"
+        _jobs[job_id]["error"] = str(exc)
+        log.error("Proxmox node restart failed on %s: %s", slug, exc)
+    finally:
+        _jobs[job_id]["done"] = True
+
+
 async def _job_run_stack_update(job_id: str, backend_key: str, ref: str) -> None:
     try:
         backend = next(
@@ -482,6 +538,7 @@ async def host_check(request: Request, slug: str) -> HTMLResponse:
                     "slug": slug,
                     "packages": packages,
                     "reboot_required": False,
+                    "is_proxmox_node": False,
                     "package_manager": f"apt · pct exec ({proxmox_node}/{proxmox_vmid})",
                     "proxmox_node": proxmox_node,
                     "proxmox_url": proxmox_url,
@@ -506,6 +563,7 @@ async def host_check(request: Request, slug: str) -> HTMLResponse:
                     "slug": slug,
                     "packages": packages,
                     "reboot_required": False,
+                    "is_proxmox_node": True,
                     "package_manager": f"apt · Proxmox API ({proxmox_node})",
                     "proxmox_node": proxmox_node,
                     "proxmox_url": proxmox_url,
@@ -625,6 +683,46 @@ async def host_update(
         )
 
 
+@app.get("/api/host/{slug}/reboot-preview", response_class=HTMLResponse)
+async def host_reboot_preview(request: Request, slug: str) -> HTMLResponse:
+    try:
+        host = _get_host(slug)
+        proxmox_node = host.get("proxmox_node")
+        proxmox_vmid = host.get("proxmox_vmid")
+
+        if proxmox_node and proxmox_vmid is None:
+            self_on_node = is_self_on_proxmox_node(proxmox_node)
+            client = await _proxmox_client_from_config()
+            guests = await client.get_running_guests(proxmox_node)
+            return templates.TemplateResponse(
+                "partials/proxmox_reboot_preview.html",
+                {
+                    "request": request,
+                    "slug": slug,
+                    "proxmox_node": proxmox_node,
+                    "guests": guests,
+                    "self_on_node": self_on_node,
+                },
+            )
+
+        # Non-Proxmox or LXC: trigger the simple reboot directly
+        return templates.TemplateResponse(
+            "partials/proxmox_reboot_preview.html",
+            {
+                "request": request,
+                "slug": slug,
+                "proxmox_node": None,
+                "guests": [],
+                "self_on_node": False,
+            },
+        )
+    except Exception as exc:
+        return templates.TemplateResponse(
+            "partials/error.html",
+            {"request": request, "message": str(exc)},
+        )
+
+
 @app.post("/api/host/{slug}/restart", response_class=HTMLResponse)
 async def host_restart(
     request: Request,
@@ -632,9 +730,37 @@ async def host_restart(
     background_tasks: BackgroundTasks,
     sudo_password: str = Form(""),
     save_sudo: str = Form(""),
+    confirmed: str = Form(""),
+    force_stop: str = Form(""),
 ) -> HTMLResponse:
     try:
         host = _get_host(slug)
+        proxmox_node = host.get("proxmox_node")
+        proxmox_vmid = host.get("proxmox_vmid")
+
+        if proxmox_node and proxmox_vmid is None:
+            host_name = host.get("name", slug)
+            job_id = uuid.uuid4().hex[:8]
+            _jobs[job_id] = {
+                "done": False,
+                "status": "running",
+                "error": None,
+                "lines": [],
+                "type": "os_restart",
+                "label": host_name,
+                "sub": proxmox_node,
+                "slug": slug,
+                "timed_out_guests": [],
+            }
+            background_tasks.add_task(
+                _job_run_proxmox_node_restart,
+                job_id, slug, proxmox_node, force_stop == "true",
+            )
+            return templates.TemplateResponse(
+                "partials/job_poll.html",
+                {"request": request, "job_id": job_id, "job": _jobs[job_id]},
+            )
+
         creds = get_credentials(slug)
 
         if _needs_sudo(host, get_ssh_config()):

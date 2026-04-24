@@ -201,6 +201,104 @@ class ProxmoxClient:
         log.info("Proxmox: upgrade complete on node %s", node)
         return lines
 
+    async def get_running_guests(self, node: str) -> list[dict]:
+        """Return all running VMs and LXCs on a node."""
+        import asyncio
+
+        async with self._client() as c:
+            results = await asyncio.gather(
+                c.get(f"/api2/json/nodes/{node}/qemu"),
+                c.get(f"/api2/json/nodes/{node}/lxc"),
+                return_exceptions=True,
+            )
+        guests = []
+        for guest_type, result in zip(("qemu", "lxc"), results):
+            if isinstance(result, Exception):
+                log.warning("Proxmox: failed to list %s on %s: %s", guest_type, node, result)
+                continue
+            result.raise_for_status()
+            for item in result.json().get("data", []):
+                if item.get("status") == "running":
+                    guests.append({
+                        "vmid": item["vmid"],
+                        "name": item.get("name", f"{guest_type}-{item['vmid']}"),
+                        "type": guest_type,
+                    })
+        log.info("Proxmox: %d running guest(s) on node %s", len(guests), node)
+        return guests
+
+    async def stop_guest(
+        self, node: str, vmid: int, guest_type: str, timeout: int = 60
+    ) -> str:
+        """Gracefully shut down a guest. Returns 'stopped' or 'timed_out'."""
+        import asyncio
+
+        log.info(
+            "Proxmox: shutting down %s %s/%s (timeout=%ds)", guest_type, node, vmid, timeout
+        )
+        async with self._client() as c:
+            r = await c.post(
+                f"/api2/json/nodes/{node}/{guest_type}/{vmid}/status/shutdown"
+            )
+            r.raise_for_status()
+            elapsed = 0
+            while elapsed < timeout:
+                await asyncio.sleep(2)
+                elapsed += 2
+                status_r = await c.get(
+                    f"/api2/json/nodes/{node}/{guest_type}/{vmid}/status/current"
+                )
+                status_r.raise_for_status()
+                if status_r.json().get("data", {}).get("status") == "stopped":
+                    log.info("Proxmox: %s %s/%s stopped", guest_type, node, vmid)
+                    return "stopped"
+        log.warning(
+            "Proxmox: %s %s/%s timed out after %ds", guest_type, node, vmid, timeout
+        )
+        return "timed_out"
+
+    async def force_stop_guest(self, node: str, vmid: int, guest_type: str) -> None:
+        """Immediately poweroff a guest (no graceful shutdown)."""
+        log.info("Proxmox: force-stopping %s %s/%s", guest_type, node, vmid)
+        async with self._client() as c:
+            r = await c.post(
+                f"/api2/json/nodes/{node}/{guest_type}/{vmid}/status/stop"
+            )
+            r.raise_for_status()
+
+    async def get_node_kernel(self, node: str) -> str:
+        """Return the running kernel release string for a node."""
+        async with self._client() as c:
+            r = await c.get(f"/api2/json/nodes/{node}/status")
+            r.raise_for_status()
+            uname = r.json().get("data", {}).get("uname_info", {})
+            return uname.get("release", "unknown")
+
+    async def wait_for_node(self, node: str, timeout: int = 600) -> bool:
+        """Poll until the node API responds or timeout expires. Returns True if up."""
+        import asyncio
+
+        log.info("Proxmox: waiting for node %s (timeout=%ds)", node, timeout)
+        elapsed = 0
+        while elapsed < timeout:
+            await asyncio.sleep(5)
+            elapsed += 5
+            try:
+                async with httpx.AsyncClient(
+                    base_url=self.base,
+                    headers=self.headers,
+                    verify=self.verify_ssl,
+                    timeout=5,
+                ) as c:
+                    r = await c.get(f"/api2/json/nodes/{node}/status")
+                    if r.status_code == 200:
+                        log.info("Proxmox: node %s responded after %ds", node, elapsed)
+                        return True
+            except Exception:
+                pass
+        log.warning("Proxmox: node %s did not return within %ds", node, timeout)
+        return False
+
     async def get_nodes(self) -> list[str]:
         """Return names of all online nodes."""
         async with self._client() as c:

@@ -14,3 +14,13 @@ def get_self_container_id() -> str | None:
     if _CONTAINER_ID_RE.match(hostname):
         return hostname
     return None
+
+
+def is_self_on_proxmox_node(node_slug: str) -> bool:
+    """Return True if KEEPUP_PROXMOX_NODE env var matches node_slug.
+
+    Set KEEPUP_PROXMOX_NODE to the Proxmox node name where Keepup is running
+    to prevent rebooting the node from under itself.
+    """
+    self_node = os.environ.get("KEEPUP_PROXMOX_NODE", "")
+    return bool(self_node) and self_node == node_slug
