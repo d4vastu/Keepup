@@ -19,21 +19,13 @@
     </button>
   </div>
 </form>
-{% elif self_on_node %}
-<div class="flex flex-wrap items-center gap-2">
-  <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[12px] font-medium bg-amber-900/40 text-amber-400 border border-amber-800/50">
-    Keepup is running on this node — trigger this reboot from a different host
-  </span>
-  <button type="button"
-          hx-get="/api/host/{{ slug }}/check"
-          hx-target="#host-{{ slug }}-action"
-          hx-swap="innerHTML"
-          class="text-[12px] font-medium px-3 py-1 rounded-md border border-slate-700 text-slate-400 hover:bg-slate-800/40 transition-colors">
-    Cancel
-  </button>
-</div>
 {% else %}
 <div class="space-y-2">
+  {% if self_on_node %}
+  <div class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[12px] font-medium bg-amber-900/40 text-amber-400 border border-amber-800/50">
+    Keepup is running on this node — your browser connection will be lost during the reboot
+  </div>
+  {% endif %}
   <div class="text-[12px] text-slate-400">
     The following guests on <span class="text-orange-400 font-medium">{{ proxmox_node }}</span> will be stopped before the node reboots:
   </div>

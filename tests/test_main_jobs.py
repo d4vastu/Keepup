@@ -311,8 +311,11 @@ def test_reboot_preview_proxmox_node_lists_guests(client):
 
 
 def test_reboot_preview_proxmox_node_self_on_node(client):
-    """Self-on-node returns refusal message without guest list."""
+    """Self-on-node shows connection-loss warning and still allows the user to proceed."""
     mock_client = AsyncMock()
+    mock_client.get_running_guests = AsyncMock(return_value=[
+        {"vmid": 100, "name": "my-vm", "type": "qemu"},
+    ])
     node_host = {
         "name": "PVE Node",
         "host": "10.0.0.1",
@@ -326,8 +329,10 @@ def test_reboot_preview_proxmox_node_self_on_node(client):
     ):
         response = client.get("/api/host/pve-node/reboot-preview")
     assert response.status_code == 200
-    assert "different host" in response.text
-    mock_client.get_running_guests.assert_not_called()
+    assert "connection will be lost" in response.text
+    assert "my-vm" in response.text
+    assert "Confirm reboot" in response.text
+    mock_client.get_running_guests.assert_called_once()
 
 
 def test_reboot_preview_proxmox_node_no_guests(client):

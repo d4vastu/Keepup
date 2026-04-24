@@ -692,11 +692,8 @@ async def host_reboot_preview(request: Request, slug: str) -> HTMLResponse:
 
         if proxmox_node and proxmox_vmid is None:
             self_on_node = is_self_on_proxmox_node(proxmox_node)
-            if self_on_node:
-                guests = []
-            else:
-                client = await _proxmox_client_from_config()
-                guests = await client.get_running_guests(proxmox_node)
+            client = await _proxmox_client_from_config()
+            guests = await client.get_running_guests(proxmox_node)
             return templates.TemplateResponse(
                 "partials/proxmox_reboot_preview.html",
                 {
