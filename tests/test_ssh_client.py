@@ -162,6 +162,41 @@ async def test_check_host_updates_no_reboot_marker():
 
 
 @pytest.mark.asyncio
+async def test_check_host_updates_refreshes_on_cold_cache():
+    """First check on a cold cache must include apt-get update in the sent command."""
+    from app.update_check_cache import clear as clear_cache
+
+    clear_cache()
+    conn = _make_conn(stdout="__REBOOT__\nno\n")
+    with (
+        patch("app.ssh_client.asyncssh.connect", new=AsyncMock(return_value=conn)),
+        _DETECT_PM_PATCH,
+    ):
+        await check_host_updates(HOST_KEY, SSH_CFG)
+    # conn.run is called twice: once for detect (patched out) + once for list_cmd
+    sent_cmd = conn.run.call_args[0][0]
+    assert "apt-get update" in sent_cmd
+
+
+@pytest.mark.asyncio
+async def test_check_host_updates_skips_refresh_when_cache_fresh():
+    """A check within the TTL window must NOT include apt-get update."""
+    from app.update_check_cache import clear as clear_cache, mark_refreshed
+
+    clear_cache()
+    mark_refreshed("ssh:10.0.0.1")  # cache key is slug or host
+    conn = _make_conn(stdout="__REBOOT__\nno\n")
+    with (
+        patch("app.ssh_client.asyncssh.connect", new=AsyncMock(return_value=conn)),
+        _DETECT_PM_PATCH,
+    ):
+        await check_host_updates(HOST_KEY, SSH_CFG)
+    sent_cmd = conn.run.call_args[0][0]
+    assert "apt-get update" not in sent_cmd
+    assert "apt list --upgradable" in sent_cmd
+
+
+@pytest.mark.asyncio
 async def test_check_host_updates_skips_non_package_lines():
     # Lines without [upgradable from: hit the continue branch
     output = "Listing... Done\nnginx/stable 1.26.0-1 amd64 [upgradable from: 1.24.0-1]\n__REBOOT__\nno\n"

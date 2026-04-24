@@ -96,12 +96,25 @@ class ProxmoxClient:
             "user": ssh_creds.get("user", "root"),
             "port": ssh_creds.get("port", 22),
         }
-        cmd = (
-            f"pct exec {vmid} -- sh -c "
-            f"'apt-get update -qq 2>/dev/null; apt list -qq --upgradable 2>/dev/null'"
-        )
+        from .config_manager import get_update_check_ttl_minutes
+        from .update_check_cache import is_cache_fresh, mark_refreshed
+
+        cache_key = f"lxc:{node}:{vmid}"
+        ttl = get_update_check_ttl_minutes()
+        refresh = not is_cache_fresh(cache_key, ttl)
+
+        if refresh:
+            cmd = (
+                f"pct exec {vmid} -- sh -c "
+                f"'apt-get update -qq 2>/dev/null; apt list -qq --upgradable 2>/dev/null'"
+            )
+        else:
+            cmd = f"pct exec {vmid} -- apt list -qq --upgradable 2>/dev/null"
+
         async with await _connect(host_entry, ssh_cfg, ssh_creds) as conn:
             result = await _run(conn, cmd, sudo_password=None, needs_sudo=False, timeout=90)
+        if refresh:
+            mark_refreshed(cache_key)
 
         packages = []
         for line in result.stdout.splitlines():

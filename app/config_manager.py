@@ -454,6 +454,25 @@ def update_ssh_config(
     save_config(config)
 
 
+def get_update_check_config() -> dict:
+    return load_config().get("update_check", {})
+
+
+def save_update_check_config(cache_ttl_minutes: int) -> None:
+    cfg = load_config()
+    cfg["update_check"] = {"cache_ttl_minutes": int(cache_ttl_minutes)}
+    save_config(cfg)
+
+
+def get_update_check_ttl_minutes() -> int:
+    """Return the configured TTL in minutes (default 15, 0 disables caching)."""
+    try:
+        val = int(get_update_check_config().get("cache_ttl_minutes", 15))
+        return val if val >= 0 else 15
+    except (ValueError, TypeError):
+        return 15
+
+
 def get_ssl_config() -> dict:
     return load_config().get("ssl", {})
 

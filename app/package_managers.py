@@ -72,8 +72,12 @@ def get_package_manager(name: str) -> "PackageManager":
 class PackageManager:
     name: str = "unknown"
 
-    def list_cmd(self) -> str:
-        """Single shell command — stdout fed to parse()."""
+    def list_cmd(self, refresh: bool = True) -> str:
+        """Single shell command — stdout fed to parse().
+
+        refresh=False skips any package-DB sync step (e.g. apt-get update);
+        ignored for PMs where the check itself always refreshes (dnf/yum).
+        """
         raise NotImplementedError
 
     def upgrade_cmd(self) -> str:
@@ -96,9 +100,10 @@ class PackageManager:
 class AptPackageManager(PackageManager):
     name = "apt"
 
-    def list_cmd(self) -> str:
+    def list_cmd(self, refresh: bool = True) -> str:
+        prefix = "apt-get update -qq 2>/dev/null; " if refresh else ""
         return (
-            "apt-get update -qq 2>/dev/null; "
+            f"{prefix}"
             "apt list --upgradable 2>/dev/null; "
             "echo __REBOOT__; "
             "[ -f /var/run/reboot-required ] && echo yes || echo no"
@@ -141,7 +146,7 @@ class AptPackageManager(PackageManager):
 class DnfPackageManager(PackageManager):
     name = "dnf"
 
-    def list_cmd(self) -> str:
+    def list_cmd(self, refresh: bool = True) -> str:
         # dnf check-update exits 100 when updates exist, 0 when none, other on error.
         # needs-restarting -r exits 1 when reboot needed (may not be installed).
         return (
@@ -203,7 +208,7 @@ class DnfPackageManager(PackageManager):
 class YumPackageManager(PackageManager):
     name = "yum"
 
-    def list_cmd(self) -> str:
+    def list_cmd(self, refresh: bool = True) -> str:
         return (
             "yum check-update -q 2>/dev/null; echo __EXIT__$?; "
             "echo __REBOOT__; "
@@ -226,8 +231,10 @@ class YumPackageManager(PackageManager):
 class ZypperPackageManager(PackageManager):
     name = "zypper"
 
-    def list_cmd(self) -> str:
+    def list_cmd(self, refresh: bool = True) -> str:
+        prefix = "zypper -q refresh 2>/dev/null; " if refresh else ""
         return (
+            f"{prefix}"
             "zypper -q lu 2>/dev/null; "
             "echo __REBOOT__; "
             "zypper needs-rebooting >/dev/null 2>&1 && echo yes || echo no"
@@ -275,9 +282,10 @@ class ZypperPackageManager(PackageManager):
 class PacmanPackageManager(PackageManager):
     name = "pacman"
 
-    def list_cmd(self) -> str:
+    def list_cmd(self, refresh: bool = True) -> str:
         # pacman -Qu lists packages with pending updates: "name old -> new"
-        return "pacman -Sy -q 2>/dev/null; pacman -Qu 2>/dev/null"
+        prefix = "pacman -Sy -q 2>/dev/null; " if refresh else ""
+        return f"{prefix}pacman -Qu 2>/dev/null"
 
     def upgrade_cmd(self) -> str:
         return "pacman -Su --noconfirm 2>&1"
@@ -308,9 +316,10 @@ class PacmanPackageManager(PackageManager):
 class ApkPackageManager(PackageManager):
     name = "apk"
 
-    def list_cmd(self) -> str:
+    def list_cmd(self, refresh: bool = True) -> str:
         # apk version -q -l '<' lists packages where installed < available
-        return "apk update -q 2>/dev/null; apk version -q -l '<' 2>/dev/null"
+        prefix = "apk update -q 2>/dev/null; " if refresh else ""
+        return f"{prefix}apk version -q -l '<' 2>/dev/null"
 
     def upgrade_cmd(self) -> str:
         return "apk upgrade 2>&1"
@@ -349,7 +358,7 @@ class UnknownPackageManager(PackageManager):
     def __init__(self, name: str = "unknown"):
         self.name = name
 
-    def list_cmd(self) -> str:
+    def list_cmd(self, refresh: bool = True) -> str:
         return "echo 'Package manager not supported'"
 
     def upgrade_cmd(self) -> str:

@@ -39,6 +39,13 @@
         <input type="number" name="command_timeout" value="{{ ssh.command_timeout or 600 }}"
           class="w-full bg-slate-800 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-blue-500" />
       </div>
+      <div class="sm:col-span-2">
+        <label class="block text-xs font-medium text-slate-400 mb-1.5">Cache apt-update results for <span class="text-slate-500 font-normal">(minutes)</span></label>
+        <input type="number" name="update_check_cache_ttl" min="0"
+          value="{{ update_check.cache_ttl_minutes if update_check.cache_ttl_minutes is not none else 15 }}"
+          class="w-full bg-slate-800 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-blue-500" />
+        <p class="text-xs text-slate-500 mt-1">How long to skip <code>apt-get update</code> between host checks. Lower = fresher but slower page loads. 0 disables caching.</p>
+      </div>
     </div>
     <div class="flex justify-end">
       <button type="submit"

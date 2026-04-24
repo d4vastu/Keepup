@@ -149,11 +149,18 @@ async def check_host_updates(
         "package_manager": str,
       }
     """
+    from .config_manager import get_update_check_ttl_minutes
+    from .update_check_cache import is_cache_fresh, mark_refreshed
+
     h = host["host"]
     log.info("SSH: checking %s for OS updates", h)
     creds = creds or {}
     use_sudo = _needs_sudo(host, ssh_cfg)
     sudo_password = creds.get("sudo_password")
+
+    cache_key = f"ssh:{host.get('slug') or h}"
+    ttl = get_update_check_ttl_minutes()
+    refresh = not is_cache_fresh(cache_key, ttl)
 
     check_timeout = ssh_cfg.get("check_timeout", 60)
     async with await _connect(host, ssh_cfg, creds) as conn:
@@ -162,11 +169,13 @@ async def check_host_updates(
         )
         result = await _run(
             conn,
-            pm.list_cmd(),
+            pm.list_cmd(refresh=refresh),
             sudo_password=sudo_password,
             needs_sudo=use_sudo,
             timeout=check_timeout,
         )
+    if refresh:
+        mark_refreshed(cache_key)
 
     packages, reboot_required = pm.parse(result.stdout)
     n = len(packages)

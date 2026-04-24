@@ -184,6 +184,31 @@ def test_apt_upgrade_cmd():
     assert "DEBIAN_FRONTEND=noninteractive" in pm.upgrade_cmd()
 
 
+def test_apt_list_cmd_with_refresh_includes_update():
+    assert "apt-get update" in AptPackageManager().list_cmd(refresh=True)
+
+
+def test_apt_list_cmd_without_refresh_skips_update():
+    cmd = AptPackageManager().list_cmd(refresh=False)
+    assert "apt-get update" not in cmd
+    assert "apt list --upgradable" in cmd
+
+
+def test_zypper_list_cmd_refresh_param():
+    assert "zypper -q refresh" in ZypperPackageManager().list_cmd(refresh=True)
+    assert "zypper -q refresh" not in ZypperPackageManager().list_cmd(refresh=False)
+
+
+def test_pacman_list_cmd_refresh_param():
+    assert "pacman -Sy" in PacmanPackageManager().list_cmd(refresh=True)
+    assert "pacman -Sy" not in PacmanPackageManager().list_cmd(refresh=False)
+
+
+def test_apk_list_cmd_refresh_param():
+    assert "apk update" in ApkPackageManager().list_cmd(refresh=True)
+    assert "apk update" not in ApkPackageManager().list_cmd(refresh=False)
+
+
 # ---------------------------------------------------------------------------
 # DNF
 # ---------------------------------------------------------------------------

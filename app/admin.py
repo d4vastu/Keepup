@@ -47,6 +47,8 @@ from .config_manager import (
     set_docker_monitoring,
     update_host,
     update_ssh_config,
+    get_update_check_config,
+    save_update_check_config,
 )
 from .proxmox_client import ProxmoxClient
 from .credentials import (
@@ -440,7 +442,12 @@ async def admin_ssh_page(request: Request) -> HTMLResponse:
 
     return templates.TemplateResponse(
         "admin_ssh.html",
-        {"request": request, "ssh": get_ssh_config(), "app_version": APP_VERSION},
+        {
+            "request": request,
+            "ssh": get_ssh_config(),
+            "update_check": get_update_check_config(),
+            "app_version": APP_VERSION,
+        },
     )
 
 
@@ -901,6 +908,7 @@ async def admin_update_ssh(
     default_key: str = Form("/app/keys/id_ed25519"),
     connect_timeout: str = Form("15"),
     command_timeout: str = Form("600"),
+    update_check_cache_ttl: str = Form("15"),
 ) -> HTMLResponse:
     try:
         update_ssh_config(
@@ -910,15 +918,29 @@ async def admin_update_ssh(
             connect_timeout=int(connect_timeout),
             command_timeout=int(command_timeout),
         )
+        ttl_int = int(update_check_cache_ttl)
+        if ttl_int < 0:
+            raise ValueError("Cache TTL must be 0 or greater.")
+        save_update_check_config(cache_ttl_minutes=ttl_int)
         saved = True
     except Exception as exc:
         return templates.TemplateResponse(
             "partials/admin_ssh.html",
-            {"request": request, "ssh": get_ssh_config(), "error": str(exc)},
+            {
+                "request": request,
+                "ssh": get_ssh_config(),
+                "update_check": get_update_check_config(),
+                "error": str(exc),
+            },
         )
     return templates.TemplateResponse(
         "partials/admin_ssh.html",
-        {"request": request, "ssh": get_ssh_config(), "saved": saved},
+        {
+            "request": request,
+            "ssh": get_ssh_config(),
+            "update_check": get_update_check_config(),
+            "saved": saved,
+        },
     )
 
 

@@ -261,6 +261,50 @@ def test_update_ssh_config_writes_to_file(config_file):
 
 
 # ---------------------------------------------------------------------------
+# update_check config
+# ---------------------------------------------------------------------------
+
+
+def test_get_update_check_ttl_default_when_unset(config_file):
+    from app.config_manager import get_update_check_ttl_minutes
+
+    assert get_update_check_ttl_minutes() == 15
+
+
+def test_save_and_read_update_check_ttl(config_file):
+    from app.config_manager import (
+        get_update_check_ttl_minutes,
+        save_update_check_config,
+    )
+
+    save_update_check_config(cache_ttl_minutes=30)
+    assert get_update_check_ttl_minutes() == 30
+
+
+def test_update_check_ttl_zero_allowed(config_file):
+    from app.config_manager import (
+        get_update_check_ttl_minutes,
+        save_update_check_config,
+    )
+
+    save_update_check_config(cache_ttl_minutes=0)
+    assert get_update_check_ttl_minutes() == 0
+
+
+def test_update_check_ttl_invalid_falls_back(config_file):
+    from app.config_manager import (
+        get_update_check_ttl_minutes,
+        load_config,
+        save_config,
+    )
+
+    cfg = load_config()
+    cfg["update_check"] = {"cache_ttl_minutes": "not-a-number"}
+    save_config(cfg)
+    assert get_update_check_ttl_minutes() == 15
+
+
+# ---------------------------------------------------------------------------
 # SSL config
 # ---------------------------------------------------------------------------
 

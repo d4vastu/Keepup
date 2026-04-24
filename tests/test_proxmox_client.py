@@ -274,6 +274,8 @@ async def test_get_lxc_updates_parses_apt_output(mock_client):
     mock_result.stdout = apt_output
     mock_conn.run = AsyncMock(return_value=mock_result)
 
+    from app.update_check_cache import clear as clear_cache
+    clear_cache()
     with patch("app.ssh_client._connect", new=AsyncMock(return_value=mock_conn)):
         result = await mock_client.get_lxc_updates(
             node="pve", vmid=100,
@@ -285,9 +287,36 @@ async def test_get_lxc_updates_parses_apt_output(mock_client):
     assert len(result) == 2
     assert result[0] == {"name": "curl", "current": "7.81", "available": "7.90"}
     assert result[1] == {"name": "vim", "current": "9.0", "available": "9.1"}
-    # Verify apt cache is refreshed before listing — otherwise updates stay stale
+    # First call with empty cache: apt-get update must run
     sent_cmd = mock_conn.run.call_args[0][0]
     assert "apt-get update" in sent_cmd
+    assert "apt list" in sent_cmd
+
+
+@pytest.mark.asyncio
+async def test_get_lxc_updates_skips_refresh_when_cache_fresh(mock_client):
+    """Second call within TTL window should not run apt-get update."""
+    mock_conn = MagicMock()
+    mock_conn.__aenter__ = AsyncMock(return_value=mock_conn)
+    mock_conn.__aexit__ = AsyncMock(return_value=False)
+    mock_result = MagicMock()
+    mock_result.stdout = "Listing...\n"
+    mock_conn.run = AsyncMock(return_value=mock_result)
+
+    from app.update_check_cache import clear as clear_cache, mark_refreshed
+    clear_cache()
+    mark_refreshed("lxc:pve:100")
+
+    with patch("app.ssh_client._connect", new=AsyncMock(return_value=mock_conn)):
+        await mock_client.get_lxc_updates(
+            node="pve", vmid=100,
+            ssh_host="192.168.1.10",
+            ssh_cfg={},
+            ssh_creds={"key_path": "/home/user/.ssh/id_rsa"},
+        )
+
+    sent_cmd = mock_conn.run.call_args[0][0]
+    assert "apt-get update" not in sent_cmd
     assert "apt list" in sent_cmd
 
 
