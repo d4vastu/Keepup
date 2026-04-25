@@ -630,6 +630,20 @@ async def admin_test_host(request: Request, slug: str) -> HTMLResponse:
 # ---------------------------------------------------------------------------
 
 
+def _group_containers(
+    containers: list[dict],
+) -> tuple[dict[str, list[dict]], list[dict]]:
+    """Split containers into (compose_groups_dict, standalone_list), groups sorted."""
+    compose_groups: dict[str, list[dict]] = {}
+    standalone: list[dict] = []
+    for c in containers:
+        if c.get("compose_project"):
+            compose_groups.setdefault(c["compose_project"], []).append(c)
+        else:
+            standalone.append(c)
+    return dict(sorted(compose_groups.items())), standalone
+
+
 @router.delete("/hosts/{slug}/docker-prompt", response_class=HTMLResponse)
 async def admin_dismiss_docker_prompt(request: Request, slug: str) -> HTMLResponse:
     """Dismiss the Docker discovery prompt without saving anything."""
@@ -638,7 +652,7 @@ async def admin_dismiss_docker_prompt(request: Request, slug: str) -> HTMLRespon
 
 @router.get("/hosts/{slug}/docker-discover", response_class=HTMLResponse)
 async def admin_docker_discover(request: Request, slug: str) -> HTMLResponse:
-    """SSH into the host and return found Compose stacks, or empty if none."""
+    """SSH into the host and return found containers, or empty if none."""
     hosts = get_hosts()
     host = next((h for h in hosts if h["slug"] == slug), None)
     if not host:
@@ -646,12 +660,53 @@ async def admin_docker_discover(request: Request, slug: str) -> HTMLResponse:
     from .backends.ssh_docker_backend import SSHDockerBackend
 
     backend = SSHDockerBackend()
-    stacks = await backend.discover_stacks(host)
-    if not stacks:
+    try:
+        containers = await backend.discover_containers(host)
+    except Exception:
         return HTMLResponse("")
+    if not containers:
+        return HTMLResponse("")
+    compose_groups, standalone = _group_containers(containers)
     return templates.TemplateResponse(
         "partials/admin_docker_prompt.html",
-        {"request": request, "slug": slug, "host": host, "stacks": stacks},
+        {
+            "request": request,
+            "slug": slug,
+            "host": host,
+            "compose_groups": compose_groups,
+            "standalone": standalone,
+            "container_count": len(containers),
+        },
+    )
+
+
+@router.get("/hosts/{slug}/docker-manage", response_class=HTMLResponse)
+async def admin_docker_manage(request: Request, slug: str) -> HTMLResponse:
+    """Return the inline container monitoring management panel."""
+    hosts = get_hosts()
+    host = next((h for h in hosts if h["slug"] == slug), None)
+    if not host:
+        return HTMLResponse("")
+    from .backends.ssh_docker_backend import SSHDockerBackend
+
+    backend = SSHDockerBackend()
+    containers: list[dict] = []
+    error: str | None = None
+    try:
+        containers = await backend.discover_containers(host)
+    except Exception as exc:
+        error = str(exc)
+    compose_groups, standalone = _group_containers(containers)
+    return templates.TemplateResponse(
+        "partials/admin_docker_manage.html",
+        {
+            "request": request,
+            "slug": slug,
+            "host": host,
+            "compose_groups": compose_groups,
+            "standalone": standalone,
+            "error": error,
+        },
     )
 
 
@@ -660,13 +715,13 @@ async def admin_save_docker_monitoring(
     request: Request,
     slug: str,
     docker_mode: str = Form("none"),
-    docker_stacks: list[str] = Form(default=[]),
+    docker_containers: list[str] = Form(default=[]),
 ) -> HTMLResponse:
     try:
         set_docker_monitoring(
             slug=slug,
             mode=docker_mode,
-            stacks=docker_stacks if docker_mode == "selected" else None,
+            containers=docker_containers if docker_mode == "selected" else None,
         )
     except Exception as exc:
         return templates.TemplateResponse(
@@ -675,7 +730,7 @@ async def admin_save_docker_monitoring(
         )
     return templates.TemplateResponse(
         "partials/admin_hosts.html",
-        {"request": request, "hosts": _hosts_with_status()},
+        {"request": request, "hosts": _hosts_with_status(), "save_success": True},
     )
 
 

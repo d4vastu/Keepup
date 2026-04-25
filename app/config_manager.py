@@ -143,21 +143,23 @@ def delete_host(slug: str) -> None:
 def set_docker_monitoring(
     slug: str,
     mode: str,  # "all" | "all_and_new" | "selected" | "none"
-    stacks: list[str] | None = None,
+    containers: list[str] | None = None,
 ) -> None:
-    """Configure Docker Compose monitoring for a host."""
+    """Configure container monitoring for a host."""
     config = load_config()
     for h in config.get("hosts", []):
         if slugify(h["name"]) == slug:
             if mode == "none":
                 h.pop("docker_mode", None)
+                h.pop("docker_containers", None)
                 h.pop("docker_stacks", None)
             else:
                 h["docker_mode"] = mode
-                if mode == "selected" and stacks is not None:
-                    h["docker_stacks"] = stacks
+                if mode == "selected" and containers is not None:
+                    h["docker_containers"] = containers
                 else:
-                    h.pop("docker_stacks", None)
+                    h.pop("docker_containers", None)
+                h.pop("docker_stacks", None)
             break
     save_config(config)
 
@@ -180,7 +182,8 @@ def save_wizard_container_selection(selections: list[str]) -> None:
         slug = slugify(h["name"])
         if slug in by_slug:
             h["docker_mode"] = "selected"
-            h["docker_stacks"] = by_slug[slug]
+            h["docker_containers"] = by_slug[slug]
+            h.pop("docker_stacks", None)
         # Hosts not in selections are left unchanged (user may not have docker)
     save_config(config)
 

@@ -136,8 +136,8 @@ def test_setup_containers_save_stores_selection(config_file, data_dir, monkeypat
     raw = yaml.safe_load(config_file.read_text())
     test_host = next(h for h in raw["hosts"] if h["name"] == "Test Host")
     assert test_host.get("docker_mode") == "selected"
-    assert "nginx" in test_host.get("docker_stacks", [])
-    assert "plex" in test_host.get("docker_stacks", [])
+    assert "nginx" in test_host.get("docker_containers", [])
+    assert "plex" in test_host.get("docker_containers", [])
 
 
 def test_setup_containers_save_empty_selection(config_file, data_dir, monkeypatch):
@@ -165,7 +165,8 @@ def test_save_wizard_container_selection_sets_docker_mode(config_file, data_dir)
     raw = yaml.safe_load(config_file.read_text())
     host = next(h for h in raw["hosts"] if h["name"] == "Test Host")
     assert host["docker_mode"] == "selected"
-    assert set(host["docker_stacks"]) == {"plex", "sonarr"}
+    assert set(host["docker_containers"]) == {"plex", "sonarr"}
+    assert "docker_stacks" not in host
 
 
 def test_save_wizard_container_selection_ignores_malformed(config_file, data_dir):

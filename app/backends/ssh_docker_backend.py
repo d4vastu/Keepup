@@ -12,6 +12,7 @@ Update strategy (per container):
 import asyncio
 import json
 import logging
+import re
 import shlex
 from typing import Callable
 from urllib.parse import quote, unquote, urlparse
@@ -19,7 +20,7 @@ from urllib.parse import quote, unquote, urlparse
 from ..ssh_client import _connect
 from ..registry_client import check_image_update, extract_local_digest
 from ..credentials import get_credentials, get_integration_credentials
-from ..config_manager import get_hosts, get_ssh_config, get_proxmox_config
+from ..config_manager import get_hosts, get_ssh_config, get_proxmox_config, set_docker_monitoring
 from ..self_identity import get_self_container_id
 
 log = logging.getLogger(__name__)
@@ -127,6 +128,26 @@ class SSHDockerBackend:
         except Exception:
             return []
 
+    async def discover_containers(self, host: dict) -> list[dict]:
+        """Return all containers on the host for admin container selection.
+
+        Returns list of dicts: name, image, status, running (bool),
+        compose_project (str | None), css_id (CSS-safe id string).
+        Raises on connection failure — caller decides how to handle.
+        Also routes through _ssh_params_for so Proxmox LXC hosts are
+        reached via pct exec.
+        """
+        ssh_cfg = get_ssh_config()
+        host_entry, ssh_creds, wrap = self._ssh_params_for(host)
+        async with await _connect(host_entry, ssh_cfg, ssh_creds) as conn:
+            result = await conn.run(
+                wrap("docker ps -a --format '{{json .}}'"), check=False
+            )
+            if result.returncode != 0:
+                return []
+            raw = _parse_json_output(result.stdout)
+            return _containers_for_display(raw)
+
     # ------------------------------------------------------------------
     # ContainerBackend protocol
     # ------------------------------------------------------------------
@@ -186,9 +207,18 @@ class SSHDockerBackend:
         slug = host["slug"]
         h = host.get("host", slug)
         docker_mode = host.get("docker_mode", "all")
-        allowed_projects: set[str] | None = None
+
+        # Resolve which containers are allowed in "selected" mode.
+        # migration_stacks: set if we need to expand old docker_stacks → docker_containers.
+        allowed_containers: set[str] | None = None
+        migration_stacks: set[str] | None = None
         if docker_mode == "selected":
-            allowed_projects = set(host.get("docker_stacks") or [])
+            if "docker_containers" in host:
+                allowed_containers = set(host.get("docker_containers") or [])
+            elif "docker_stacks" in host:
+                migration_stacks = set(host["docker_stacks"])
+            else:
+                allowed_containers = set()
 
         host_entry, ssh_creds, wrap = self._ssh_params_for(host)
         entries = []
@@ -223,8 +253,9 @@ class SSHDockerBackend:
                         if project:
                             self_projects.add(project)
 
-            # First pass: collect qualifying containers and unique images
-            raw: list[tuple[str, str, str]] = []  # (container_name, image, project)
+            # First pass: collect ALL qualifying containers (no mode filter yet,
+            # so migration can inspect the full set).
+            raw_all: list[tuple[str, str, str]] = []  # (container_name, image, project)
             for c in containers:
                 labels = _parse_docker_ps_labels(c.get("Labels", "") or "")
                 project = labels.get("com.docker.compose.project", "")
@@ -245,12 +276,26 @@ class SSHDockerBackend:
                 if project and project in portainer_projects:
                     continue
 
-                # In "selected" mode only include containers from chosen projects
-                if allowed_projects is not None:
-                    if not project or project not in allowed_projects:
-                        continue
+                raw_all.append((container_name, image, project))
 
-                raw.append((container_name, image, project))
+            # One-shot migration: docker_stacks → docker_containers.
+            # Expand selected project names to their current container names.
+            if migration_stacks is not None:
+                container_names = [
+                    name for name, _, proj in raw_all if proj in migration_stacks
+                ]
+                set_docker_monitoring(slug, "selected", containers=container_names)
+                log.info(
+                    "Docker SSH: %s — migrated docker_stacks %s → %d container(s)",
+                    h, sorted(migration_stacks), len(container_names),
+                )
+                allowed_containers = set(container_names)
+
+            # Apply container-level filter for "selected" mode.
+            if allowed_containers is not None:
+                raw = [(n, img, proj) for n, img, proj in raw_all if n in allowed_containers]
+            else:
+                raw = raw_all
 
             # Check all unique images concurrently (deduplicates registry lookups)
             unique_images = list({image for _, image, _ in raw})
@@ -561,6 +606,37 @@ def _parse_docker_ps_labels(labels_str: str) -> dict[str, str]:
         if "=" in part:
             k, v = part.split("=", 1)
             result[k.strip()] = v.strip()
+    return result
+
+
+def _css_safe_id(name: str) -> str:
+    """Convert a string to a CSS-safe id: lowercase, only [a-z0-9-]."""
+    s = name.lower()
+    s = re.sub(r"[^a-z0-9]+", "-", s)
+    return s.strip("-") or "container"
+
+
+def _containers_for_display(containers: list[dict]) -> list[dict]:
+    """Parse docker ps -a NDJSON output into display-ready container dicts."""
+    result = []
+    for c in containers:
+        labels = _parse_docker_ps_labels(c.get("Labels", "") or "")
+        project = labels.get("com.docker.compose.project", "") or None
+        name = (c.get("Names", "") or "").split(",")[0].lstrip("/").strip()
+        image = c.get("Image", "")
+        status = c.get("Status", "")
+        if not name:
+            continue
+        result.append(
+            {
+                "name": name,
+                "image": image,
+                "status": status,
+                "running": (status or "").lower().startswith("up"),
+                "compose_project": project,
+                "css_id": _css_safe_id(name),
+            }
+        )
     return result
 
 

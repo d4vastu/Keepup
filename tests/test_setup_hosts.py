@@ -109,7 +109,7 @@ def test_setup_add_host_connection_succeeds_no_docker_adds_host(
         patch(
             "app.auth_router.verify_connection", new=AsyncMock(return_value=mock_result)
         ),
-        patch("app.auth_router.detect_docker_stacks", new=AsyncMock(return_value=0)),
+        patch("app.auth_router.discover_containers", new=AsyncMock(return_value=[])),
     ):
         response = setup_client.post(
             "/setup/hosts/add",
@@ -137,7 +137,14 @@ def test_setup_add_host_docker_detected_shows_prompt(
         patch(
             "app.auth_router.verify_connection", new=AsyncMock(return_value=mock_result)
         ),
-        patch("app.auth_router.detect_docker_stacks", new=AsyncMock(return_value=3)),
+        patch("app.auth_router.discover_containers", new=AsyncMock(return_value=[
+            {"name": "c1", "image": "img1:1", "status": "Up", "running": True,
+             "compose_project": None, "css_id": "c1"},
+            {"name": "c2", "image": "img2:1", "status": "Up", "running": True,
+             "compose_project": None, "css_id": "c2"},
+            {"name": "c3", "image": "img3:1", "status": "Up", "running": True,
+             "compose_project": None, "css_id": "c3"},
+        ])),
     ):
         response = setup_client.post(
             "/setup/hosts/add",
@@ -151,7 +158,7 @@ def test_setup_add_host_docker_detected_shows_prompt(
         )
     assert response.status_code == 200
     assert (
-        "docker detected" in response.text.lower() or "3 stack" in response.text.lower()
+        "docker detected" in response.text.lower() or "3 container" in response.text.lower()
     )
     assert "monitor" in response.text.lower()
 
@@ -165,7 +172,10 @@ def _add_host_via_session(
         patch(
             "app.auth_router.verify_connection", new=AsyncMock(return_value=mock_result)
         ),
-        patch("app.auth_router.detect_docker_stacks", new=AsyncMock(return_value=3)),
+        patch("app.auth_router.discover_containers", new=AsyncMock(return_value=[
+            {"name": "c1", "image": "img:1", "status": "Up", "running": True,
+             "compose_project": None, "css_id": "c1"},
+        ])),
     ):
         setup_client.post(
             "/setup/hosts/add",
@@ -235,7 +245,7 @@ def test_setup_add_host_auto_update_saved(setup_client, data_dir, config_file):
         patch(
             "app.auth_router.verify_connection", new=AsyncMock(return_value=mock_result)
         ),
-        patch("app.auth_router.detect_docker_stacks", new=AsyncMock(return_value=0)),
+        patch("app.auth_router.discover_containers", new=AsyncMock(return_value=[])),
     ):
         response = setup_client.post(
             "/setup/hosts/add",

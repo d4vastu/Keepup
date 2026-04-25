@@ -1,0 +1,150 @@
+<!-- Inline container monitoring management panel -->
+<div id="docker-manage-{{ slug }}" class="mt-2 rounded-xl border border-slate-700 bg-slate-900/80 p-4 space-y-4">
+
+  <!-- Header -->
+  <div class="flex items-center justify-between">
+    <p class="text-sm font-medium text-slate-200">Container monitoring — {{ host.name }}</p>
+    <button
+      onclick="document.getElementById('host-docker-manage-{{ slug }}').innerHTML=''"
+      class="text-slate-500 hover:text-slate-300 text-lg leading-none transition-colors"
+      title="Close">
+      &times;
+    </button>
+  </div>
+
+  {% if error %}
+  <!-- Docker unreachable state -->
+  <div class="flex items-start gap-2 rounded-lg bg-red-900/30 border border-red-700/50 px-3 py-2.5">
+    <svg class="w-4 h-4 text-red-400 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+        d="M12 9v4m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/>
+    </svg>
+    <div>
+      <p class="text-xs font-medium text-red-300">Could not reach Docker on this host</p>
+      <p class="text-xs text-slate-500 mt-0.5">{{ error }}</p>
+    </div>
+  </div>
+  <!-- Still allow changing mode even if Docker is unreachable -->
+  {% endif %}
+
+  <form
+    hx-post="/admin/hosts/{{ slug }}/docker-monitoring"
+    hx-target="#admin-hosts"
+    hx-swap="innerHTML"
+    class="space-y-4">
+
+    <input type="hidden" name="docker_mode" id="docker-manage-mode-{{ slug }}"
+      value="{{ host.docker_mode or 'none' }}" />
+
+    <!-- Mode options (4 tiles) -->
+    <div class="grid sm:grid-cols-2 lg:grid-cols-4 gap-2">
+
+      <label class="flex items-start gap-2 cursor-pointer rounded-lg border border-slate-700 hover:border-blue-600 p-3 transition-colors has-[:checked]:border-blue-500 has-[:checked]:bg-blue-900/20"
+        onclick="document.getElementById('docker-manage-mode-{{ slug }}').value='selected'; document.getElementById('docker-manage-ctr-{{ slug }}').style.display='block';">
+        <input type="radio" name="_mode_visual" value="selected"
+          {% if host.docker_mode == 'selected' %}checked{% endif %}
+          class="mt-0.5 accent-blue-500 flex-shrink-0" />
+        <div>
+          <p class="text-xs font-medium text-slate-200">Select containers</p>
+          <p class="text-xs text-slate-500 mt-0.5">Choose which ones to watch</p>
+        </div>
+      </label>
+
+      <label class="flex items-start gap-2 cursor-pointer rounded-lg border border-slate-700 hover:border-blue-600 p-3 transition-colors has-[:checked]:border-blue-500 has-[:checked]:bg-blue-900/20"
+        onclick="document.getElementById('docker-manage-mode-{{ slug }}').value='all'; document.getElementById('docker-manage-ctr-{{ slug }}').style.display='none';">
+        <input type="radio" name="_mode_visual" value="all"
+          {% if host.docker_mode == 'all' %}checked{% endif %}
+          class="mt-0.5 accent-blue-500 flex-shrink-0" />
+        <div>
+          <p class="text-xs font-medium text-slate-200">Monitor all</p>
+          <p class="text-xs text-slate-500 mt-0.5">Watch all current containers</p>
+        </div>
+      </label>
+
+      <label class="flex items-start gap-2 cursor-pointer rounded-lg border border-slate-700 hover:border-blue-600 p-3 transition-colors has-[:checked]:border-blue-500 has-[:checked]:bg-blue-900/20"
+        onclick="document.getElementById('docker-manage-mode-{{ slug }}').value='all_and_new'; document.getElementById('docker-manage-ctr-{{ slug }}').style.display='none';">
+        <input type="radio" name="_mode_visual" value="all_and_new"
+          {% if host.docker_mode == 'all_and_new' %}checked{% endif %}
+          class="mt-0.5 accent-blue-500 flex-shrink-0" />
+        <div>
+          <p class="text-xs font-medium text-slate-200">Monitor all + new</p>
+          <p class="text-xs text-slate-500 mt-0.5">Includes containers added later</p>
+        </div>
+      </label>
+
+      <label class="flex items-start gap-2 cursor-pointer rounded-lg border border-slate-700 hover:border-slate-500 p-3 transition-colors has-[:checked]:border-slate-500 has-[:checked]:bg-slate-800"
+        onclick="document.getElementById('docker-manage-mode-{{ slug }}').value='none'; document.getElementById('docker-manage-ctr-{{ slug }}').style.display='none';">
+        <input type="radio" name="_mode_visual" value="none"
+          {% if not host.docker_mode %}checked{% endif %}
+          class="mt-0.5 accent-blue-500 flex-shrink-0" />
+        <div>
+          <p class="text-xs font-medium text-slate-200">Stop monitoring</p>
+          <p class="text-xs text-slate-500 mt-0.5">Disable Docker monitoring</p>
+        </div>
+      </label>
+
+    </div>
+
+    <!-- Container list — shown only when "Select containers" is active -->
+    <div id="docker-manage-ctr-{{ slug }}"
+      style="display: {{ 'block' if host.docker_mode == 'selected' else 'none' }};">
+
+      {% if error %}
+      <p class="text-xs text-slate-500 italic">Container list unavailable — Docker unreachable.</p>
+      {% elif not compose_groups and not standalone %}
+      <p class="text-xs text-slate-500 italic">No containers found on this host.</p>
+      {% else %}
+      <div class="rounded-lg border border-slate-700 bg-slate-800/50 p-3 space-y-3">
+        {% for project, ctrs in compose_groups.items() %}
+        <div>
+          <p class="text-xs text-slate-500 mb-1.5 font-mono">{{ project }}</p>
+          <div class="space-y-1">
+            {% for c in ctrs %}
+            <label class="flex items-center gap-2 cursor-pointer py-0.5">
+              <input type="checkbox" name="docker_containers" value="{{ c.name }}"
+                {% if not host.docker_mode or host.docker_mode != 'selected' or c.name in (host.docker_containers or []) %}checked{% endif %}
+                class="accent-blue-500 flex-shrink-0" />
+              <span class="w-1.5 h-1.5 rounded-full flex-shrink-0 {{ 'bg-green-400' if c.running else 'bg-slate-500' }}"></span>
+              <span class="text-sm text-slate-200 font-mono flex-1 min-w-0 truncate">{{ c.name }}</span>
+              <span class="text-xs text-slate-600 font-mono truncate max-w-[180px] hidden sm:block">{{ c.image }}</span>
+            </label>
+            {% endfor %}
+          </div>
+        </div>
+        {% endfor %}
+        {% if standalone %}
+        <div>
+          <p class="text-xs text-slate-500 mb-1.5">Standalone</p>
+          <div class="space-y-1">
+            {% for c in standalone %}
+            <label class="flex items-center gap-2 cursor-pointer py-0.5">
+              <input type="checkbox" name="docker_containers" value="{{ c.name }}"
+                {% if not host.docker_mode or host.docker_mode != 'selected' or c.name in (host.docker_containers or []) %}checked{% endif %}
+                class="accent-blue-500 flex-shrink-0" />
+              <span class="w-1.5 h-1.5 rounded-full flex-shrink-0 {{ 'bg-green-400' if c.running else 'bg-slate-500' }}"></span>
+              <span class="text-sm text-slate-200 font-mono flex-1 min-w-0 truncate">{{ c.name }}</span>
+              <span class="text-xs text-slate-600 font-mono truncate max-w-[180px] hidden sm:block">{{ c.image }}</span>
+            </label>
+            {% endfor %}
+          </div>
+        </div>
+        {% endif %}
+      </div>
+      {% endif %}
+    </div>
+
+    <!-- Action buttons -->
+    <div class="flex gap-2 justify-end">
+      <button type="button"
+        onclick="document.getElementById('host-docker-manage-{{ slug }}').innerHTML=''"
+        class="text-xs px-3 py-1.5 rounded-lg bg-slate-700 hover:bg-slate-600 text-slate-300 transition-colors">
+        Cancel
+      </button>
+      <button type="submit"
+        class="text-xs px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-medium transition-colors">
+        Save
+      </button>
+    </div>
+
+  </form>
+</div>

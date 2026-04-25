@@ -1,6 +1,12 @@
 {% if error is defined and error %}
 <div class="mb-3 px-4 py-2 rounded-lg bg-red-900/40 border border-red-700 text-red-300 text-sm">{{ error }}</div>
 {% endif %}
+{% if save_success is defined and save_success %}
+<div id="admin-save-flash" class="mb-3 px-4 py-2 rounded-lg bg-green-900/40 border border-green-700 text-green-300 text-sm">
+  Container monitoring settings saved.
+</div>
+<script>setTimeout(function(){var el=document.getElementById('admin-save-flash');if(el)el.remove();},3000);</script>
+{% endif %}
 
 <!-- Hosts table -->
 <div class="bg-slate-800/50 rounded-xl border border-slate-700 overflow-x-auto mb-4">
@@ -56,17 +62,27 @@
         </td>
         <td class="px-5 py-3">
           {% if host.docker_mode %}
-          <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs bg-blue-900/40 text-blue-300 border border-blue-800">
+          <button
+            hx-get="/admin/hosts/{{ host.slug }}/docker-manage"
+            hx-target="#host-docker-manage-{{ host.slug }}"
+            hx-swap="innerHTML"
+            class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs bg-blue-900/40 text-blue-300 border border-blue-800 hover:bg-blue-800/60 transition-colors cursor-pointer">
             <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                 d="M20 7l-8-4-8 4m16 0v10l-8 4M4 7v10l8 4"/>
             </svg>
-            {% if host.docker_mode == "selected" %}{{ (host.docker_stacks or []) | length }} stack{{ 's' if (host.docker_stacks or []) | length != 1 }}
+            {% if host.docker_mode == "selected" %}{{ (host.docker_containers or []) | length }} container{{ 's' if (host.docker_containers or []) | length != 1 }}
             {% elif host.docker_mode == "all_and_new" %}All + new
             {% else %}All{% endif %}
-          </span>
+          </button>
           {% else %}
-          <span class="text-xs text-slate-600">—</span>
+          <button
+            hx-get="/admin/hosts/{{ host.slug }}/docker-manage"
+            hx-target="#host-docker-manage-{{ host.slug }}"
+            hx-swap="innerHTML"
+            class="text-xs text-slate-600 hover:text-slate-400 transition-colors cursor-pointer">
+            —
+          </button>
           {% endif %}
         </td>
         <td class="px-5 py-3 text-right">
@@ -93,6 +109,13 @@
               hx-swap="outerHTML"
               class="text-xs px-2.5 py-1 rounded bg-slate-700 hover:bg-slate-600 text-slate-300 transition-colors">
               Edit
+            </button>
+            <button
+              hx-get="/admin/hosts/{{ host.slug }}/docker-manage"
+              hx-target="#host-docker-manage-{{ host.slug }}"
+              hx-swap="innerHTML"
+              class="text-xs px-2.5 py-1 rounded bg-slate-700 hover:bg-slate-600 text-slate-300 transition-colors">
+              Containers
             </button>
             <button
               hx-delete="/admin/hosts/{{ host.slug }}"
@@ -123,6 +146,8 @@
             hx-swap="innerHTML"
             {% endif %}
           ></div>
+          <!-- Container monitoring management panel (opened on demand) -->
+          <div id="host-docker-manage-{{ host.slug }}" class="px-5 pb-2"></div>
         </td>
       </tr>
       {% endfor %}
