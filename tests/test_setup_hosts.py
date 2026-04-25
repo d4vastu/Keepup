@@ -163,6 +163,33 @@ def test_setup_add_host_docker_detected_shows_prompt(
     assert "monitor" in response.text.lower()
 
 
+def test_setup_add_host_passes_sudo_password_to_discovery(
+    setup_client, data_dir, config_file
+):
+    """Wizard must forward ssh_password as sudo_password so non-root users can run docker ps."""
+    _create_admin()
+    mock_result = {"ok": True, "message": "Connected"}
+    discover_mock = AsyncMock(return_value=[])
+    with (
+        patch(
+            "app.auth_router.verify_connection", new=AsyncMock(return_value=mock_result)
+        ),
+        patch("app.auth_router.discover_containers", new=discover_mock),
+    ):
+        setup_client.post(
+            "/setup/hosts/add",
+            data={
+                "name": "OMV Host",
+                "host": "192.168.5.228",
+                "user": "admin",
+                "auth_method": "password",
+                "ssh_password": "secret",
+            },
+        )
+    creds_passed = discover_mock.call_args[0][2]
+    assert creds_passed.get("sudo_password") == "secret"
+
+
 def _add_host_via_session(
     setup_client, name, host, ssh_password="pass", enable_auto_update=False
 ):
