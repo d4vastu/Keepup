@@ -20,7 +20,7 @@ from urllib.parse import quote, unquote, urlparse
 from ..ssh_client import _connect
 from ..registry_client import check_image_update, extract_local_digest
 from ..credentials import get_credentials, get_integration_credentials
-from ..config_manager import get_hosts, get_ssh_config, get_proxmox_config, set_docker_monitoring
+from ..config_manager import get_hosts, get_ssh_config, get_proxmox_config, get_portainer_config, set_docker_monitoring
 from ..self_identity import get_self_container_id
 
 log = logging.getLogger(__name__)
@@ -229,9 +229,16 @@ class SSHDockerBackend:
             )
             containers = _parse_json_output(ps_result.stdout)
             portainer_projects = _portainer_managed_projects(containers)
-            if portainer_projects:
+            portainer_active = _portainer_integration_active()
+            if portainer_projects and portainer_active:
                 log.info(
                     "Docker SSH: %s — skipping %d Portainer-managed project(s): %s",
+                    h, len(portainer_projects), sorted(portainer_projects),
+                )
+            elif portainer_projects and not portainer_active:
+                log.info(
+                    "Docker SSH: %s — Portainer agent detected but no Portainer integration"
+                    " configured; including %d project(s) via SSH: %s",
                     h, len(portainer_projects), sorted(portainer_projects),
                 )
 
@@ -272,8 +279,10 @@ class SSHDockerBackend:
                 if project and project in self_projects:
                     continue
 
-                # Skip compose projects managed by a Portainer agent on this host
-                if project and project in portainer_projects:
+                # Skip compose projects managed by a Portainer agent — but only
+                # when the Portainer integration is active; otherwise those
+                # containers would vanish from the dashboard entirely.
+                if project and project in portainer_projects and portainer_active:
                     continue
 
                 raw_all.append((container_name, image, project))
@@ -547,6 +556,13 @@ def _compose_projects_from_ps(containers: list[dict]) -> list[dict]:
         if name not in by_project or (cf and not by_project[name]):
             by_project[name] = cf
     return [{"name": n, "config_file": f} for n, f in by_project.items()]
+
+
+def _portainer_integration_active() -> bool:
+    """Return True if both a Portainer URL and API key are configured."""
+    cfg = get_portainer_config()
+    creds = get_integration_credentials("portainer")
+    return bool(cfg.get("url") and creds.get("api_key"))
 
 
 def _portainer_managed_projects(containers: list[dict]) -> set[str]:
