@@ -61,7 +61,7 @@ from .credentials import (
     save_integration_credentials,
 )
 from .proxmox_client import ProxmoxClient
-from .ssh_client import detect_docker_stacks, discover_containers, verify_connection
+from .ssh_client import discover_containers, verify_connection
 from .backend_loader import reload_backends
 from .templates_env import make_templates
 
@@ -1261,11 +1261,12 @@ async def setup_add_host(
         )
 
     # Connection succeeded — check for Docker before committing
-    stack_count = await detect_docker_stacks(host_entry, get_ssh_config(), creds)
+    found_containers = await discover_containers(host_entry, get_ssh_config(), creds)
+    container_count = len(found_containers)
 
-    if stack_count > 0:
+    if container_count > 0:
         # Store pending host in session (avoids putting credentials in HTML hidden fields)
-        label = f"{stack_count} stack{'s' if stack_count != 1 else ''}"
+        label = f"{container_count} container{'s' if container_count != 1 else ''}"
         request.session["pending_ssh_host"] = {
             "name": name,
             "host": host_addr,
@@ -1280,7 +1281,7 @@ async def setup_add_host(
             "partials/setup_ssh_section.html",
             _ssh_section_ctx(
                 request,
-                docker_prompt={"name": name, "stack_label": label},
+                docker_prompt={"name": name, "container_label": label},
             ),
         )
 

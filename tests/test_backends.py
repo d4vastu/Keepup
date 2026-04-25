@@ -332,6 +332,355 @@ async def test_discover_stacks_pct_host_uses_pct_exec(config_file, data_dir):
 
 
 # ---------------------------------------------------------------------------
+# SSHDockerBackend — discover_containers
+# ---------------------------------------------------------------------------
+
+
+def _make_ssh_conn_with_status(stdout="", returncode=0):
+    result = MagicMock(stdout=stdout, returncode=returncode)
+    conn = MagicMock()
+    conn.__aenter__ = AsyncMock(return_value=conn)
+    conn.__aexit__ = AsyncMock(return_value=False)
+    conn.run = AsyncMock(return_value=result)
+    return conn
+
+
+@pytest.mark.asyncio
+async def test_discover_containers_returns_containers(config_file, data_dir):
+    """discover_containers returns name, image, status, compose_project, running, css_id."""
+    ps_output = "\n".join([
+        json.dumps({"Names": "/sonarr", "Image": "sonarr:latest",
+                    "Status": "Up 2 hours",
+                    "Labels": "com.docker.compose.project=arr"}),
+        json.dumps({"Names": "/plex", "Image": "plex:latest",
+                    "Status": "Exited (0) 1 minute ago",
+                    "Labels": ""}),
+    ])
+    conn = _make_ssh_conn_with_status(stdout=ps_output)
+    host = {"name": "Test Host", "host": "192.168.1.10", "slug": "test-host"}
+    with patch(
+        "app.backends.ssh_docker_backend._connect", new=AsyncMock(return_value=conn)
+    ):
+        backend = SSHDockerBackend()
+        containers = await backend.discover_containers(host)
+
+    assert len(containers) == 2
+    sonarr = next(c for c in containers if c["name"] == "sonarr")
+    assert sonarr["compose_project"] == "arr"
+    assert sonarr["running"] is True
+    assert sonarr["css_id"] == "sonarr"
+    plex = next(c for c in containers if c["name"] == "plex")
+    assert plex["compose_project"] is None
+    assert plex["running"] is False
+
+
+@pytest.mark.asyncio
+async def test_discover_containers_css_safe_id_strips_special_chars(config_file, data_dir):
+    """Container names with special chars (e.g. parens) are sanitized for CSS ids."""
+    from app.backends.ssh_docker_backend import _css_safe_id
+
+    assert _css_safe_id("my-container") == "my-container"
+    assert _css_safe_id("My Container (main)") == "my-container-main"
+    assert _css_safe_id("app(1)") == "app-1"
+    assert _css_safe_id("!!!") == "container"
+    assert _css_safe_id("abc_def") == "abc-def"
+
+
+@pytest.mark.asyncio
+async def test_discover_containers_pct_host_uses_pct_exec(config_file, data_dir):
+    """discover_containers routes through pct exec for Proxmox LXC hosts."""
+    import yaml
+    from app.config_manager import save_proxmox_config
+    from app.credentials import save_integration_credentials
+
+    save_proxmox_config(url="https://pve.example:8006", verify_ssl=False)
+    save_integration_credentials("proxmox", ssh_user="root", ssh_key="id_proxmox")
+
+    raw = yaml.safe_load(config_file.read_text())
+    raw["hosts"][0]["proxmox_node"] = "pve"
+    raw["hosts"][0]["proxmox_vmid"] = 707
+    config_file.write_text(yaml.dump(raw))
+
+    ps_output = json.dumps(
+        {"Names": "/nginx", "Image": "nginx:alpine", "Status": "Up 1 hour", "Labels": ""}
+    )
+    conn = _make_ssh_conn_with_status(stdout=ps_output)
+    host = dict(raw["hosts"][0])
+    with patch(
+        "app.backends.ssh_docker_backend._connect", new=AsyncMock(return_value=conn)
+    ):
+        backend = SSHDockerBackend()
+        containers = await backend.discover_containers(host)
+
+    assert len(containers) == 1
+    assert containers[0]["name"] == "nginx"
+    cmd = conn.run.call_args_list[0].args[0]
+    assert cmd.startswith("pct exec 707 -- sh -c ")
+    assert "docker ps -a" in cmd
+
+
+@pytest.mark.asyncio
+async def test_discover_containers_nonzero_returncode_returns_empty(config_file, data_dir):
+    conn = _make_ssh_conn_with_status(stdout="error output", returncode=1)
+    host = {"name": "Test Host", "host": "192.168.1.10", "slug": "test-host"}
+    with patch(
+        "app.backends.ssh_docker_backend._connect", new=AsyncMock(return_value=conn)
+    ):
+        backend = SSHDockerBackend()
+        containers = await backend.discover_containers(host)
+    assert containers == []
+
+
+# ---------------------------------------------------------------------------
+# SSHDockerBackend — docker_stacks migration
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_selected_mode_migrates_docker_stacks_to_containers(config_file, data_dir):
+    """When docker_stacks is set but docker_containers is not, expand to containers."""
+    import yaml
+
+    raw = yaml.safe_load(config_file.read_text())
+    raw["hosts"][0]["docker_mode"] = "selected"
+    raw["hosts"][0]["docker_stacks"] = ["mystack"]
+    config_file.write_text(yaml.dump(raw))
+
+    docker_ps_output = "\n".join([
+        json.dumps({"Names": "/app1", "Image": "app1:latest",
+                    "Labels": "com.docker.compose.project=mystack"}),
+        json.dumps({"Names": "/app2", "Image": "app2:latest",
+                    "Labels": "com.docker.compose.project=mystack"}),
+        json.dumps({"Names": "/other", "Image": "other:latest",
+                    "Labels": "com.docker.compose.project=other-stack"}),
+    ])
+    inspect_app1 = '["app1@sha256:aaa"]'
+    inspect_app2 = '["app2@sha256:bbb"]'
+
+    conn = _make_multi_conn(
+        [
+            MagicMock(stdout=docker_ps_output, returncode=0),
+            MagicMock(stdout=inspect_app1, returncode=0),
+            MagicMock(stdout=inspect_app2, returncode=0),
+        ]
+    )
+
+    with (
+        patch("app.backends.ssh_docker_backend._connect", new=AsyncMock(return_value=conn)),
+        patch("app.backends.ssh_docker_backend.check_image_update",
+              new=AsyncMock(return_value="up_to_date")),
+    ):
+        backend = SSHDockerBackend()
+        stacks = await backend.get_stacks_with_update_status()
+
+    # Only containers from mystack are included, not "other"
+    names = {s["name"] for s in stacks}
+    assert names == {"app1", "app2"}
+
+    # Config persisted docker_containers, dropped docker_stacks
+    updated = yaml.safe_load(config_file.read_text())
+    host = updated["hosts"][0]
+    assert host["docker_mode"] == "selected"
+    assert set(host["docker_containers"]) == {"app1", "app2"}
+    assert "docker_stacks" not in host
+
+
+@pytest.mark.asyncio
+async def test_selected_mode_empty_docker_containers_monitors_nothing(config_file, data_dir):
+    """selected mode with docker_containers=[] includes nothing."""
+    import yaml
+
+    raw = yaml.safe_load(config_file.read_text())
+    raw["hosts"][0]["docker_mode"] = "selected"
+    raw["hosts"][0]["docker_containers"] = []
+    config_file.write_text(yaml.dump(raw))
+
+    docker_ps_output = json.dumps(
+        {"Names": "/app1", "Image": "app1:latest", "Labels": ""}
+    )
+    conn = _make_multi_conn(
+        [MagicMock(stdout=docker_ps_output, returncode=0)]
+    )
+
+    with patch("app.backends.ssh_docker_backend._connect", new=AsyncMock(return_value=conn)):
+        backend = SSHDockerBackend()
+        stacks = await backend.get_stacks_with_update_status()
+
+    assert stacks == []
+
+
+# ---------------------------------------------------------------------------
+# SSHDockerBackend — mode transitions (all four modes × SSH backend)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_mode_all_includes_every_container(config_file, data_dir):
+    import yaml
+
+    raw = yaml.safe_load(config_file.read_text())
+    raw["hosts"][0]["docker_mode"] = "all"
+    config_file.write_text(yaml.dump(raw))
+
+    ps = "\n".join([
+        json.dumps({"Names": "/a", "Image": "a:1", "Labels": ""}),
+        json.dumps({"Names": "/b", "Image": "b:1", "Labels": "com.docker.compose.project=proj"}),
+    ])
+    conn = _make_multi_conn([
+        MagicMock(stdout=ps, returncode=0),
+        MagicMock(stdout='[]', returncode=0),
+        MagicMock(stdout='[]', returncode=0),
+    ])
+    with (
+        patch("app.backends.ssh_docker_backend._connect", new=AsyncMock(return_value=conn)),
+        patch("app.backends.ssh_docker_backend.check_image_update",
+              new=AsyncMock(return_value="up_to_date")),
+    ):
+        result = await SSHDockerBackend().get_stacks_with_update_status()
+    assert {s["name"] for s in result} == {"a", "b"}
+
+
+@pytest.mark.asyncio
+async def test_mode_all_and_new_includes_every_container(config_file, data_dir):
+    import yaml
+
+    raw = yaml.safe_load(config_file.read_text())
+    raw["hosts"][0]["docker_mode"] = "all_and_new"
+    config_file.write_text(yaml.dump(raw))
+
+    ps = json.dumps({"Names": "/c", "Image": "c:1", "Labels": ""})
+    conn = _make_multi_conn([
+        MagicMock(stdout=ps, returncode=0),
+        MagicMock(stdout='[]', returncode=0),
+    ])
+    with (
+        patch("app.backends.ssh_docker_backend._connect", new=AsyncMock(return_value=conn)),
+        patch("app.backends.ssh_docker_backend.check_image_update",
+              new=AsyncMock(return_value="up_to_date")),
+    ):
+        result = await SSHDockerBackend().get_stacks_with_update_status()
+    assert len(result) == 1
+    assert result[0]["name"] == "c"
+
+
+@pytest.mark.asyncio
+async def test_mode_selected_with_docker_containers_filters(config_file, data_dir):
+    import yaml
+
+    raw = yaml.safe_load(config_file.read_text())
+    raw["hosts"][0]["docker_mode"] = "selected"
+    raw["hosts"][0]["docker_containers"] = ["wanted"]
+    config_file.write_text(yaml.dump(raw))
+
+    ps = "\n".join([
+        json.dumps({"Names": "/wanted", "Image": "wanted:1", "Labels": ""}),
+        json.dumps({"Names": "/unwanted", "Image": "unwanted:1", "Labels": ""}),
+    ])
+    conn = _make_multi_conn([
+        MagicMock(stdout=ps, returncode=0),
+        MagicMock(stdout='[]', returncode=0),
+    ])
+    with (
+        patch("app.backends.ssh_docker_backend._connect", new=AsyncMock(return_value=conn)),
+        patch("app.backends.ssh_docker_backend.check_image_update",
+              new=AsyncMock(return_value="up_to_date")),
+    ):
+        result = await SSHDockerBackend().get_stacks_with_update_status()
+    assert len(result) == 1
+    assert result[0]["name"] == "wanted"
+
+
+@pytest.mark.asyncio
+async def test_mode_none_host_not_monitored(config_file, data_dir):
+    """A host with no docker_mode set is not included in monitoring."""
+    import yaml
+
+    raw = yaml.safe_load(config_file.read_text())
+    # Ensure no docker_mode
+    raw["hosts"][0].pop("docker_mode", None)
+    config_file.write_text(yaml.dump(raw))
+
+    backend = SSHDockerBackend()
+    result = await backend.get_stacks_with_update_status()
+    assert result == []
+
+
+# ---------------------------------------------------------------------------
+# SSHDockerBackend — Proxmox backend mode transitions
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_proxmox_lxc_all_mode(config_file, data_dir):
+    """Proxmox LXC host in all mode routes through pct exec and returns containers."""
+    import yaml
+    from app.config_manager import save_proxmox_config
+    from app.credentials import save_integration_credentials
+
+    save_proxmox_config(url="https://pve.example:8006", verify_ssl=False)
+    save_integration_credentials("proxmox", ssh_user="root", ssh_key="id_proxmox")
+
+    raw = yaml.safe_load(config_file.read_text())
+    raw["hosts"][0]["docker_mode"] = "all"
+    raw["hosts"][0]["proxmox_node"] = "pve"
+    raw["hosts"][0]["proxmox_vmid"] = 100
+    config_file.write_text(yaml.dump(raw))
+
+    ps = json.dumps({"Names": "/lxc-app", "Image": "lxc-app:1", "Labels": ""})
+    conn = _make_multi_conn([
+        MagicMock(stdout=ps, returncode=0),
+        MagicMock(stdout='[]', returncode=0),
+    ])
+    with (
+        patch("app.backends.ssh_docker_backend._connect", new=AsyncMock(return_value=conn)),
+        patch("app.backends.ssh_docker_backend.check_image_update",
+              new=AsyncMock(return_value="up_to_date")),
+    ):
+        result = await SSHDockerBackend().get_stacks_with_update_status()
+
+    assert len(result) == 1
+    assert result[0]["name"] == "lxc-app"
+    cmd = conn.run.call_args_list[0].args[0]
+    assert cmd.startswith("pct exec 100 -- sh -c ")
+
+
+@pytest.mark.asyncio
+async def test_proxmox_lxc_selected_mode(config_file, data_dir):
+    """Proxmox LXC host in selected mode filters by docker_containers."""
+    import yaml
+    from app.config_manager import save_proxmox_config
+    from app.credentials import save_integration_credentials
+
+    save_proxmox_config(url="https://pve.example:8006", verify_ssl=False)
+    save_integration_credentials("proxmox", ssh_user="root", ssh_key="id_proxmox")
+
+    raw = yaml.safe_load(config_file.read_text())
+    raw["hosts"][0]["docker_mode"] = "selected"
+    raw["hosts"][0]["docker_containers"] = ["lxc-app"]
+    raw["hosts"][0]["proxmox_node"] = "pve"
+    raw["hosts"][0]["proxmox_vmid"] = 100
+    config_file.write_text(yaml.dump(raw))
+
+    ps = "\n".join([
+        json.dumps({"Names": "/lxc-app", "Image": "lxc-app:1", "Labels": ""}),
+        json.dumps({"Names": "/other", "Image": "other:1", "Labels": ""}),
+    ])
+    conn = _make_multi_conn([
+        MagicMock(stdout=ps, returncode=0),
+        MagicMock(stdout='[]', returncode=0),
+    ])
+    with (
+        patch("app.backends.ssh_docker_backend._connect", new=AsyncMock(return_value=conn)),
+        patch("app.backends.ssh_docker_backend.check_image_update",
+              new=AsyncMock(return_value="up_to_date")),
+    ):
+        result = await SSHDockerBackend().get_stacks_with_update_status()
+
+    assert len(result) == 1
+    assert result[0]["name"] == "lxc-app"
+
+
+# ---------------------------------------------------------------------------
 # SSHDockerBackend — update_stack
 # ---------------------------------------------------------------------------
 
@@ -394,9 +743,9 @@ async def test_update_stack_runs_pull_and_up(config_file, data_dir, monkeypatch)
 # ---------------------------------------------------------------------------
 
 
-def test_docker_discover_no_stacks_returns_empty(client):
+def test_docker_discover_no_containers_returns_empty(client):
     with patch(
-        "app.backends.ssh_docker_backend.SSHDockerBackend.discover_stacks",
+        "app.backends.ssh_docker_backend.SSHDockerBackend.discover_containers",
         new=AsyncMock(return_value=[]),
     ):
         response = client.get("/admin/hosts/test-host/docker-discover")
@@ -404,14 +753,16 @@ def test_docker_discover_no_stacks_returns_empty(client):
     assert response.text.strip() == ""
 
 
-def test_docker_discover_returns_prompt_when_stacks_found(client):
-    stacks = [
-        {"name": "sonarr", "config_file": "/opt/stacks/sonarr/docker-compose.yml"},
-        {"name": "radarr", "config_file": "/opt/stacks/radarr/docker-compose.yml"},
+def test_docker_discover_returns_prompt_when_containers_found(client):
+    containers = [
+        {"name": "sonarr", "image": "sonarr:latest", "status": "Up", "running": True,
+         "compose_project": "arr-stack", "css_id": "sonarr"},
+        {"name": "radarr", "image": "radarr:latest", "status": "Up", "running": True,
+         "compose_project": "arr-stack", "css_id": "radarr"},
     ]
     with patch(
-        "app.backends.ssh_docker_backend.SSHDockerBackend.discover_stacks",
-        new=AsyncMock(return_value=stacks),
+        "app.backends.ssh_docker_backend.SSHDockerBackend.discover_containers",
+        new=AsyncMock(return_value=containers),
     ):
         response = client.get("/admin/hosts/test-host/docker-discover")
     assert response.status_code == 200
@@ -420,10 +771,61 @@ def test_docker_discover_returns_prompt_when_stacks_found(client):
     assert "monitor" in response.text.lower()
 
 
+def test_docker_discover_exception_returns_empty(client):
+    with patch(
+        "app.backends.ssh_docker_backend.SSHDockerBackend.discover_containers",
+        new=AsyncMock(side_effect=Exception("SSH timeout")),
+    ):
+        response = client.get("/admin/hosts/test-host/docker-discover")
+    assert response.status_code == 200
+    assert response.text.strip() == ""
+
+
 def test_docker_discover_unknown_host_returns_empty(client):
     response = client.get("/admin/hosts/does-not-exist/docker-discover")
     assert response.status_code == 200
     assert response.text.strip() == ""
+
+
+def test_docker_manage_returns_panel(client):
+    containers = [
+        {"name": "plex", "image": "plex:latest", "status": "Up", "running": True,
+         "compose_project": None, "css_id": "plex"},
+    ]
+    with patch(
+        "app.backends.ssh_docker_backend.SSHDockerBackend.discover_containers",
+        new=AsyncMock(return_value=containers),
+    ):
+        response = client.get("/admin/hosts/test-host/docker-manage")
+    assert response.status_code == 200
+    assert "plex" in response.text
+    assert "monitor" in response.text.lower()
+
+
+def test_docker_manage_unknown_host_returns_empty(client):
+    response = client.get("/admin/hosts/does-not-exist/docker-manage")
+    assert response.status_code == 200
+    assert response.text.strip() == ""
+
+
+def test_docker_manage_shows_error_on_connection_failure(client):
+    with patch(
+        "app.backends.ssh_docker_backend.SSHDockerBackend.discover_containers",
+        new=AsyncMock(side_effect=Exception("Connection refused")),
+    ):
+        response = client.get("/admin/hosts/test-host/docker-manage")
+    assert response.status_code == 200
+    assert "Connection refused" in response.text
+
+
+def test_docker_manage_empty_state(client):
+    with patch(
+        "app.backends.ssh_docker_backend.SSHDockerBackend.discover_containers",
+        new=AsyncMock(return_value=[]),
+    ):
+        response = client.get("/admin/hosts/test-host/docker-manage")
+    assert response.status_code == 200
+    assert "No containers found" in response.text
 
 
 def test_docker_monitoring_save_all(client, config_file):
@@ -438,18 +840,32 @@ def test_docker_monitoring_save_all(client, config_file):
     assert host["docker_mode"] == "all"
 
 
+def test_docker_monitoring_save_all_and_new(client, config_file):
+    import yaml
+
+    response = client.post(
+        "/admin/hosts/test-host/docker-monitoring", data={"docker_mode": "all_and_new"}
+    )
+    assert response.status_code == 200
+    raw = yaml.safe_load(config_file.read_text())
+    host = next(h for h in raw["hosts"] if h["name"] == "Test Host")
+    assert host["docker_mode"] == "all_and_new"
+    assert "docker_containers" not in host
+
+
 def test_docker_monitoring_save_selected(client, config_file):
     import yaml
 
     response = client.post(
         "/admin/hosts/test-host/docker-monitoring",
-        data={"docker_mode": "selected", "docker_stacks": ["sonarr", "radarr"]},
+        data={"docker_mode": "selected", "docker_containers": ["sonarr", "radarr"]},
     )
     assert response.status_code == 200
     raw = yaml.safe_load(config_file.read_text())
     host = next(h for h in raw["hosts"] if h["name"] == "Test Host")
     assert host["docker_mode"] == "selected"
-    assert set(host["docker_stacks"]) == {"sonarr", "radarr"}
+    assert set(host["docker_containers"]) == {"sonarr", "radarr"}
+    assert "docker_stacks" not in host
 
 
 def test_docker_monitoring_save_none_clears(client, config_file):
@@ -465,6 +881,15 @@ def test_docker_monitoring_save_none_clears(client, config_file):
     raw = yaml.safe_load(config_file.read_text())
     host = next(h for h in raw["hosts"] if h["name"] == "Test Host")
     assert "docker_mode" not in host
+    assert "docker_containers" not in host
+
+
+def test_docker_monitoring_save_shows_success_flash(client):
+    response = client.post(
+        "/admin/hosts/test-host/docker-monitoring", data={"docker_mode": "all"}
+    )
+    assert response.status_code == 200
+    assert "saved" in response.text.lower()
 
 
 def test_docker_prompt_dismiss(client):
@@ -533,10 +958,10 @@ async def test_get_stacks_filters_by_selected_mode(config_file, data_dir):
 
     raw = yaml.safe_load(config_file.read_text())
     raw["hosts"][0]["docker_mode"] = "selected"
-    raw["hosts"][0]["docker_stacks"] = ["radarr"]
+    raw["hosts"][0]["docker_containers"] = ["radarr"]
     config_file.write_text(yaml.dump(raw))
 
-    # docker ps -a returns both containers; only radarr passes the project filter
+    # docker ps -a returns both containers; only radarr passes the container name filter
     docker_ps_output = "\n".join([
         json.dumps({"Names": "/sonarr", "Image": "sonarr:latest",
                     "Labels": "com.docker.compose.project=sonarr"}),
@@ -824,13 +1249,13 @@ async def test_standalone_containers_appear_in_all_mode(config_file, data_dir):
 
 
 @pytest.mark.asyncio
-async def test_selected_mode_excludes_standalone_containers(config_file, data_dir):
-    """In selected mode, containers without a matching compose project are excluded."""
+async def test_selected_mode_filters_by_container_name(config_file, data_dir):
+    """In selected mode, only containers whose names are in docker_containers are included."""
     import yaml
 
     raw = yaml.safe_load(config_file.read_text())
     raw["hosts"][0]["docker_mode"] = "selected"
-    raw["hosts"][0]["docker_stacks"] = ["allowed-stack"]
+    raw["hosts"][0]["docker_containers"] = ["in-stack"]
     config_file.write_text(yaml.dump(raw))
 
     docker_ps_output = "\n".join([

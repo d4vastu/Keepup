@@ -1,4 +1,4 @@
-<!-- Docker monitoring prompt — injected after credential save if stacks are found -->
+<!-- Docker monitoring prompt — injected after credential save if containers are found -->
 <div id="docker-prompt-{{ slug }}" class="mt-2 rounded-xl border border-blue-700/60 bg-slate-900/80 p-4 space-y-4">
 
   <div class="flex items-start gap-2">
@@ -8,7 +8,7 @@
     </svg>
     <div>
       <p class="text-sm font-medium text-blue-300">
-        {{ stacks | length }} Docker Compose stack{{ 's' if stacks | length != 1 }} found on {{ host.name }}
+        {{ container_count }} container{{ 's' if container_count != 1 }} found on {{ host.name }}
       </p>
       <p class="text-xs text-slate-400 mt-0.5">Would you like to monitor container image updates for this host?</p>
     </div>
@@ -32,7 +32,7 @@
 
   <!-- Step 2: Monitoring mode (hidden until Yes clicked) -->
   <div id="docker-prompt-step2-{{ slug }}" style="display:none;" class="space-y-4">
-    <p class="text-xs font-medium text-slate-300">How would you like to monitor stacks?</p>
+    <p class="text-xs font-medium text-slate-300">How would you like to monitor containers?</p>
 
     <form
       hx-post="/admin/hosts/{{ slug }}/docker-monitoring"
@@ -45,51 +45,73 @@
       <!-- Mode options -->
       <div class="grid sm:grid-cols-3 gap-2">
         <label class="flex items-start gap-2 cursor-pointer rounded-lg border border-slate-700 hover:border-blue-600 p-3 transition-colors has-[:checked]:border-blue-500 has-[:checked]:bg-blue-900/20"
-          onclick="document.getElementById('docker-mode-{{ slug }}').value='all'; document.getElementById('docker-select-{{ slug }}').style.display='none'; document.getElementById('docker-submit-{{ slug }}').style.display='block';">
+          onclick="document.getElementById('docker-mode-{{ slug }}').value='all'; document.getElementById('docker-select-{{ slug }}').style.display='none';">
           <input type="radio" name="_mode_visual" value="all" checked class="mt-0.5 accent-blue-500 flex-shrink-0" />
           <div>
             <p class="text-xs font-medium text-slate-200">Monitor all</p>
-            <p class="text-xs text-slate-500 mt-0.5">Watch all current stacks</p>
+            <p class="text-xs text-slate-500 mt-0.5">Watch all current containers</p>
           </div>
         </label>
 
         <label class="flex items-start gap-2 cursor-pointer rounded-lg border border-slate-700 hover:border-blue-600 p-3 transition-colors has-[:checked]:border-blue-500 has-[:checked]:bg-blue-900/20"
-          onclick="document.getElementById('docker-mode-{{ slug }}').value='all_and_new'; document.getElementById('docker-select-{{ slug }}').style.display='none'; document.getElementById('docker-submit-{{ slug }}').style.display='block';">
+          onclick="document.getElementById('docker-mode-{{ slug }}').value='all_and_new'; document.getElementById('docker-select-{{ slug }}').style.display='none';">
           <input type="radio" name="_mode_visual" value="all_and_new" class="mt-0.5 accent-blue-500 flex-shrink-0" />
           <div>
             <p class="text-xs font-medium text-slate-200">Monitor all + new</p>
-            <p class="text-xs text-slate-500 mt-0.5">Includes stacks added later</p>
+            <p class="text-xs text-slate-500 mt-0.5">Includes containers added later</p>
           </div>
         </label>
 
         <label class="flex items-start gap-2 cursor-pointer rounded-lg border border-slate-700 hover:border-blue-600 p-3 transition-colors has-[:checked]:border-blue-500 has-[:checked]:bg-blue-900/20"
-          onclick="document.getElementById('docker-mode-{{ slug }}').value='selected'; document.getElementById('docker-select-{{ slug }}').style.display='block'; document.getElementById('docker-submit-{{ slug }}').style.display='block';">
+          onclick="document.getElementById('docker-mode-{{ slug }}').value='selected'; document.getElementById('docker-select-{{ slug }}').style.display='block';">
           <input type="radio" name="_mode_visual" value="selected" class="mt-0.5 accent-blue-500 flex-shrink-0" />
           <div>
-            <p class="text-xs font-medium text-slate-200">Select stacks</p>
+            <p class="text-xs font-medium text-slate-200">Select containers</p>
             <p class="text-xs text-slate-500 mt-0.5">Choose which ones to watch</p>
           </div>
         </label>
       </div>
 
-      <!-- Stack selector (shown only for "Select stacks") -->
+      <!-- Container selector (shown only for "Select containers") -->
       <div id="docker-select-{{ slug }}" style="display:none;"
-        class="rounded-lg border border-slate-700 bg-slate-800/50 p-3 space-y-2">
-        <p class="text-xs font-medium text-slate-400 mb-2">Select stacks to monitor:</p>
-        {% for stack in stacks %}
-        <label class="flex items-center gap-2 cursor-pointer">
-          <input type="checkbox" name="docker_stacks" value="{{ stack.name }}" checked
-            class="accent-blue-500" />
-          <span class="text-sm text-slate-200 font-mono">{{ stack.name }}</span>
-          {% if stack.config_file %}
-          <span class="text-xs text-slate-600 font-mono truncate">{{ stack.config_file }}</span>
-          {% endif %}
-        </label>
+        class="rounded-lg border border-slate-700 bg-slate-800/50 p-3 space-y-3">
+        <p class="text-xs font-medium text-slate-400">Select containers to monitor:</p>
+        {% for project, ctrs in compose_groups.items() %}
+        <div>
+          <p class="text-xs text-slate-500 mb-1.5 font-mono">{{ project }}</p>
+          <div class="space-y-1">
+            {% for c in ctrs %}
+            <label class="flex items-center gap-2 cursor-pointer py-0.5">
+              <input type="checkbox" name="docker_containers" value="{{ c.name }}" checked
+                class="accent-blue-500 flex-shrink-0" />
+              <span class="w-1.5 h-1.5 rounded-full flex-shrink-0 {{ 'bg-green-400' if c.running else 'bg-slate-500' }}"></span>
+              <span class="text-sm text-slate-200 font-mono flex-1">{{ c.name }}</span>
+              <span class="text-xs text-slate-600 font-mono truncate max-w-[160px]">{{ c.image }}</span>
+            </label>
+            {% endfor %}
+          </div>
+        </div>
         {% endfor %}
+        {% if standalone %}
+        <div>
+          <p class="text-xs text-slate-500 mb-1.5">Standalone</p>
+          <div class="space-y-1">
+            {% for c in standalone %}
+            <label class="flex items-center gap-2 cursor-pointer py-0.5">
+              <input type="checkbox" name="docker_containers" value="{{ c.name }}" checked
+                class="accent-blue-500 flex-shrink-0" />
+              <span class="w-1.5 h-1.5 rounded-full flex-shrink-0 {{ 'bg-green-400' if c.running else 'bg-slate-500' }}"></span>
+              <span class="text-sm text-slate-200 font-mono flex-1">{{ c.name }}</span>
+              <span class="text-xs text-slate-600 font-mono truncate max-w-[160px]">{{ c.image }}</span>
+            </label>
+            {% endfor %}
+          </div>
+        </div>
+        {% endif %}
       </div>
 
-      <!-- Submit (hidden until mode chosen, shown by default since "all" is pre-selected) -->
-      <div id="docker-submit-{{ slug }}" class="flex gap-2 justify-end">
+      <!-- Submit buttons -->
+      <div class="flex gap-2 justify-end">
         <button type="button"
           hx-delete="/admin/hosts/{{ slug }}/docker-prompt"
           hx-target="#docker-prompt-{{ slug }}"
