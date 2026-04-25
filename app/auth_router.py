@@ -1240,7 +1240,10 @@ async def setup_add_host(
 
     creds: dict = {}
     if auth_method == "password" and ssh_password.strip():
-        creds = {"ssh_password": ssh_password.strip()}
+        creds = {
+            "ssh_password": ssh_password.strip(),
+            "sudo_password": ssh_password.strip(),
+        }
 
     result = await verify_connection(host_entry, get_ssh_config(), creds)
     if not result["ok"]:

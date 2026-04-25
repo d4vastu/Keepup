@@ -93,11 +93,16 @@ async def discover_containers(
 ) -> list[dict]:
     """Return list of running containers as [{"id": name, "name": name, "image": image}, ...].
     Returns empty list on error or if Docker not available."""
+    creds = creds or {}
+    needs_sudo = _needs_sudo(host, ssh_cfg)
+    sudo_password = creds.get("sudo_password")
     try:
         async with await _connect(host, ssh_cfg, creds) as conn:
-            result = await conn.run(
+            result = await _run(
+                conn,
                 'docker ps --format \'{"name":"{{.Names}}","image":"{{.Image}}"}\'',
-                check=False,
+                sudo_password=sudo_password,
+                needs_sudo=needs_sudo,
             )
         containers = []
         for line in result.stdout.strip().splitlines():
@@ -124,11 +129,16 @@ async def detect_docker_stacks(
     host: dict, ssh_cfg: dict, creds: dict | None = None
 ) -> int:
     """Return the number of Docker Compose stacks found on the host, or -1 on error."""
+    creds = creds or {}
+    needs_sudo = _needs_sudo(host, ssh_cfg)
+    sudo_password = creds.get("sudo_password")
     try:
         async with await _connect(host, ssh_cfg, creds) as conn:
-            result = await conn.run(
+            result = await _run(
+                conn,
                 "docker compose ls --all --format json 2>/dev/null || echo '[]'",
-                check=False,
+                sudo_password=sudo_password,
+                needs_sudo=needs_sudo,
             )
         import json
 

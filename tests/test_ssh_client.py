@@ -7,6 +7,8 @@ import pytest
 from app.package_managers import AptPackageManager
 from app.ssh_client import (
     check_host_updates,
+    detect_docker_stacks,
+    discover_containers,
     reboot_host,
     run_host_update_buffered,
     verify_connection,
@@ -266,3 +268,118 @@ async def test_run_host_update_respects_timeout():
     ):
         with pytest.raises(asyncio.TimeoutError):
             await run_host_update_buffered(HOST_KEY, {"command_timeout": 1})
+
+
+# ---------------------------------------------------------------------------
+# discover_containers
+# ---------------------------------------------------------------------------
+
+_CONTAINER_JSON = (
+    '{"name":"nginx","image":"nginx:latest"}\n'
+    '{"name":"redis","image":"redis:7"}\n'
+)
+
+HOST_NON_ROOT = {"name": "Test", "host": "10.0.0.1", "user": "admin"}
+HOST_ROOT = {"name": "Test", "host": "10.0.0.1", "user": "root"}
+SSH_CFG_NON_ROOT = {**SSH_CFG, "default_user": "admin"}
+CREDS_SUDO = {"sudo_password": "sudopass"}
+
+
+@pytest.mark.asyncio
+async def test_discover_containers_parses_containers():
+    conn = _make_conn(stdout=_CONTAINER_JSON)
+    with patch("app.ssh_client.asyncssh.connect", new=AsyncMock(return_value=conn)):
+        result = await discover_containers(HOST_ROOT, SSH_CFG)
+    assert len(result) == 2
+    assert result[0] == {"id": "nginx", "name": "nginx", "image": "nginx:latest"}
+    assert result[1] == {"id": "redis", "name": "redis", "image": "redis:7"}
+
+
+@pytest.mark.asyncio
+async def test_discover_containers_returns_empty_on_error():
+    with patch(
+        "app.ssh_client.asyncssh.connect", side_effect=Exception("refused")
+    ):
+        result = await discover_containers(HOST_ROOT, SSH_CFG)
+    assert result == []
+
+
+@pytest.mark.asyncio
+async def test_discover_containers_uses_sudo_for_non_root():
+    conn = _make_conn(stdout=_CONTAINER_JSON)
+    with patch("app.ssh_client.asyncssh.connect", new=AsyncMock(return_value=conn)):
+        await discover_containers(HOST_NON_ROOT, SSH_CFG_NON_ROOT, creds=CREDS_SUDO)
+    sent_cmd = conn.run.call_args[0][0]
+    assert sent_cmd.startswith("sudo -S")
+    assert "docker ps" in sent_cmd
+
+
+@pytest.mark.asyncio
+async def test_discover_containers_no_sudo_for_root():
+    conn = _make_conn(stdout=_CONTAINER_JSON)
+    with patch("app.ssh_client.asyncssh.connect", new=AsyncMock(return_value=conn)):
+        await discover_containers(HOST_ROOT, SSH_CFG)
+    sent_cmd = conn.run.call_args[0][0]
+    assert not sent_cmd.startswith("sudo")
+    assert "docker ps" in sent_cmd
+
+
+@pytest.mark.asyncio
+async def test_discover_containers_standalone_containers():
+    """docker ps lists standalone (non-compose, non-swarm) containers."""
+    stdout = '{"name":"standalone","image":"alpine:3"}\n'
+    conn = _make_conn(stdout=stdout)
+    with patch("app.ssh_client.asyncssh.connect", new=AsyncMock(return_value=conn)):
+        result = await discover_containers(HOST_ROOT, SSH_CFG)
+    assert len(result) == 1
+    assert result[0]["name"] == "standalone"
+
+
+# ---------------------------------------------------------------------------
+# detect_docker_stacks
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_detect_docker_stacks_compose_only():
+    stacks_json = '[{"Name":"web","Status":"running","ConfigFiles":"..."}]'
+    conn = _make_conn(stdout=stacks_json)
+    with patch("app.ssh_client.asyncssh.connect", new=AsyncMock(return_value=conn)):
+        count = await detect_docker_stacks(HOST_ROOT, SSH_CFG)
+    assert count == 1
+
+
+@pytest.mark.asyncio
+async def test_detect_docker_stacks_empty_returns_zero():
+    conn = _make_conn(stdout="[]")
+    with patch("app.ssh_client.asyncssh.connect", new=AsyncMock(return_value=conn)):
+        count = await detect_docker_stacks(HOST_ROOT, SSH_CFG)
+    assert count == 0
+
+
+@pytest.mark.asyncio
+async def test_detect_docker_stacks_error_returns_minus_one():
+    with patch(
+        "app.ssh_client.asyncssh.connect", side_effect=Exception("refused")
+    ):
+        count = await detect_docker_stacks(HOST_ROOT, SSH_CFG)
+    assert count == -1
+
+
+@pytest.mark.asyncio
+async def test_detect_docker_stacks_uses_sudo_for_non_root():
+    conn = _make_conn(stdout="[]")
+    with patch("app.ssh_client.asyncssh.connect", new=AsyncMock(return_value=conn)):
+        await detect_docker_stacks(HOST_NON_ROOT, SSH_CFG_NON_ROOT, creds=CREDS_SUDO)
+    sent_cmd = conn.run.call_args[0][0]
+    assert sent_cmd.startswith("sudo -S")
+    assert "docker compose ls" in sent_cmd
+
+
+@pytest.mark.asyncio
+async def test_detect_docker_stacks_no_sudo_for_root():
+    conn = _make_conn(stdout="[]")
+    with patch("app.ssh_client.asyncssh.connect", new=AsyncMock(return_value=conn)):
+        await detect_docker_stacks(HOST_ROOT, SSH_CFG)
+    sent_cmd = conn.run.call_args[0][0]
+    assert not sent_cmd.startswith("sudo")
