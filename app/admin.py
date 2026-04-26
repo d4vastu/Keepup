@@ -7,6 +7,7 @@ import pyotp
 from fastapi import APIRouter, Form, Request
 from fastapi.responses import HTMLResponse
 
+from .audit import audit
 from .auth import (
     _MIN_PASSWORD_LEN,
     change_password,
@@ -227,6 +228,7 @@ async def admin_integrations_save_portainer(
     save_portainer_config(url=url, verify_ssl=verify_ssl)
     if key:
         save_integration_credentials("portainer", api_key=key)
+        audit(request, "credential.save", target="portainer")
 
     await reload_backends()
 
@@ -537,6 +539,7 @@ async def admin_delete_host(request: Request, slug: str) -> HTMLResponse:
             "partials/admin_hosts.html",
             {"request": request, "hosts": _hosts_with_status(), "error": str(exc)},
         )
+    audit(request, "host.delete", target=slug)
     return templates.TemplateResponse(
         "partials/admin_hosts.html",
         {"request": request, "hosts": _hosts_with_status()},
@@ -591,6 +594,7 @@ async def admin_save_credentials(
                 "error": str(exc),
             },
         )
+    audit(request, "credential.save", target=slug, details={"auth_method": auth_method})
     # Return hosts list and trigger Docker auto-discovery for this host
     return templates.TemplateResponse(
         "partials/admin_hosts.html",
@@ -1107,6 +1111,7 @@ async def admin_change_password(
             {"request": request, **_account_context(), "pw_errors": errors},
         )
     change_password(new_password)
+    audit(request, "account.password.change")
     # New password meets policy — clear the home-page upgrade notice if present.
     request.session.pop("show_password_notice", None)
     return templates.TemplateResponse(
@@ -1150,6 +1155,7 @@ async def admin_mfa_setup_submit(
             },
         )
     enroll_mfa(secret)
+    audit(request, "account.mfa.enroll")
     request.session.pop("mfa_setup_secret", None)
     return templates.TemplateResponse(
         "partials/admin_account.html",
@@ -1173,6 +1179,7 @@ async def admin_mfa_remove(
             },
         )
     remove_mfa()
+    audit(request, "account.mfa.remove")
     return templates.TemplateResponse(
         "partials/admin_account.html",
         {"request": request, **_account_context(), "mfa_removed": True},
@@ -1194,6 +1201,7 @@ async def admin_regenerate_backup_key(
             },
         )
     new_key = regenerate_backup_key()
+    audit(request, "account.backup_key.regen")
     return templates.TemplateResponse(
         "partials/admin_account.html",
         {"request": request, **_account_context(), "new_backup_key": new_key},
@@ -1224,6 +1232,7 @@ async def admin_factory_reset(
                 "reset_error": 'Type "RESET" in the confirmation field.',
             },
         )
+    audit(request, "account.factory_reset")
     wipe_credential_store()
     reset_config()
     request.session.clear()

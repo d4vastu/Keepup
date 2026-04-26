@@ -62,6 +62,7 @@ from .credentials import (
     save_credentials,
     save_integration_credentials,
 )
+from .audit import audit
 from .proxmox_client import ProxmoxClient
 from .ssh_client import discover_containers, verify_connection
 from .backend_loader import reload_backends
@@ -1092,6 +1093,7 @@ async def login_submit(
             error = f"Incorrect credentials. {attempts_left} attempt{'s' if attempts_left != 1 else ''} remaining before lockout."
         else:
             error = "Incorrect username, password, or authenticator code."
+        audit(request, "auth.login.failure", result="denied", actor=username.strip() or "unknown")
         return templates.TemplateResponse(
             "login.html",
             {
@@ -1103,6 +1105,7 @@ async def login_submit(
         )
 
     _clear_attempts(ip)
+    audit(request, "auth.login.success", actor=username.strip() or "unknown")
     request.session["authenticated"] = True
     if remember_me == "on":
         request.session["remember_me"] = True
