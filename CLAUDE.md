@@ -90,6 +90,7 @@ git push -u origin 'user-story/{id}-{slug}'
 
 ## Development Rules
 
+- **After cloning**, run `bash scripts/install-hooks.sh` to install the workflow guard pre-commit hook.
 - **Do not start implementation** until Daniel explicitly approves the technical approach comment on the ticket
 - **95% test coverage** must be maintained at all times
 - **Every new feature with UI changes** requires a design task approved by Daniel before any code is written

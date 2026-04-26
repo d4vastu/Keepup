@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+# keepup workflow guard — block commits on main and other non-feature branches
+branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null)
+if [[ "$branch" =~ ^(user-story|bug)/[0-9]+- || "$branch" == "main" ]]; then
+  exit 0
+fi
+echo >&2
+echo "BLOCKED by keepup workflow guard: commits to /home/daniel/update-dashboard" >&2
+echo "require a feature branch named user-story/{id}-... or bug/{id}-... with an" >&2
+echo "approved OpenProject ticket. Current branch: $branch" >&2
+echo "See CLAUDE.md for the workflow." >&2
+echo >&2
+exit 1
