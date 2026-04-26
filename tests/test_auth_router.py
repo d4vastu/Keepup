@@ -16,7 +16,7 @@ def auth_client(config_file, data_dir, monkeypatch):
     return TestClient(app, raise_server_exceptions=True)
 
 
-def _create_admin(username="alice", password="password123"):
+def _create_admin(username="alice", password="password1234"):
     from app.auth import create_admin
 
     return create_admin(username=username, password=password, totp_secret=None)
@@ -94,8 +94,8 @@ def test_setup_account_valid_redirects_to_security(auth_client):
         "/setup/account",
         data={
             "username": "alice",
-            "password": "password123",
-            "password_confirm": "password123",
+            "password": "password1234",
+            "password_confirm": "password1234",
         },
         follow_redirects=False,
     )
@@ -110,8 +110,8 @@ def test_setup_account_creates_admin(auth_client, data_dir):
         "/setup/account",
         data={
             "username": "alice",
-            "password": "password123",
-            "password_confirm": "password123",
+            "password": "password1234",
+            "password_confirm": "password1234",
         },
     )
     assert admin_exists() is True
@@ -124,8 +124,8 @@ def test_setup_account_stores_username(auth_client, data_dir):
         "/setup/account",
         data={
             "username": "alice",
-            "password": "password123",
-            "password_confirm": "password123",
+            "password": "password1234",
+            "password_confirm": "password1234",
         },
     )
     assert get_admin_username() == "alice"
@@ -136,8 +136,8 @@ def test_setup_account_short_username_shows_error(auth_client):
         "/setup/account",
         data={
             "username": "a",
-            "password": "password123",
-            "password_confirm": "password123",
+            "password": "password1234",
+            "password_confirm": "password1234",
         },
     )
     assert response.status_code == 200
@@ -149,8 +149,8 @@ def test_setup_account_invalid_username_chars_shows_error(auth_client):
         "/setup/account",
         data={
             "username": "alice@bad",
-            "password": "password123",
-            "password_confirm": "password123",
+            "password": "password1234",
+            "password_confirm": "password1234",
         },
     )
     assert response.status_code == 200
@@ -167,7 +167,7 @@ def test_setup_account_short_password_shows_error(auth_client):
         },
     )
     assert response.status_code == 200
-    assert "8 characters" in response.text.lower()
+    assert "12 characters" in response.text.lower()
 
 
 def test_setup_account_mismatched_passwords_shows_error(auth_client):
@@ -175,8 +175,8 @@ def test_setup_account_mismatched_passwords_shows_error(auth_client):
         "/setup/account",
         data={
             "username": "alice",
-            "password": "password123",
-            "password_confirm": "different456",
+            "password": "password1234",
+            "password_confirm": "different4567",
         },
     )
     assert response.status_code == 200
@@ -202,8 +202,8 @@ def test_setup_account_with_admin_redirects_to_login(auth_client, data_dir):
         "/setup/account",
         data={
             "username": "bob",
-            "password": "password123",
-            "password_confirm": "password123",
+            "password": "password1234",
+            "password_confirm": "password1234",
         },
         follow_redirects=False,
     )
@@ -228,8 +228,8 @@ def test_setup_security_with_session_flag_returns_200(auth_client):
         "/setup/account",
         data={
             "username": "alice",
-            "password": "password123",
-            "password_confirm": "password123",
+            "password": "password1234",
+            "password_confirm": "password1234",
         },
         follow_redirects=False,
     )
@@ -242,8 +242,8 @@ def test_setup_security_skip_mfa_redirects_to_recovery(auth_client):
         "/setup/account",
         data={
             "username": "alice",
-            "password": "password123",
-            "password_confirm": "password123",
+            "password": "password1234",
+            "password_confirm": "password1234",
         },
         follow_redirects=False,
     )
@@ -257,8 +257,8 @@ def test_setup_security_wrong_totp_code_shows_error(auth_client):
         "/setup/account",
         data={
             "username": "alice",
-            "password": "password123",
-            "password_confirm": "password123",
+            "password": "password1234",
+            "password_confirm": "password1234",
         },
         follow_redirects=False,
     )
@@ -290,8 +290,8 @@ def test_setup_recovery_code_with_session_key_returns_200(auth_client):
         "/setup/account",
         data={
             "username": "alice",
-            "password": "password123",
-            "password_confirm": "password123",
+            "password": "password1234",
+            "password_confirm": "password1234",
         },
         follow_redirects=False,
     )
@@ -305,8 +305,8 @@ def test_setup_recovery_code_confirm_redirects_to_connect(auth_client):
         "/setup/account",
         data={
             "username": "alice",
-            "password": "password123",
-            "password_confirm": "password123",
+            "password": "password1234",
+            "password_confirm": "password1234",
         },
         follow_redirects=False,
     )

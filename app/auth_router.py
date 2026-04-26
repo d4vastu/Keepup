@@ -11,6 +11,7 @@ from fastapi import APIRouter, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 
 from .auth import (
+    _MIN_PASSWORD_LEN,
     admin_exists,
     create_admin,
     enroll_mfa,
@@ -235,8 +236,8 @@ async def setup_account_submit(
             "Username may only contain letters, numbers, hyphens, and underscores."
         )
 
-    if len(password) < 8:
-        errors.append("Password must be at least 8 characters.")
+    if len(password) < _MIN_PASSWORD_LEN:
+        errors.append(f"Password must be at least {_MIN_PASSWORD_LEN} characters.")
     if password != password_confirm:
         errors.append("Passwords do not match.")
 
@@ -1106,6 +1107,13 @@ async def login_submit(
     if remember_me == "on":
         request.session["remember_me"] = True
 
+    # Show a soft notice on the home page if the stored password was set before
+    # the current minimum-length policy was adopted.  We cannot determine whether
+    # the plaintext password meets the policy from the hash alone, so we rely on
+    # the `password_meets_policy` flag that is written whenever a password is saved.
+    if not get_integration_credentials("admin").get("password_meets_policy"):
+        request.session["show_password_notice"] = True
+
     # Sanitise the redirect target to prevent open-redirect attacks.
     next_url = _safe_next_url(request.query_params.get("next", "/home"))
     return RedirectResponse(next_url, status_code=303)
@@ -1167,8 +1175,8 @@ async def forgot_password_reset(
         return RedirectResponse("/forgot-password", status_code=302)
 
     errors: list[str] = []
-    if len(new_password) < 8:
-        errors.append("Password must be at least 8 characters.")
+    if len(new_password) < _MIN_PASSWORD_LEN:
+        errors.append(f"Password must be at least {_MIN_PASSWORD_LEN} characters.")
     if new_password != new_password_confirm:
         errors.append("Passwords do not match.")
 
@@ -1186,6 +1194,9 @@ async def forgot_password_reset(
 
     change_password(new_password)
     request.session.pop("recovery_verified", None)
+    # New password is guaranteed to meet policy (validated above), so clear any
+    # outstanding upgrade notice that may have been set on the previous login.
+    request.session.pop("show_password_notice", None)
 
     return templates.TemplateResponse(
         "forgot_password.html",

@@ -189,7 +189,7 @@ def test_change_password_too_short(client):
         },
     )
     assert response.status_code == 200
-    assert "8 characters" in response.text or "error" in response.text.lower()
+    assert "12 characters" in response.text or "error" in response.text.lower()
 
 
 def test_change_password_mismatch(client):
