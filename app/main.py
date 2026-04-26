@@ -2,11 +2,12 @@ import asyncio
 import logging
 import os
 import time
+import traceback
 import uuid
 from pathlib import Path
 
 from fastapi import BackgroundTasks, FastAPI, Form, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.middleware.sessions import SessionMiddleware
@@ -170,6 +171,41 @@ app.mount(
     "/static", StaticFiles(directory=Path(__file__).parent / "static"), name="static"
 )
 templates = make_templates()
+
+# ---------------------------------------------------------------------------
+# Global exception handler — error hygiene (OP#116)
+# ---------------------------------------------------------------------------
+
+
+@app.exception_handler(Exception)
+async def _unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+    """Catch-all for unhandled server errors.
+
+    Logs the full traceback with a unique request_id so an operator can
+    correlate the log entry to the opaque error returned to the client.
+    No internal detail (stack trace, library versions, file paths) is leaked
+    in the response body.
+
+    HTTPException and RequestValidationError are already handled by FastAPI's
+    built-in handlers and never reach this function.
+    """
+    request_id = str(uuid.uuid4())
+    log.error(
+        "Unhandled exception [request_id=%s] %s %s\n%s",
+        request_id,
+        request.method,
+        request.url.path,
+        traceback.format_exc(),
+    )
+    # HTMX and JSON API clients receive a machine-readable envelope.
+    # Plain browser navigations (Accept: text/html, no HX-Request) get the
+    # same payload — a rendered error page is not worth the complexity since
+    # these errors should never surface to end users in normal operation.
+    return JSONResponse(
+        {"error": "Internal error", "request_id": request_id},
+        status_code=500,
+    )
+
 
 _DATA_DIR = Path(os.getenv("DATA_PATH", "/app/data"))
 _VERSION_FILE = _DATA_DIR / ".app_version"
@@ -450,6 +486,9 @@ async def main_home(request: Request) -> HTMLResponse:
             "app_version": APP_VERSION,
             "latest_version": latest_tag if show_update else None,
             "latest_release_url": latest_url if show_update else None,
+            # Show a soft password-policy upgrade notice if the stored password
+            # was saved before the minimum length was raised to 12 characters.
+            "show_password_notice": request.session.get("show_password_notice", False),
         },
     )
 

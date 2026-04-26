@@ -8,6 +8,7 @@ from fastapi import APIRouter, Form, Request
 from fastapi.responses import HTMLResponse
 
 from .auth import (
+    _MIN_PASSWORD_LEN,
     change_password,
     enroll_mfa,
     get_admin_username,
@@ -1096,8 +1097,8 @@ async def admin_change_password(
     errors: list[str] = []
     if not verify_password(current_password):
         errors.append("Current password is incorrect.")
-    if len(new_password) < 8:
-        errors.append("New password must be at least 8 characters.")
+    if len(new_password) < _MIN_PASSWORD_LEN:
+        errors.append(f"New password must be at least {_MIN_PASSWORD_LEN} characters.")
     if new_password != new_password_confirm:
         errors.append("New passwords do not match.")
     if errors:
@@ -1106,6 +1107,8 @@ async def admin_change_password(
             {"request": request, **_account_context(), "pw_errors": errors},
         )
     change_password(new_password)
+    # New password meets policy — clear the home-page upgrade notice if present.
+    request.session.pop("show_password_notice", None)
     return templates.TemplateResponse(
         "partials/admin_account.html",
         {"request": request, **_account_context(), "pw_saved": True},

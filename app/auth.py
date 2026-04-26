@@ -3,10 +3,11 @@ Authentication helpers.
 
 Admin account stored in the encrypted credential store under __admin__:
   {
-    "username":        str,              # display/login username
-    "password_hash":   str,             # bcrypt
-    "totp_secret":     str | None,      # base32, None = MFA not enrolled
-    "backup_key_hash": str,             # sha256 hex of the backup key
+    "username":            str,           # display/login username
+    "password_hash":       str,           # bcrypt
+    "totp_secret":         str | None,    # base32, None = MFA not enrolled
+    "backup_key_hash":     str,           # sha256 hex of the backup key
+    "password_meets_policy": bool,        # True once a ≥12-char password is saved
   }
 """
 
@@ -23,6 +24,12 @@ from .credentials import (
     get_integration_credentials,
     save_integration_credentials,
 )
+
+
+# Minimum password length per NIST SP 800-63B.  Raised from 8 to 12 chars so
+# that existing credentials set under the old policy can be identified and
+# the user prompted to upgrade on next login (see "password_meets_policy" flag).
+_MIN_PASSWORD_LEN = 12
 
 
 def _hash_password(password: str) -> str:
@@ -92,12 +99,16 @@ def create_admin(username: str, password: str, totp_secret: str | None) -> str:
     """
     Persist the admin account. Returns the plaintext backup key (show once).
     totp_secret is None if user skipped MFA enrollment.
+
+    Sets ``password_meets_policy = True`` when the password is ≥ _MIN_PASSWORD_LEN
+    characters so the home-page notice is suppressed for new accounts.
     """
     backup_key = _generate_backup_key()
     data: dict = {
         "username": username,
         "password_hash": _hash_password(password),
         "backup_key_hash": _hash_backup_key(backup_key),
+        "password_meets_policy": len(password) >= _MIN_PASSWORD_LEN,
     }
     if totp_secret:
         data["totp_secret"] = totp_secret
@@ -158,7 +169,14 @@ def verify_backup_key(key: str) -> bool:
 
 
 def change_password(new_password: str) -> None:
-    save_integration_credentials("admin", password_hash=_hash_password(new_password))
+    """Update the admin password hash and record whether the new password meets policy."""
+    save_integration_credentials(
+        "admin",
+        password_hash=_hash_password(new_password),
+        # Record that the saved password meets the current minimum length policy so
+        # the home-page upgrade notice is suppressed after the user has updated.
+        password_meets_policy=len(new_password) >= _MIN_PASSWORD_LEN,
+    )
 
 
 def enroll_mfa(totp_secret: str) -> None:

@@ -17,7 +17,7 @@ def setup_client(config_file, data_dir, monkeypatch):
 def _create_admin():
     from app.auth import create_admin
 
-    return create_admin(username="admin", password="password123", totp_secret=None)
+    return create_admin(username="admin", password="password1234", totp_secret=None)
 
 
 def _mock_httpx(status=200, json_data=None, exc=None):
@@ -68,8 +68,8 @@ def test_setup_security_correct_totp_enrolls_mfa(setup_client):
         "/setup/account",
         data={
             "username": "alice",
-            "password": "password123",
-            "password_confirm": "password123",
+            "password": "password1234",
+            "password_confirm": "password1234",
         },
         follow_redirects=False,
     )
