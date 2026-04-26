@@ -64,7 +64,17 @@ def data_dir(tmp_path, monkeypatch):
     monkeypatch.setattr(aul, "_DATA_DIR", d)
     monkeypatch.setattr(aul, "_LOG_PATH", d / "auto_update_log.json")
 
-    return d
+    # Redirect audit log to temp dir so tests can read and verify entries.
+    import app.audit as audit_mod
+
+    monkeypatch.setattr(audit_mod, "_DATA_DIR", d)
+    audit_mod.setup_audit_log(d)
+
+    yield d
+
+    for h in list(audit_mod._audit_log.handlers):
+        audit_mod._audit_log.removeHandler(h)
+        h.close()
 
 
 @pytest.fixture

@@ -13,6 +13,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.middleware.sessions import SessionMiddleware
 
 from .admin import router as admin_router
+from .audit import audit, setup_audit_log
 from .auth import admin_exists, get_session_secret
 from .auth_router import router as auth_router
 from .csrf import CSRFMiddleware
@@ -118,11 +119,20 @@ class AuthMiddleware(BaseHTTPMiddleware):
         return await call_next(request)
 
 
+class RequestIDMiddleware(BaseHTTPMiddleware):
+    """Attach a unique request_id to every request for log correlation."""
+
+    async def dispatch(self, request: Request, call_next):
+        request.state.request_id = str(uuid.uuid4())
+        return await call_next(request)
+
+
 # ---------------------------------------------------------------------------
 # App setup
 # ---------------------------------------------------------------------------
 
 setup_log_buffer()
+setup_audit_log()
 app = FastAPI(title="Keepup")
 
 # ---------------------------------------------------------------------------
@@ -131,8 +141,12 @@ app = FastAPI(title="Keepup")
 # middleware wraps all the others (outermost = first in request chain).
 #
 # Resulting request chain (outermost → innermost):
-#   ConditionalHTTPSRedirect → SecurityHeaders → Session → CSRF → Auth → routes
+#   ConditionalHTTPSRedirect → SecurityHeaders → Session → CSRF → Auth → RequestID → routes
 # ---------------------------------------------------------------------------
+
+# RequestID: stamp every request with a unique ID for log correlation.
+# Registered first so it runs innermost — just before the route handler.
+app.add_middleware(RequestIDMiddleware)
 
 # Auth: protect every route that isn't on the public allow-list.
 app.add_middleware(AuthMiddleware)
@@ -695,6 +709,7 @@ async def host_update(
                 "sub": proxmox_node,
             }
             background_tasks.add_task(_job_run_proxmox_node_upgrade, job_id, slug)
+            audit(request, "host.upgrade.trigger", target=slug, details={"host": host_name, "job_id": job_id})
             return templates.TemplateResponse(
                 "partials/job_poll.html",
                 {"request": request, "job_id": job_id, "job": _jobs[job_id]},
@@ -717,6 +732,7 @@ async def host_update(
             background_tasks.add_task(
                 _job_run_lxc_upgrade, job_id, proxmox_node, proxmox_vmid, ssh_host
             )
+            audit(request, "host.upgrade.trigger", target=slug, details={"host": host_name, "job_id": job_id})
             return templates.TemplateResponse(
                 "partials/job_poll.html",
                 {"request": request, "job_id": job_id, "job": _jobs[job_id]},
@@ -746,6 +762,7 @@ async def host_update(
             "sub": host.get("host", ""),
         }
         background_tasks.add_task(_job_run_host_update, job_id, host, creds)
+        audit(request, "host.upgrade.trigger", target=slug, details={"host": host_name, "job_id": job_id})
         return templates.TemplateResponse(
             "partials/job_poll.html",
             {"request": request, "job_id": job_id, "job": _jobs[job_id]},
@@ -829,6 +846,7 @@ async def host_restart(
                 _job_run_proxmox_node_restart,
                 job_id, slug, proxmox_node,
             )
+            audit(request, "host.reboot.trigger", target=slug, details={"host": host_name, "job_id": job_id})
             return templates.TemplateResponse(
                 "partials/job_poll.html",
                 {"request": request, "job_id": job_id, "job": _jobs[job_id]},
@@ -858,6 +876,7 @@ async def host_restart(
             "sub": host.get("host", ""),
         }
         background_tasks.add_task(_job_run_host_restart, job_id, host, creds)
+        audit(request, "host.reboot.trigger", target=slug, details={"host": host["name"], "job_id": job_id})
         return templates.TemplateResponse(
             "partials/job_poll.html",
             {"request": request, "job_id": job_id, "job": _jobs[job_id]},
@@ -949,6 +968,7 @@ async def stack_update(
         "sub": backend_key,
     }
     background_tasks.add_task(_job_run_stack_update, job_id, backend_key, ref)
+    audit(request, "docker.stack.update", target=f"{backend_key}/{ref}", details={"stack": stack_name, "job_id": job_id})
     return templates.TemplateResponse(
         "partials/job_poll.html",
         {"request": request, "job_id": job_id, "job": _jobs[job_id]},
