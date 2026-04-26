@@ -14,6 +14,7 @@ from starlette.middleware.sessions import SessionMiddleware
 from .admin import router as admin_router
 from .auth import admin_exists, get_session_secret
 from .auth_router import router as auth_router
+from .csrf import CSRFMiddleware
 from .log_buffer import setup_log_buffer
 from .notifications import get_unread_count, get_notifications, mark_all_read
 from .auto_update_scheduler import apply_all_schedules, scheduler
@@ -29,6 +30,7 @@ from .ssh_client import (
 )
 from .__version__ import APP_VERSION
 from .self_identity import is_self_on_proxmox_node
+from .ssl_manager import ssl_enabled
 from .templates_env import make_templates
 
 log = logging.getLogger(__name__)
@@ -118,13 +120,20 @@ class AuthMiddleware(BaseHTTPMiddleware):
 setup_log_buffer()
 app = FastAPI(title="Keepup")
 app.add_middleware(AuthMiddleware)
+# CSRFMiddleware must be registered before SessionMiddleware so that it runs
+# inside the session context (i.e. after the session cookie is loaded).
+app.add_middleware(CSRFMiddleware)
 app.add_middleware(
     SessionMiddleware,
     secret_key=get_session_secret(),
     session_cookie="ud_session",
     max_age=30 * 24 * 3600,  # 30 days max; login sets shorter if no remember_me
-    https_only=False,
-    same_site="lax",
+    # Enable the Secure flag whenever TLS is active so the cookie is not sent
+    # over plain HTTP connections.
+    https_only=ssl_enabled(),
+    # SameSite=strict prevents the browser from sending the session cookie on
+    # any cross-site request, giving strong CSRF protection for non-HTMX forms.
+    same_site="strict",
 )
 app.include_router(auth_router)
 app.include_router(admin_router)

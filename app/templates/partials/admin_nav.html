@@ -47,6 +47,18 @@
 </div>
 
 <script>
+/* Configure HTMX to include the per-session CSRF token on every mutating request.
+   The token is provisioned server-side (csrf.py) and embedded here at render time. */
+(function () {
+  var t = "{{ request.session.get('_csrf_token', '') }}";
+  document.addEventListener("htmx:configRequest", function (e) {
+    var m = e.detail.verb ? e.detail.verb.toUpperCase() : "";
+    if (m === "POST" || m === "PUT" || m === "DELETE" || m === "PATCH") {
+      e.detail.headers["X-CSRF-Token"] = t;
+    }
+  });
+})();
+
 function toggleNotifPanel() {
   const panel = document.getElementById('notif-panel');
   const isHidden = panel.classList.contains('hidden');
