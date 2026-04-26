@@ -15,6 +15,7 @@ from .admin import router as admin_router
 from .auth import admin_exists, get_session_secret
 from .auth_router import router as auth_router
 from .csrf import CSRFMiddleware
+from .security_headers import ConditionalHTTPSRedirectMiddleware, SecurityHeadersMiddleware
 from .log_buffer import setup_log_buffer
 from .notifications import get_unread_count, get_notifications, mark_all_read
 from .auto_update_scheduler import apply_all_schedules, scheduler
@@ -98,6 +99,9 @@ _PUBLIC_PATHS = {
     "/setup",
     "/forgot-password",
     "/forgot-password/reset",
+    # CSP violation reports are sent by the browser before auth state is
+    # evaluated, so this endpoint must be accessible without a session.
+    "/api/csp-report",
 }
 
 
@@ -119,10 +123,24 @@ class AuthMiddleware(BaseHTTPMiddleware):
 
 setup_log_buffer()
 app = FastAPI(title="Keepup")
+
+# ---------------------------------------------------------------------------
+# Middleware stack — registration order is REVERSED from execution order.
+# Starlette inserts each new middleware at position 0, so the last registered
+# middleware wraps all the others (outermost = first in request chain).
+#
+# Resulting request chain (outermost → innermost):
+#   ConditionalHTTPSRedirect → SecurityHeaders → Session → CSRF → Auth → routes
+# ---------------------------------------------------------------------------
+
+# Auth: protect every route that isn't on the public allow-list.
 app.add_middleware(AuthMiddleware)
-# CSRFMiddleware must be registered before SessionMiddleware so that it runs
-# inside the session context (i.e. after the session cookie is loaded).
+
+# CSRF: validate X-CSRF-Token on mutating HTMX requests; must run inside the
+# Session context so it can read/write the session-stored token.
 app.add_middleware(CSRFMiddleware)
+
+# Session: load/store the signed session cookie.
 app.add_middleware(
     SessionMiddleware,
     secret_key=get_session_secret(),
@@ -135,6 +153,16 @@ app.add_middleware(
     # any cross-site request, giving strong CSRF protection for non-HTMX forms.
     same_site="strict",
 )
+
+# Security headers: inject X-Content-Type-Options, X-Frame-Options, etc.
+# Runs outside the session layer so headers are added to every response
+# including redirects and error pages.
+_tls_active = ssl_enabled()
+app.add_middleware(SecurityHeadersMiddleware, tls_active=_tls_active)
+
+# HTTPS redirect: must be the outermost middleware so that HTTP requests are
+# redirected before any session processing or auth checks occur.
+app.add_middleware(ConditionalHTTPSRedirectMiddleware, tls_active=_tls_active)
 app.include_router(auth_router)
 app.include_router(admin_router)
 app.include_router(auto_updates_router)
@@ -173,6 +201,28 @@ async def _startup() -> None:
     await reload_backends()
     apply_all_schedules()
     scheduler.start()
+
+
+# ---------------------------------------------------------------------------
+# CSP violation report endpoint
+# ---------------------------------------------------------------------------
+
+
+@app.post("/api/csp-report", status_code=204)
+async def csp_report(request: Request) -> None:
+    """Receive Content-Security-Policy violation reports from browsers.
+
+    Browsers POST a JSON body when a resource is blocked (or would be blocked
+    in Report-Only mode). We log the report at WARNING level so violations are
+    visible in the Keepup logs page. The endpoint is public (no auth required)
+    because the browser sends reports before authentication state is evaluated.
+    """
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    report = body.get("csp-report") or body
+    log.warning("CSP violation: %s", report)
 
 
 # ---------------------------------------------------------------------------
