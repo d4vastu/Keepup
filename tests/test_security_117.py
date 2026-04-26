@@ -15,8 +15,6 @@ import logging.handlers
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import pytest
-
 import app.audit as audit_mod
 from app.audit import audit, setup_audit_log
 
