@@ -7,7 +7,6 @@ Covers:
   - Session cookie SameSite=strict configuration
 """
 
-import pytest
 from fastapi.testclient import TestClient
 
 
