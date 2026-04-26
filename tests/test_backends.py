@@ -11,6 +11,7 @@ from app.backends.ssh_docker_backend import (
     _compose_projects_from_ps,
     _parse_docker_ps_labels,
     _parse_json_output,
+    _portainer_integration_active,
     _portainer_managed_projects,
     _rollup_status,
 )
@@ -2582,3 +2583,141 @@ def test_portainer_managed_projects_standalone_unaffected():
     ]
     result = _portainer_managed_projects(containers)
     assert result == set()
+
+
+# ---------------------------------------------------------------------------
+# _portainer_integration_active
+# ---------------------------------------------------------------------------
+
+
+def test_portainer_integration_active_false_when_unconfigured():
+    """Returns False when no Portainer URL or API key is set."""
+    with (
+        patch("app.backends.ssh_docker_backend.get_portainer_config", return_value={}),
+        patch("app.backends.ssh_docker_backend.get_integration_credentials", return_value={}),
+    ):
+        assert _portainer_integration_active() is False
+
+
+def test_portainer_integration_active_false_when_url_missing():
+    """Returns False when API key is set but URL is absent."""
+    with (
+        patch("app.backends.ssh_docker_backend.get_portainer_config", return_value={}),
+        patch("app.backends.ssh_docker_backend.get_integration_credentials",
+              return_value={"api_key": "tok"}),
+    ):
+        assert _portainer_integration_active() is False
+
+
+def test_portainer_integration_active_false_when_key_missing():
+    """Returns False when URL is set but API key is absent."""
+    with (
+        patch("app.backends.ssh_docker_backend.get_portainer_config",
+              return_value={"url": "https://portainer.test:9443"}),
+        patch("app.backends.ssh_docker_backend.get_integration_credentials", return_value={}),
+    ):
+        assert _portainer_integration_active() is False
+
+
+def test_portainer_integration_active_true_when_both_set():
+    """Returns True when both URL and API key are present."""
+    with (
+        patch("app.backends.ssh_docker_backend.get_portainer_config",
+              return_value={"url": "https://portainer.test:9443"}),
+        patch("app.backends.ssh_docker_backend.get_integration_credentials",
+              return_value={"api_key": "tok"}),
+    ):
+        assert _portainer_integration_active() is True
+
+
+# ---------------------------------------------------------------------------
+# _containers_for_host — Portainer agent present, integration not configured
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_portainer_agent_containers_included_without_integration(config_file, data_dir):
+    """When portainer/agent runs but no Portainer integration is configured,
+    SSH backend must include the /data/compose/ containers instead of dropping them."""
+    import yaml
+
+    raw = yaml.safe_load(config_file.read_text())
+    raw["hosts"][0]["docker_mode"] = "all"
+    config_file.write_text(yaml.dump(raw))
+
+    portainer_agent = json.dumps({
+        "Names": "/portainer_agent_1",
+        "Image": "portainer/agent:latest",
+        "Labels": "",
+    })
+    managed_container = json.dumps({
+        "Names": "/actualbudget_1",
+        "Image": "actualbudget/actual:latest",
+        "Labels": (
+            "com.docker.compose.project=actualbudget,"
+            "com.docker.compose.project.config_files=/data/compose/58/docker-compose.yml"
+        ),
+    })
+    inspect_output = '["actualbudget/actual@sha256:abc"]'
+
+    conn = _make_multi_conn([
+        MagicMock(stdout="\n".join([portainer_agent, managed_container]), returncode=0),
+        MagicMock(stdout=inspect_output, returncode=0),
+    ])
+
+    with (
+        patch("app.backends.ssh_docker_backend._connect", new=AsyncMock(return_value=conn)),
+        patch("app.backends.ssh_docker_backend.check_image_update",
+              new=AsyncMock(return_value="up_to_date")),
+        patch("app.backends.ssh_docker_backend.get_portainer_config", return_value={}),
+        patch("app.backends.ssh_docker_backend.get_integration_credentials", return_value={}),
+    ):
+        backend = SSHDockerBackend()
+        stacks = await backend.get_stacks_with_update_status()
+
+    names = [s["name"] for s in stacks]
+    assert "actualbudget_1" in names
+
+
+@pytest.mark.asyncio
+async def test_portainer_agent_containers_skipped_with_integration(config_file, data_dir):
+    """When portainer/agent runs AND Portainer integration is configured,
+    SSH backend must skip /data/compose/ containers (Portainer backend owns them)."""
+    import yaml
+
+    raw = yaml.safe_load(config_file.read_text())
+    raw["hosts"][0]["docker_mode"] = "all"
+    config_file.write_text(yaml.dump(raw))
+
+    portainer_agent = json.dumps({
+        "Names": "/portainer_agent_1",
+        "Image": "portainer/agent:latest",
+        "Labels": "",
+    })
+    managed_container = json.dumps({
+        "Names": "/actualbudget_1",
+        "Image": "actualbudget/actual:latest",
+        "Labels": (
+            "com.docker.compose.project=actualbudget,"
+            "com.docker.compose.project.config_files=/data/compose/58/docker-compose.yml"
+        ),
+    })
+
+    conn = _make_multi_conn([
+        MagicMock(stdout="\n".join([portainer_agent, managed_container]), returncode=0),
+    ])
+
+    with (
+        patch("app.backends.ssh_docker_backend._connect", new=AsyncMock(return_value=conn)),
+        patch("app.backends.ssh_docker_backend.check_image_update",
+              new=AsyncMock(return_value="up_to_date")),
+        patch("app.backends.ssh_docker_backend.get_portainer_config",
+              return_value={"url": "https://portainer.test:9443"}),
+        patch("app.backends.ssh_docker_backend.get_integration_credentials",
+              return_value={"api_key": "tok"}),
+    ):
+        backend = SSHDockerBackend()
+        stacks = await backend.get_stacks_with_update_status()
+
+    names = [s["name"] for s in stacks]
+    assert "actualbudget_1" not in names
