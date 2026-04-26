@@ -144,6 +144,17 @@
       panel.classList.add('hidden');
     }
   });
+
+  /* Attach per-session CSRF token to all HTMX mutating requests from this page. */
+  (function () {
+    var t = "{{ request.session.get('_csrf_token', '') }}";
+    document.addEventListener("htmx:configRequest", function (e) {
+      var m = e.detail.verb ? e.detail.verb.toUpperCase() : "";
+      if (m === "POST" || m === "PUT" || m === "DELETE" || m === "PATCH") {
+        e.detail.headers["X-CSRF-Token"] = t;
+      }
+    });
+  })();
   </script>
 
 </body>

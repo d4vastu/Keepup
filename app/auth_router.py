@@ -2,6 +2,7 @@ import re
 import time
 from collections import defaultdict
 from pathlib import Path
+from urllib.parse import urlparse
 from zoneinfo import available_timezones
 
 import httpx
@@ -106,6 +107,38 @@ def _timezone_groups() -> list[tuple[str, list[str]]]:
         region = zone.split("/")[0]
         groups.setdefault(region, []).append(zone)
     return sorted(groups.items())
+
+
+# ---------------------------------------------------------------------------
+# Redirect safety
+# ---------------------------------------------------------------------------
+
+
+def _safe_next_url(url: str) -> str:
+    """
+    Validate a post-login redirect target.
+
+    Only allows relative paths that start with a single forward slash.  Rejects
+    absolute URLs, protocol-relative paths (//evil.com), backslash variants, and
+    anything with a scheme or netloc so an open-redirect attack cannot send users
+    to an external site after a successful login.
+
+    Returns /home as a safe fallback for any rejected input.
+    """
+    if not url:
+        return "/home"
+    parsed = urlparse(url)
+    # Reject anything that has a scheme (http://, javascript:, etc.) or a netloc.
+    if parsed.scheme or parsed.netloc:
+        return "/home"
+    path = parsed.path
+    # Must begin with exactly one slash; // would be parsed as a netloc by browsers.
+    if not path.startswith("/") or path.startswith("//"):
+        return "/home"
+    # Reject backslash variants that some parsers normalise to a slash.
+    if "\\" in url:
+        return "/home"
+    return url
 
 
 # ---------------------------------------------------------------------------
@@ -1073,7 +1106,8 @@ async def login_submit(
     if remember_me == "on":
         request.session["remember_me"] = True
 
-    next_url = request.query_params.get("next", "/home")
+    # Sanitise the redirect target to prevent open-redirect attacks.
+    next_url = _safe_next_url(request.query_params.get("next", "/home"))
     return RedirectResponse(next_url, status_code=303)
 
 
