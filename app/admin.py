@@ -7,7 +7,6 @@ from fastapi import APIRouter, Form, Request
 from fastapi.responses import HTMLResponse
 
 from .audit import audit
-from .rate_limiter import limiter
 from .auth import (
     _MIN_PASSWORD_LEN,
     change_password,

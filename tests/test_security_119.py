@@ -1,8 +1,6 @@
 """Tests for #119: session fixation, httpx timeouts, access log, upgrade modal XSS."""
 
-import asyncio
 import logging
-from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
 import pytest
@@ -131,7 +129,6 @@ async def test_breaker_client_opens_after_fail_max():
 @pytest.mark.asyncio
 async def test_make_client_read_timeout_fires():
     """A hung outbound call raises ReadTimeout (simulated via transport mock)."""
-    from app.httpx_client import make_client
 
     class _HungTransport(httpx.AsyncBaseTransport):
         async def handle_async_request(self, request):

@@ -7,7 +7,6 @@ the image's RepoDigests field.
 import logging
 import re
 
-import httpx
 
 from .httpx_client import make_client
 

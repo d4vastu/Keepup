@@ -11,7 +11,6 @@ Handles:
 import asyncio
 import logging
 
-import httpx
 
 from .httpx_client import make_breaker_client
 from .registry_client import extract_local_digest, check_image_update

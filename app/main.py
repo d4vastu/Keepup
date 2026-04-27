@@ -609,7 +609,6 @@ async def dashboard_redirect(request: Request) -> HTMLResponse:
 @app.get("/api/integration/pbs/status", response_class=HTMLResponse)
 async def pbs_status(request: Request) -> HTMLResponse:
     """Return a small status card for PBS — version and connectivity."""
-    import httpx
     import logging
 
     log = logging.getLogger(__name__)

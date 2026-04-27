@@ -9,7 +9,7 @@ import logging
 
 import httpx
 
-from .httpx_client import make_breaker_client, make_client
+from .httpx_client import make_breaker_client
 
 log = logging.getLogger(__name__)
 
