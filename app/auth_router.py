@@ -15,6 +15,7 @@ from .auth import (
     admin_exists,
     create_admin,
     enroll_mfa,
+    get_session_version,
     get_totp_uri,
     mfa_enrolled,
     new_totp_secret,
@@ -1107,6 +1108,7 @@ async def login_submit(
     _clear_attempts(ip)
     audit(request, "auth.login.success", actor=username.strip() or "unknown")
     request.session["authenticated"] = True
+    request.session["session_version"] = get_session_version()
     if remember_me == "on":
         request.session["remember_me"] = True
 
