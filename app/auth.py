@@ -52,11 +52,29 @@ _SESSION_SECRET_FILE = _DATA_DIR / ".session_secret"
 
 
 def get_session_secret() -> str:
+    env_secret = os.getenv("KEEPUP_SESSION_SECRET", "").strip()
+    if env_secret:
+        return env_secret
     _DATA_DIR.mkdir(parents=True, exist_ok=True)
     if not _SESSION_SECRET_FILE.exists():
         _SESSION_SECRET_FILE.write_text(secrets.token_hex(32))
         _SESSION_SECRET_FILE.chmod(0o600)
     return _SESSION_SECRET_FILE.read_text().strip()
+
+
+# ---------------------------------------------------------------------------
+# Session version — bumped on any credential change to invalidate live sessions
+# ---------------------------------------------------------------------------
+
+
+def get_session_version() -> int:
+    return int(get_integration_credentials("admin").get("session_version", 0))
+
+
+def bump_session_version() -> int:
+    new_version = get_session_version() + 1
+    save_integration_credentials("admin", session_version=new_version)
+    return new_version
 
 
 # ---------------------------------------------------------------------------
@@ -176,18 +194,27 @@ def change_password(new_password: str) -> None:
         # Record that the saved password meets the current minimum length policy so
         # the home-page upgrade notice is suppressed after the user has updated.
         password_meets_policy=len(new_password) >= _MIN_PASSWORD_LEN,
+        session_version=get_session_version() + 1,
     )
 
 
 def enroll_mfa(totp_secret: str) -> None:
-    save_integration_credentials("admin", totp_secret=totp_secret)
+    save_integration_credentials(
+        "admin",
+        totp_secret=totp_secret,
+        session_version=get_session_version() + 1,
+    )
 
 
 def remove_mfa() -> None:
     creds = get_integration_credentials("admin")
     creds.pop("totp_secret", None)
-    # Re-save without the key by clearing it
-    save_integration_credentials("admin", totp_secret="")
+    # Re-save without the key by clearing it; bump version to invalidate sessions.
+    save_integration_credentials(
+        "admin",
+        totp_secret="",
+        session_version=get_session_version() + 1,
+    )
 
 
 def regenerate_backup_key() -> str:

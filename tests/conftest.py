@@ -90,6 +90,11 @@ def client(config_file, data_dir, monkeypatch):
     # Create admin account in the temp credential store
     create_admin(username="testadmin", password="testpassword123", totp_secret=None)
 
+    # Reset per-test rate limit windows so tests don't bleed into each other.
+    app.state.admin_rl_window = {}
+    from app.rate_limiter import limiter
+    limiter.reset()
+
     tc = TestClient(app, raise_server_exceptions=True)
     # Log in — cookies persist in the TestClient
     resp = tc.post(
