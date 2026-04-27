@@ -9,12 +9,16 @@ from pathlib import Path
 from fastapi import BackgroundTasks, FastAPI, Form, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.middleware.sessions import SessionMiddleware
 
 from .admin import router as admin_router
 from .audit import audit, setup_audit_log
-from .auth import admin_exists, get_session_secret
+from .auth import admin_exists, get_session_secret, get_session_version
+from .rate_limiter import limiter
 from .auth_router import router as auth_router
 from .csrf import CSRFMiddleware
 from .security_headers import ConditionalHTTPSRedirectMiddleware, SecurityHeadersMiddleware
@@ -94,6 +98,23 @@ def _newer_version(latest: str | None) -> bool:
 # Auth middleware
 # ---------------------------------------------------------------------------
 
+_KEYS_DIR = Path("/app/keys")
+
+
+def _resolve_ssh_key_path(ssh_key: str) -> str:
+    """Return the absolute path for ssh_key inside _KEYS_DIR.
+
+    Raises ValueError for absolute paths, paths containing '..', or any path
+    that resolves outside _KEYS_DIR.
+    """
+    if ".." in ssh_key or Path(ssh_key).is_absolute():
+        raise ValueError(f"SSH key path escapes keys directory: {ssh_key!r}")
+    resolved = (_KEYS_DIR / ssh_key).resolve()
+    if not resolved.is_relative_to(_KEYS_DIR.resolve()):
+        raise ValueError(f"SSH key path escapes keys directory: {ssh_key!r}")
+    return str(resolved)
+
+
 _PUBLIC_PATHS = {
     "/",
     "/login",
@@ -116,6 +137,30 @@ class AuthMiddleware(BaseHTTPMiddleware):
             return RedirectResponse("/setup", status_code=302)
         if not request.session.get("authenticated"):
             return RedirectResponse(f"/login?next={path}", status_code=302)
+        if request.session.get("session_version") != get_session_version():
+            request.session.clear()
+            return RedirectResponse(f"/login?next={path}", status_code=302)
+        return await call_next(request)
+
+
+class AdminPostRateLimitMiddleware(BaseHTTPMiddleware):
+    """30 mutating requests per IP per minute on /admin/* routes."""
+
+    async def dispatch(self, request: Request, call_next):
+        if request.method in ("POST", "PUT", "DELETE") and request.url.path.startswith(
+            "/admin/"
+        ):
+            window: dict[str, list[float]] = request.app.state.admin_rl_window
+            ip = (request.client.host if request.client else "") or "unknown"
+            now = time.time()
+            times = [t for t in window.get(ip, []) if now - t < 60]
+            if len(times) >= 30:
+                return JSONResponse(
+                    {"detail": "Too Many Requests"}, status_code=429,
+                    headers={"Retry-After": "60"},
+                )
+            times.append(now)
+            window[ip] = times
         return await call_next(request)
 
 
@@ -134,6 +179,9 @@ class RequestIDMiddleware(BaseHTTPMiddleware):
 setup_log_buffer()
 setup_audit_log()
 app = FastAPI(title="Keepup")
+app.state.limiter = limiter
+app.state.admin_rl_window: dict[str, list[float]] = {}
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 # ---------------------------------------------------------------------------
 # Middleware stack — registration order is REVERSED from execution order.
@@ -141,12 +189,15 @@ app = FastAPI(title="Keepup")
 # middleware wraps all the others (outermost = first in request chain).
 #
 # Resulting request chain (outermost → innermost):
-#   ConditionalHTTPSRedirect → SecurityHeaders → Session → CSRF → Auth → RequestID → routes
+#   ConditionalHTTPSRedirect → SecurityHeaders → SlowAPI → Session → CSRF → Auth → RequestID → routes
 # ---------------------------------------------------------------------------
 
 # RequestID: stamp every request with a unique ID for log correlation.
 # Registered first so it runs innermost — just before the route handler.
 app.add_middleware(RequestIDMiddleware)
+
+# Admin rate limit: 30 mutating requests per IP per minute on /admin/* routes.
+app.add_middleware(AdminPostRateLimitMiddleware)
 
 # Auth: protect every route that isn't on the public allow-list.
 app.add_middleware(AuthMiddleware)
@@ -168,6 +219,10 @@ app.add_middleware(
     # any cross-site request, giving strong CSRF protection for non-HTMX forms.
     same_site="strict",
 )
+
+# SlowAPI: enforce per-route rate limits (must run outside Auth so that
+# 429 responses are returned even to unauthenticated callers on public routes).
+app.add_middleware(SlowAPIMiddleware)
 
 # Security headers: inject X-Content-Type-Options, X-Frame-Options, etc.
 # Runs outside the session layer so headers are added to every response
@@ -580,6 +635,7 @@ async def _proxmox_client_from_config():
 
 
 @app.get("/api/host/{slug}/check", response_class=HTMLResponse)
+@limiter.limit("60/minute")
 async def host_check(request: Request, slug: str) -> HTMLResponse:
     try:
         host = _get_host(slug)
@@ -601,7 +657,7 @@ async def host_check(request: Request, slug: str) -> HTMLResponse:
             proxmox_url = px_cfg.get("url", "")
             import urllib.parse
             px_host = urllib.parse.urlparse(proxmox_url).hostname or host["host"]
-            ssh_key_path = f"/app/keys/{ssh_key}" if ssh_key else None
+            ssh_key_path = _resolve_ssh_key_path(ssh_key) if ssh_key else None
             ssh_creds: dict = {"user": ssh_user}
             if ssh_key_path:
                 ssh_creds["key_path"] = ssh_key_path
@@ -683,6 +739,7 @@ async def host_check(request: Request, slug: str) -> HTMLResponse:
 
 
 @app.post("/api/host/{slug}/update", response_class=HTMLResponse)
+@limiter.limit("6/minute")
 async def host_update(
     request: Request,
     slug: str,
@@ -815,6 +872,7 @@ async def host_reboot_preview(request: Request, slug: str) -> HTMLResponse:
 
 
 @app.post("/api/host/{slug}/restart", response_class=HTMLResponse)
+@limiter.limit("6/minute")
 async def host_restart(
     request: Request,
     slug: str,
@@ -894,6 +952,7 @@ async def host_restart(
 
 
 @app.get("/api/docker/check", response_class=HTMLResponse)
+@limiter.limit("60/minute")
 async def docker_check(request: Request) -> HTMLResponse:
     hosts = get_hosts()
     backends = get_backends()
@@ -944,6 +1003,7 @@ async def docker_check(request: Request) -> HTMLResponse:
 @app.post(
     "/api/docker/stack/{backend_key}/{ref:path}/update", response_class=HTMLResponse
 )
+@limiter.limit("6/minute")
 async def stack_update(
     request: Request,
     backend_key: str,

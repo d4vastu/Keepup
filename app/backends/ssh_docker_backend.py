@@ -15,6 +15,7 @@ import logging
 import re
 import shlex
 from typing import Callable
+from pathlib import Path
 from urllib.parse import quote, unquote, urlparse
 
 from ..ssh_client import _connect
@@ -78,7 +79,13 @@ class SSHDockerBackend:
 
         host_entry: dict = {"host": px_host, "user": ssh_user, "port": 22}
         if ssh_key:
-            host_entry["key"] = f"/app/keys/{ssh_key}"
+            if ".." in ssh_key or Path(ssh_key).is_absolute():
+                raise ValueError(f"SSH key path escapes keys directory: {ssh_key!r}")
+            _keys_dir = Path("/app/keys").resolve()
+            _resolved = (_keys_dir / ssh_key).resolve()
+            if not _resolved.is_relative_to(_keys_dir):
+                raise ValueError(f"SSH key path escapes keys directory: {ssh_key!r}")
+            host_entry["key"] = str(_resolved)
         ssh_creds: dict = {}
         if not ssh_key and ssh_password:
             ssh_creds["ssh_password"] = ssh_password

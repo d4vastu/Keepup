@@ -4,7 +4,7 @@
 
 portainer:
   url: https://192.168.X.X:9443
-  api_key: YOUR_PORTAINER_API_KEY
+  # secrets are stored in the encrypted credential store via the UI — do not put real secrets here
   verify_ssl: false  # Portainer uses a self-signed cert
 
 ssh:
