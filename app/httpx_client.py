@@ -1,5 +1,6 @@
 """Central httpx client factory with standardised timeouts and per-host circuit breakers."""
 
+from contextlib import asynccontextmanager
 from datetime import timedelta
 from urllib.parse import urlparse
 
@@ -36,6 +37,47 @@ def make_client(
         timeout=timeout or _DEFAULT_TIMEOUT,
         follow_redirects=follow_redirects,
     )
+
+
+class _BreakerClient:
+    """Wraps an httpx.AsyncClient so every HTTP call flows through a circuit breaker."""
+
+    def __init__(self, client: httpx.AsyncClient, breaker: aiobreaker.CircuitBreaker):
+        self._client = client
+        self._breaker = breaker
+
+    async def get(self, *args, **kwargs):
+        return await self._breaker.call_async(self._client.get, *args, **kwargs)
+
+    async def post(self, *args, **kwargs):
+        return await self._breaker.call_async(self._client.post, *args, **kwargs)
+
+    async def put(self, *args, **kwargs):
+        return await self._breaker.call_async(self._client.put, *args, **kwargs)
+
+    async def delete(self, *args, **kwargs):
+        return await self._breaker.call_async(self._client.delete, *args, **kwargs)
+
+    async def head(self, *args, **kwargs):
+        return await self._breaker.call_async(self._client.head, *args, **kwargs)
+
+
+@asynccontextmanager
+async def make_breaker_client(
+    *,
+    base_url: str,
+    verify: bool | str = True,
+    headers: dict | None = None,
+    timeout: httpx.Timeout | None = None,
+):
+    """Factory for integration clients — identical to make_client but wraps every
+    request through a per-host circuit breaker (fail_max=5, reset=60s)."""
+    host = _host_from_url(base_url)
+    breaker = get_breaker(host)
+    async with make_client(
+        base_url=base_url, verify=verify, headers=headers, timeout=timeout
+    ) as client:
+        yield _BreakerClient(client, breaker)
 
 
 def _host_from_url(url: str) -> str:

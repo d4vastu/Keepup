@@ -105,6 +105,30 @@ async def test_make_client_default_timeout_values():
 
 
 @pytest.mark.asyncio
+async def test_breaker_client_opens_after_fail_max():
+    """_BreakerClient tracks failures; after fail_max the circuit opens."""
+    from app.httpx_client import _BreakerClient, get_breaker
+    from aiobreaker import CircuitBreakerState, CircuitBreakerError
+
+    class _FailTransport(httpx.AsyncBaseTransport):
+        async def handle_async_request(self, request):
+            raise httpx.ConnectError("refused")
+
+    breaker = get_breaker("pve-test.local")
+    assert breaker.current_state == CircuitBreakerState.CLOSED
+
+    async with httpx.AsyncClient(transport=_FailTransport()) as inner:
+        wrapped = _BreakerClient(inner, breaker)
+        for _ in range(5):
+            try:
+                await wrapped.get("http://pve-test.local/")
+            except (httpx.ConnectError, CircuitBreakerError):
+                pass
+
+    assert breaker.current_state == CircuitBreakerState.OPEN
+
+
+@pytest.mark.asyncio
 async def test_make_client_read_timeout_fires():
     """A hung outbound call raises ReadTimeout (simulated via transport mock)."""
     from app.httpx_client import make_client
