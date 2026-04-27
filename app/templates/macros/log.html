@@ -1,0 +1,5 @@
+{% macro render_log(log_lines) -%}
+{%- for item in log_lines -%}
+<div class="{{ item.cls }}">{{ item.text }}</div>
+{%- endfor -%}
+{%- endmacro %}

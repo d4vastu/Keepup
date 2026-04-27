@@ -34,7 +34,7 @@ def _mock_pushover(status=200, json_data=None, exc=None):
     ctx = MagicMock()
     ctx.__aenter__ = AsyncMock(return_value=inner)
     ctx.__aexit__ = AsyncMock(return_value=None)
-    return patch("app.auth_router.httpx.AsyncClient", return_value=ctx)
+    return patch("app.auth_router.make_client", return_value=ctx)
 
 
 # ---------------------------------------------------------------------------

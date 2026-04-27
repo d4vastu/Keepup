@@ -9,6 +9,8 @@ services:
       - ./data:/app/data        # encrypted credentials and session secret
     restart: unless-stopped
     healthcheck:
+      # CERT_NONE is intentional: the healthcheck hits localhost using the app's own self-signed cert,
+      # which is not in the system CA bundle and cannot be validated by the standard trust store.
       test: ["CMD", "python3", "-c", "import urllib.request, ssl; ctx=ssl.create_default_context(); ctx.check_hostname=False; ctx.verify_mode=ssl.CERT_NONE; urllib.request.urlopen('https://localhost:8765/login', timeout=5, context=ctx)"]
       interval: 30s
       timeout: 10s

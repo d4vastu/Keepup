@@ -1,7 +1,7 @@
 """Pushover push notification sender."""
 
-import httpx
 from .credentials import get_integration_credentials
+from .httpx_client import make_client
 
 PUSHOVER_API = "https://api.pushover.net/1/messages.json"
 
@@ -13,7 +13,7 @@ async def send_pushover(title: str, message: str) -> bool:
     if not token or not user_key:
         return False
     try:
-        async with httpx.AsyncClient(timeout=10) as client:
+        async with make_client() as client:
             resp = await client.post(
                 PUSHOVER_API,
                 data={

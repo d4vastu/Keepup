@@ -31,7 +31,7 @@ async def test_send_pushover_returns_true_on_success(data_dir, monkeypatch):
             "app.pushover.get_integration_credentials",
             return_value={"api_token": "tok", "user_key": "usr"},
         ),
-        patch("app.pushover.httpx.AsyncClient", return_value=mock_client),
+        patch("app.pushover.make_client", return_value=mock_client),
     ):
         result = await send_pushover("title", "msg")
 
@@ -53,7 +53,7 @@ async def test_send_pushover_returns_false_on_http_error(data_dir, monkeypatch):
             "app.pushover.get_integration_credentials",
             return_value={"api_token": "tok", "user_key": "usr"},
         ),
-        patch("app.pushover.httpx.AsyncClient", return_value=mock_client),
+        patch("app.pushover.make_client", return_value=mock_client),
     ):
         result = await send_pushover("title", "msg")
 
@@ -77,7 +77,7 @@ async def test_send_pushover_returns_false_on_non_200(data_dir, monkeypatch):
             "app.pushover.get_integration_credentials",
             return_value={"api_token": "tok", "user_key": "usr"},
         ),
-        patch("app.pushover.httpx.AsyncClient", return_value=mock_client),
+        patch("app.pushover.make_client", return_value=mock_client),
     ):
         result = await send_pushover("title", "msg")
 

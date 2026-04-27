@@ -2,7 +2,6 @@ import asyncio
 import os
 from datetime import datetime, timezone
 
-import httpx
 import pyotp
 from fastapi import APIRouter, Form, Request
 from fastapi.responses import HTMLResponse
@@ -66,6 +65,7 @@ from .credentials import (
 from .ssh_client import verify_connection
 from .auto_update_log import get_recent
 from .log_buffer import get_log_lines
+from .httpx_client import make_client
 from .templates_env import make_templates
 
 router = APIRouter(prefix="/admin")
@@ -896,7 +896,7 @@ async def admin_about(request: Request) -> HTMLResponse:
     releases = []
     latest_version = None
     try:
-        async with httpx.AsyncClient(timeout=5) as client:
+        async with make_client() as client:
             resp = await client.get(
                 "https://api.github.com/repos/d4vastu/Keepup/releases",
                 headers={

@@ -9,6 +9,8 @@ import re
 
 import httpx
 
+from .httpx_client import make_client
+
 log = logging.getLogger(__name__)
 
 MANIFEST_ACCEPT = (
@@ -62,9 +64,9 @@ def extract_local_digest(repo_digests: list[str], image_name: str) -> str | None
 async def _get_dockerhub_token(repo: str, creds: dict | None) -> str:
     params = {"service": "registry.docker.io", "scope": f"repository:{repo}:pull"}
     auth = (creds["username"], creds["token"]) if creds else None
-    async with httpx.AsyncClient() as client:
+    async with make_client() as client:
         resp = await client.get(
-            "https://auth.docker.io/token", params=params, auth=auth, timeout=10
+            "https://auth.docker.io/token", params=params, auth=auth
         )
         resp.raise_for_status()
         return resp.json()["token"]
@@ -83,8 +85,8 @@ async def _get_bearer_token_from_challenge(www_authenticate: str) -> str | None:
     if scope_m:
         params["scope"] = scope_m.group(1)
     try:
-        async with httpx.AsyncClient() as client:
-            resp = await client.get(realm_m.group(1), params=params, timeout=10)
+        async with make_client() as client:
+            resp = await client.get(realm_m.group(1), params=params)
             if resp.status_code == 200:
                 data = resp.json()
                 return data.get("token") or data.get("access_token")
@@ -114,8 +116,8 @@ async def get_remote_digest(
         else:
             return None
 
-        async with httpx.AsyncClient(follow_redirects=True) as client:
-            resp = await client.head(url, headers=headers, timeout=15)
+        async with make_client(follow_redirects=True) as client:
+            resp = await client.head(url, headers=headers)
 
             # Handle Bearer auth challenge (ghcr.io, lscr.io, quay.io, etc.)
             if resp.status_code == 401:

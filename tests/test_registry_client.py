@@ -110,7 +110,7 @@ async def test_bearer_token_from_challenge_success():
     mock_client.get = AsyncMock(return_value=mock_resp)
 
     www_auth = 'Bearer realm="https://ghcr.io/token",service="ghcr.io",scope="repository:owner/app:pull"'
-    with patch("app.registry_client.httpx.AsyncClient", return_value=mock_client):
+    with patch("app.registry_client.make_client", return_value=mock_client):
         token = await _get_bearer_token_from_challenge(www_auth)
     assert token == "mytoken"
 
@@ -127,7 +127,7 @@ async def test_bearer_token_from_challenge_access_token_key():
     mock_client.get = AsyncMock(return_value=mock_resp)
 
     www_auth = 'Bearer realm="https://auth.example.com/token",service="example.com"'
-    with patch("app.registry_client.httpx.AsyncClient", return_value=mock_client):
+    with patch("app.registry_client.make_client", return_value=mock_client):
         token = await _get_bearer_token_from_challenge(www_auth)
     assert token == "accesstok"
 
@@ -142,7 +142,7 @@ async def test_bearer_token_from_challenge_no_realm():
 async def test_bearer_token_from_challenge_exception():
     www_auth = 'Bearer realm="https://ghcr.io/token",service="ghcr.io"'
     with patch(
-        "app.registry_client.httpx.AsyncClient", side_effect=Exception("network")
+        "app.registry_client.make_client", side_effect=Exception("network")
     ):
         token = await _get_bearer_token_from_challenge(www_auth)
     assert token is None
@@ -180,7 +180,7 @@ async def test_get_remote_digest_dockerhub():
     mock_client.get = AsyncMock(return_value=mock_token_resp)
     mock_client.head = AsyncMock(return_value=mock_manifest_resp)
 
-    with patch("app.registry_client.httpx.AsyncClient", return_value=mock_client):
+    with patch("app.registry_client.make_client", return_value=mock_client):
         digest = await get_remote_digest("nginx:latest")
 
     assert digest == "sha256:newdigest"
@@ -194,7 +194,7 @@ async def test_get_remote_digest_ghcr_200():
     mock_resp.headers = {"Docker-Content-Digest": "sha256:ghcrdigest"}
 
     mock_client = _make_mock_client([mock_resp])
-    with patch("app.registry_client.httpx.AsyncClient", return_value=mock_client):
+    with patch("app.registry_client.make_client", return_value=mock_client):
         digest = await get_remote_digest("ghcr.io/owner/app:latest")
 
     assert digest == "sha256:ghcrdigest"
@@ -218,7 +218,7 @@ async def test_get_remote_digest_ghcr_401_then_200():
     token_resp.json.return_value = {"token": "ghcrtoken"}
 
     mock_client = _make_mock_client([challenge_resp, ok_resp], get_response=token_resp)
-    with patch("app.registry_client.httpx.AsyncClient", return_value=mock_client):
+    with patch("app.registry_client.make_client", return_value=mock_client):
         digest = await get_remote_digest("ghcr.io/owner/app:latest")
 
     assert digest == "sha256:authed"
@@ -232,7 +232,7 @@ async def test_get_remote_digest_401_no_token():
     challenge_resp.headers = {}
 
     mock_client = _make_mock_client([challenge_resp])
-    with patch("app.registry_client.httpx.AsyncClient", return_value=mock_client):
+    with patch("app.registry_client.make_client", return_value=mock_client):
         digest = await get_remote_digest("ghcr.io/owner/app:latest")
 
     assert digest is None
@@ -246,7 +246,7 @@ async def test_get_remote_digest_other_registry_with_dot():
     mock_resp.headers = {"Docker-Content-Digest": "sha256:quaydigest"}
 
     mock_client = _make_mock_client([mock_resp])
-    with patch("app.registry_client.httpx.AsyncClient", return_value=mock_client):
+    with patch("app.registry_client.make_client", return_value=mock_client):
         digest = await get_remote_digest("quay.io/prometheus/node-exporter:latest")
 
     assert digest == "sha256:quaydigest"
@@ -275,7 +275,7 @@ async def test_get_remote_digest_non_200_non_401_returns_none():
     mock_client.get = AsyncMock(return_value=mock_token_resp)
     mock_client.head = AsyncMock(return_value=mock_resp)
 
-    with patch("app.registry_client.httpx.AsyncClient", return_value=mock_client):
+    with patch("app.registry_client.make_client", return_value=mock_client):
         digest = await get_remote_digest("nginx:latest")
 
     assert digest is None
@@ -284,7 +284,7 @@ async def test_get_remote_digest_non_200_non_401_returns_none():
 @pytest.mark.asyncio
 async def test_get_remote_digest_exception_returns_none():
     with patch(
-        "app.registry_client.httpx.AsyncClient", side_effect=Exception("network error")
+        "app.registry_client.make_client", side_effect=Exception("network error")
     ):
         digest = await get_remote_digest("nginx:latest")
     assert digest is None

@@ -58,7 +58,7 @@ async def test_get_raises_on_http_error(client):
     mock_http.__aexit__ = AsyncMock(return_value=False)
     mock_http.get = AsyncMock(return_value=mock_resp)
 
-    with patch("app.portainer_client.httpx.AsyncClient", return_value=mock_http):
+    with patch("app.portainer_client.make_client", return_value=mock_http):
         with pytest.raises(Exception, match="404"):
             await client.get("/api/stacks")
 
@@ -297,7 +297,7 @@ async def test_put_method(client):
     mock_http.__aexit__ = AsyncMock(return_value=False)
     mock_http.put = AsyncMock(return_value=mock_resp)
 
-    with patch("app.portainer_client.httpx.AsyncClient", return_value=mock_http):
+    with patch("app.portainer_client.make_client", return_value=mock_http):
         result = await client.put("/api/stacks/1", json={"key": "val"})
 
     assert result == {"ok": True}

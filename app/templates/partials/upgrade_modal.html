@@ -1,3 +1,4 @@
+{% from "macros/log.html" import render_log %}
 {% set close_js %}document.getElementById('modal-container').style.display='none'{% endset %}
 
 {% if job.type == "os_upgrade" %}
@@ -36,13 +37,13 @@
 
   <div class="modal-body">
     {% if job.done %}
-    <div class="log-output" id="modal-log-{{ job_id }}">{{ log_html | safe }}</div>
+    <div class="log-output" id="modal-log-{{ job_id }}">{{ render_log(log_lines) }}</div>
     {% else %}
     <div class="log-output"
          id="modal-log-{{ job_id }}"
          hx-get="/api/jobs/{{ job_id }}/modal-body"
          hx-trigger="every 1s"
-         hx-swap="innerHTML">{{ log_html | safe }}</div>
+         hx-swap="innerHTML">{{ render_log(log_lines) }}</div>
     {% endif %}
   </div>
 
