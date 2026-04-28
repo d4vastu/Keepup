@@ -37,7 +37,6 @@ from .config_manager import (
     get_portainer_config,
     get_proxmox_config,
     get_pushover_config,
-    get_ssh_config,
     get_timezone,
     get_update_check_schedule,
     save_dockerhub_config,
@@ -597,7 +596,7 @@ async def setup_proxmox_test_ssh(
     creds: dict = {}
     if password:
         creds["ssh_password"] = password
-    result = await verify_connection(host_entry, get_ssh_config(), creds)
+    result = await verify_connection(host_entry, creds)
     if result["ok"]:
         return HTMLResponse(
             f'<span class="text-green-400 text-xs">&#10003; Connected to {px_host}</span>'
@@ -1300,7 +1299,7 @@ async def setup_add_host(
             "sudo_password": ssh_password.strip(),
         }
 
-    result = await verify_connection(host_entry, get_ssh_config(), creds)
+    result = await verify_connection(host_entry, creds)
     if not result["ok"]:
         return templates.TemplateResponse(
             "partials/setup_ssh_section.html",
@@ -1319,7 +1318,7 @@ async def setup_add_host(
         )
 
     # Connection succeeded — check for Docker before committing
-    found_containers = await discover_containers(host_entry, get_ssh_config(), creds)
+    found_containers = await discover_containers(host_entry, creds)
     container_count = len(found_containers)
 
     if container_count > 0:
@@ -1447,7 +1446,7 @@ async def setup_card_test(
     if auth_method == "password" and ssh_password.strip():
         creds = {"ssh_password": ssh_password.strip()}
     try:
-        result = await verify_connection(host_entry, get_ssh_config(), creds)
+        result = await verify_connection(host_entry, creds)
         if result["ok"]:
             return HTMLResponse(
                 f'<span class="w-1.5 h-1.5 rounded-full bg-green-400 flex-shrink-0" id="dot-{idx}"></span>'
@@ -1713,7 +1712,6 @@ async def setup_containers_page(request: Request) -> HTMLResponse:
     if not admin_exists():
         return RedirectResponse("/setup", status_code=302)
     hosts = get_hosts()
-    ssh_cfg = get_ssh_config()
 
     host_data = []
     pct_exec_count = 0
@@ -1734,7 +1732,7 @@ async def setup_containers_page(request: Request) -> HTMLResponse:
                 pct_exec_count += 1
             continue
         creds = get_credentials(h["slug"])
-        containers = await discover_containers(h, ssh_cfg, creds)
+        containers = await discover_containers(h, creds)
         host_data.append(
             {
                 "id": h["slug"],

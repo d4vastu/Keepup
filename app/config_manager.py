@@ -24,7 +24,7 @@ def slugify(name: str) -> str:
 def load_config() -> dict:
     with _lock:
         if not _CONFIG_PATH.exists():
-            return {"hosts": [], "ssh": {}}
+            return {"hosts": []}
         return yaml.safe_load(_CONFIG_PATH.read_text()) or {}
 
 
@@ -189,12 +189,34 @@ def save_wizard_container_selection(selections: list[str]) -> None:
 
 
 # ---------------------------------------------------------------------------
-# SSH settings
+# SSH settings migration
 # ---------------------------------------------------------------------------
 
 
-def get_ssh_config() -> dict:
-    return load_config().get("ssh", {})
+def migrate_ssh_config() -> int:
+    """One-time migration: copy global SSH defaults into per-host records, then remove them.
+
+    Returns the number of hosts that were left without an SSH user (need manual
+    assignment before they can be checked or updated).
+    """
+    config = load_config()
+    ssh = config.get("ssh", {})
+    if not ssh:
+        return sum(1 for h in config.get("hosts", []) if not h.get("user"))
+
+    default_port = ssh.get("default_port")
+    changed = False
+    for host in config.get("hosts", []):
+        if default_port and not host.get("port"):
+            host["port"] = default_port
+            changed = True
+
+    # Remove the deprecated global SSH block entirely.
+    config.pop("ssh", None)
+    if changed or "ssh" in config:
+        save_config(config)
+
+    return sum(1 for h in config.get("hosts", []) if not h.get("user"))
 
 
 # ---------------------------------------------------------------------------
@@ -438,23 +460,6 @@ def reset_config() -> None:
         config.pop(key, None)
     save_config(config)
 
-
-def update_ssh_config(
-    default_user: str,
-    default_port: int,
-    default_key: str,
-    connect_timeout: int,
-    command_timeout: int,
-) -> None:
-    config = load_config()
-    config["ssh"] = {
-        "default_key": default_key,
-        "default_user": default_user,
-        "default_port": default_port,
-        "connect_timeout": connect_timeout,
-        "command_timeout": command_timeout,
-    }
-    save_config(config)
 
 
 def get_update_check_config() -> dict:

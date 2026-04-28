@@ -37,7 +37,6 @@ from .config_manager import (
     get_proxmox_config,
     get_pushover_config,
     get_ssl_config,
-    get_ssh_config,
     get_timezone,
     reset_config,
     save_dockerhub_config,
@@ -47,9 +46,6 @@ from .config_manager import (
     save_timezone,
     set_docker_monitoring,
     update_host,
-    update_ssh_config,
-    get_update_check_config,
-    save_update_check_config,
 )
 from .proxmox_client import ProxmoxClient
 from .credentials import (
@@ -145,7 +141,10 @@ def _integration_status() -> dict:
 
 
 def _hosts_with_status() -> list[dict]:
-    return [{**h, **credential_status(h["slug"])} for h in get_hosts()]
+    return [
+        {**h, **credential_status(h["slug"]), "needs_ssh_user": not h.get("user")}
+        for h in get_hosts()
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -441,17 +440,8 @@ async def admin_hosts_page(request: Request) -> HTMLResponse:
 
 @router.get("/ssh", response_class=HTMLResponse)
 async def admin_ssh_page(request: Request) -> HTMLResponse:
-    from .__version__ import APP_VERSION
-
-    return templates.TemplateResponse(
-        "admin_ssh.html",
-        {
-            "request": request,
-            "ssh": get_ssh_config(),
-            "update_check": get_update_check_config(),
-            "app_version": APP_VERSION,
-        },
-    )
+    from fastapi import HTTPException
+    raise HTTPException(status_code=404)
 
 
 # ---------------------------------------------------------------------------
@@ -470,10 +460,12 @@ async def admin_add_host(
     try:
         if not name.strip() or not host.strip():
             raise ValueError("Name and IP / hostname are required.")
+        if not user.strip():
+            raise ValueError("SSH user is required. Enter a non-root user account.")
         slug = add_host(
             name=name.strip(),
             host=host.strip(),
-            user=user.strip() or None,
+            user=user.strip(),
             port=int(port) if port.strip() else None,
         )
     except Exception as exc:
@@ -509,12 +501,15 @@ async def admin_update_host(
     user: str = Form(""),
     port: str = Form(""),
 ) -> HTMLResponse:
+    root_warning = user.strip() == "root"
     try:
+        if not user.strip():
+            raise ValueError("SSH user is required. Enter a non-root user account.")
         new_slug = update_host(
             slug=slug,
             name=name.strip(),
             host=host.strip(),
-            user=user.strip() or None,
+            user=user.strip(),
             port=int(port) if port.strip() else None,
         )
         rename_credentials(slug, new_slug)
@@ -525,7 +520,7 @@ async def admin_update_host(
         )
     return templates.TemplateResponse(
         "partials/admin_hosts.html",
-        {"request": request, "hosts": _hosts_with_status()},
+        {"request": request, "hosts": _hosts_with_status(), "root_warning": root_warning},
     )
 
 
@@ -619,7 +614,7 @@ async def admin_test_host(request: Request, slug: str) -> HTMLResponse:
         return HTMLResponse("<span class='text-red-400 text-xs'>Host not found</span>")
     from .credentials import get_credentials
 
-    result = await verify_connection(host, get_ssh_config(), get_credentials(slug))
+    result = await verify_connection(host, get_credentials(slug))
     return templates.TemplateResponse(
         "partials/admin_host_test_result.html",
         {"request": request, "slug": slug, "result": result},
@@ -961,47 +956,9 @@ async def admin_auto_update_history(request: Request) -> HTMLResponse:
 
 
 @router.put("/ssh", response_class=HTMLResponse)
-async def admin_update_ssh(
-    request: Request,
-    default_user: str = Form("root"),
-    default_port: str = Form("22"),
-    default_key: str = Form("/app/keys/id_ed25519"),
-    connect_timeout: str = Form("15"),
-    command_timeout: str = Form("600"),
-    update_check_cache_ttl: str = Form("15"),
-) -> HTMLResponse:
-    try:
-        update_ssh_config(
-            default_user=default_user.strip(),
-            default_port=int(default_port),
-            default_key=default_key.strip(),
-            connect_timeout=int(connect_timeout),
-            command_timeout=int(command_timeout),
-        )
-        ttl_int = int(update_check_cache_ttl)
-        if ttl_int < 0:
-            raise ValueError("Cache TTL must be 0 or greater.")
-        save_update_check_config(cache_ttl_minutes=ttl_int)
-        saved = True
-    except Exception as exc:
-        return templates.TemplateResponse(
-            "partials/admin_ssh.html",
-            {
-                "request": request,
-                "ssh": get_ssh_config(),
-                "update_check": get_update_check_config(),
-                "error": str(exc),
-            },
-        )
-    return templates.TemplateResponse(
-        "partials/admin_ssh.html",
-        {
-            "request": request,
-            "ssh": get_ssh_config(),
-            "update_check": get_update_check_config(),
-            "saved": saved,
-        },
-    )
+async def admin_update_ssh(request: Request) -> HTMLResponse:
+    from fastapi import HTTPException
+    raise HTTPException(status_code=404)
 
 
 # ---------------------------------------------------------------------------

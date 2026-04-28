@@ -53,9 +53,9 @@ def test_get_hosts_partial_lists_hosts(client):
     assert "192.168.1.10" in response.text
 
 
-def test_admin_ssh_page_returns_200(client):
+def test_admin_ssh_page_returns_404(client):
     response = client.get("/admin/ssh")
-    assert response.status_code == 200
+    assert response.status_code == 404
 
 
 def test_admin_https_page_returns_200(client):
@@ -104,7 +104,7 @@ def test_admin_about_page_handles_github_error(client):
 
 def test_add_host_minimal(client, config_file):
     response = client.post(
-        "/admin/hosts", data={"name": "New Host", "host": "10.0.0.99"}
+        "/admin/hosts", data={"name": "New Host", "host": "10.0.0.99", "user": "ubuntu"}
     )
     assert response.status_code == 200
     assert "New Host" in response.text
@@ -184,6 +184,7 @@ def test_update_host(client, config_file):
         data={
             "name": "Renamed Host",
             "host": "192.168.1.10",
+            "user": "ubuntu",
         },
     )
     assert response.status_code == 200
@@ -202,7 +203,8 @@ def test_update_host_renames_credentials(client, data_dir):
     save_credentials("test-host", ssh_password="pass123")
 
     client.put(
-        "/admin/hosts/test-host", data={"name": "Renamed Host", "host": "192.168.1.10"}
+        "/admin/hosts/test-host",
+        data={"name": "Renamed Host", "host": "192.168.1.10", "user": "ubuntu"},
     )
 
     assert get_credentials("renamed-host")["ssh_password"] == "pass123"
@@ -343,38 +345,46 @@ def test_post_credentials_password_method_clears_key(client, data_dir):
 # ---------------------------------------------------------------------------
 
 
-def test_update_ssh_settings(client, config_file):
-    response = client.put(
-        "/admin/ssh",
-        data={
-            "default_user": "ubuntu",
-            "default_port": "2222",
-            "default_key": "/app/keys/new_key",
-            "connect_timeout": "30",
-            "command_timeout": "300",
-        },
+def test_put_admin_ssh_returns_404(client):
+    response = client.put("/admin/ssh", data={"default_user": "ubuntu"})
+    assert response.status_code == 404
+
+
+def test_add_host_rejects_empty_user(client):
+    response = client.post(
+        "/admin/hosts",
+        data={"name": "No User Host", "host": "10.0.0.99", "user": "", "port": ""},
     )
     assert response.status_code == 200
-    assert "saved" in response.text.lower()
-
-    raw = yaml.safe_load(config_file.read_text())
-    assert raw["ssh"]["default_user"] == "ubuntu"
-    assert raw["ssh"]["default_port"] == 2222
+    assert "SSH user is required" in response.text
 
 
-def test_update_ssh_invalid_port(client):
-    response = client.put(
-        "/admin/ssh",
-        data={
-            "default_user": "root",
-            "default_port": "not-a-number",
-            "default_key": "/app/keys/id_ed25519",
-            "connect_timeout": "15",
-            "command_timeout": "600",
-        },
+def test_add_host_with_user_succeeds(client):
+    response = client.post(
+        "/admin/hosts",
+        data={"name": "New Host", "host": "10.0.0.99", "user": "ubuntu", "port": ""},
     )
     assert response.status_code == 200
-    assert "error" in response.text.lower() or "invalid" in response.text.lower()
+    assert "New Host" in response.text
+
+
+def test_update_host_rejects_empty_user(client):
+    response = client.put(
+        "/admin/hosts/test-host",
+        data={"name": "Test Host", "host": "192.168.1.10", "user": "", "port": ""},
+    )
+    assert response.status_code == 200
+    assert "SSH user is required" in response.text
+
+
+def test_update_host_root_shows_warning(client):
+    response = client.put(
+        "/admin/hosts/custom-user-host",
+        data={"name": "Custom User Host", "host": "192.168.1.20", "user": "root", "port": "2222"},
+    )
+    assert response.status_code == 200
+    assert "root" in response.text.lower()
+    assert "not recommended" in response.text.lower()
 
 
 def test_delete_host_error_shows_message(client, monkeypatch):
@@ -395,7 +405,7 @@ def test_update_host_error_shows_message(client, monkeypatch):
         a, "update_host", lambda **kw: (_ for _ in ()).throw(Exception("write error"))
     )
     response = client.put(
-        "/admin/hosts/test-host", data={"name": "X", "host": "1.2.3.4"}
+        "/admin/hosts/test-host", data={"name": "X", "host": "1.2.3.4", "user": "ubuntu"}
     )
     assert response.status_code == 200
     assert "write error" in response.text

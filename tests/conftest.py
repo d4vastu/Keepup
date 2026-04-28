@@ -12,15 +12,8 @@ def reset_circuit_breakers():
     hc._breakers.clear()
 
 SAMPLE_CONFIG = {
-    "ssh": {
-        "default_key": "/app/keys/id_ed25519",
-        "default_user": "root",
-        "default_port": 22,
-        "connect_timeout": 15,
-        "command_timeout": 600,
-    },
     "hosts": [
-        {"name": "Test Host", "host": "192.168.1.10"},
+        {"name": "Test Host", "host": "192.168.1.10", "user": "root"},
         {
             "name": "Custom User Host",
             "host": "192.168.1.20",

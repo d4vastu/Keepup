@@ -27,7 +27,7 @@ from .notifications import get_unread_count, get_notifications, mark_all_read
 from .auto_update_scheduler import apply_all_schedules, scheduler
 from .auto_updates_router import router as auto_updates_router
 from .backend_loader import get_backends, get_dockerhub_creds, reload_backends
-from .config_manager import get_hosts, get_ssh_config, get_pbs_config, get_proxmox_config
+from .config_manager import get_hosts, get_pbs_config, get_proxmox_config, migrate_ssh_config
 from .credentials import get_credentials, get_integration_credentials, save_sudo_password
 from .ssh_client import (
     _needs_sudo,
@@ -338,6 +338,11 @@ def _check_version_notification() -> None:
 @app.on_event("startup")
 async def _startup() -> None:
     _check_version_notification()
+    missing = migrate_ssh_config()
+    if missing:
+        log.warning(
+            "%d host(s) have no SSH user configured — set it via Admin › Hosts.", missing
+        )
     await reload_backends()
     apply_all_schedules()
     scheduler.start()
@@ -444,7 +449,7 @@ def _log_line_items(lines: list[str]) -> list[dict]:
 async def _job_run_host_update(job_id: str, host: dict, creds: dict) -> None:
     name = host.get("name", host.get("host", "unknown"))
     try:
-        lines = await run_host_update_buffered(host, get_ssh_config(), creds)
+        lines = await run_host_update_buffered(host, creds)
         _jobs[job_id]["lines"] = lines
         _jobs[job_id]["status"] = "done"
         log.info("OS upgrade complete on %s", name)
@@ -459,9 +464,8 @@ async def _job_run_host_update(job_id: str, host: dict, creds: dict) -> None:
 async def _job_run_proxmox_node_upgrade(job_id: str, slug: str) -> None:
     try:
         host = _get_host(slug)
-        ssh_cfg = get_ssh_config()
         creds = get_credentials(slug)
-        lines = await run_host_update_buffered(host, ssh_cfg, creds)
+        lines = await run_host_update_buffered(host, creds)
         _jobs[job_id]["lines"] = lines
         _jobs[job_id]["status"] = "done"
         log.info("Proxmox node upgrade complete: %s", slug)
@@ -485,7 +489,7 @@ async def _job_run_lxc_upgrade(
             "key_path": px_creds.get("ssh_key_path", ""),
             "ssh_password": px_creds.get("ssh_password", ""),
         }
-        lines = await client.upgrade_lxc(node, vmid, ssh_host, get_ssh_config(), ssh_creds)
+        lines = await client.upgrade_lxc(node, vmid, ssh_host, ssh_creds)
         _jobs[job_id]["lines"] = lines
         _jobs[job_id]["status"] = "done"
         log.info("LXC upgrade complete: %s/%s", node, vmid)
@@ -499,7 +503,7 @@ async def _job_run_lxc_upgrade(
 
 async def _job_run_host_restart(job_id: str, host: dict, creds: dict) -> None:
     try:
-        lines = await reboot_host(host, get_ssh_config(), creds)
+        lines = await reboot_host(host, creds)
         _jobs[job_id]["lines"] = lines
         _jobs[job_id]["status"] = "done"
     except Exception as exc:
@@ -703,7 +707,7 @@ async def host_check(request: Request, slug: str) -> HTMLResponse:
                 ssh_creds["ssh_password"] = ssh_password
             client = await _proxmox_client_from_config()
             packages = await client.get_lxc_updates(
-                proxmox_node, proxmox_vmid, px_host, get_ssh_config(), ssh_creds
+                proxmox_node, proxmox_vmid, px_host, ssh_creds
             )
             log.info(
                 "Check complete: %s (%s) — %d update(s) via pct exec",
@@ -753,7 +757,7 @@ async def host_check(request: Request, slug: str) -> HTMLResponse:
             )
         log.info("Checking %s (%s) via SSH", host_name, slug)
         creds = get_credentials(slug)
-        result = await check_host_updates(host, get_ssh_config(), creds)
+        result = await check_host_updates(host, creds)
         log.info(
             "Check complete: %s (%s) — %d update(s) via SSH",
             host_name, slug, len(result["packages"]),
@@ -835,7 +839,7 @@ async def host_update(
 
         creds = get_credentials(slug)
 
-        if _needs_sudo(host, get_ssh_config()):
+        if _needs_sudo(host):
             effective_sudo = sudo_password.strip() or creds.get("sudo_password", "")
             if not effective_sudo:
                 return templates.TemplateResponse(
@@ -950,7 +954,7 @@ async def host_restart(
 
         creds = get_credentials(slug)
 
-        if _needs_sudo(host, get_ssh_config()):
+        if _needs_sudo(host):
             effective_sudo = sudo_password.strip() or creds.get("sudo_password", "")
             if not effective_sudo:
                 return templates.TemplateResponse(

@@ -200,7 +200,7 @@ async def test_discover_containers_parses_docker_output():
     stdout = '{"name":"plex","image":"linuxserver/plex:latest"}\n{"name":"nginx","image":"nginx:alpine"}\n'
     conn = _make_conn(stdout=stdout)
     with patch("app.ssh_client.asyncssh.connect", new=AsyncMock(return_value=conn)):
-        result = await discover_containers({"name": "test", "host": "1.2.3.4"}, {})
+        result = await discover_containers({"name": "test", "host": "1.2.3.4", "user": "root"}, {})
 
     assert len(result) == 2
     assert result[0]["name"] == "plex"
@@ -214,7 +214,7 @@ async def test_discover_containers_returns_empty_on_error():
     with patch(
         "app.ssh_client.asyncssh.connect", side_effect=Exception("connect failed")
     ):
-        result = await discover_containers({"name": "test", "host": "1.2.3.4"}, {})
+        result = await discover_containers({"name": "test", "host": "1.2.3.4", "user": "root"}, {})
 
     assert result == []
 
@@ -225,6 +225,6 @@ async def test_discover_containers_handles_empty_output():
 
     conn = _make_conn(stdout="")
     with patch("app.ssh_client.asyncssh.connect", new=AsyncMock(return_value=conn)):
-        result = await discover_containers({"name": "test", "host": "1.2.3.4"}, {})
+        result = await discover_containers({"name": "test", "host": "1.2.3.4", "user": "root"}, {})
 
     assert result == []

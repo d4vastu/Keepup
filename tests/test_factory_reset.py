@@ -86,14 +86,12 @@ def test_reset_config_clears_stack_auto_update(config_file):
     assert "stack_auto_update" not in config
 
 
-def test_reset_config_preserves_ssh(config_file):
+def test_reset_config_has_no_ssh_block(config_file):
     from app.config_manager import reset_config, load_config
 
-    config = load_config()
-    original_ssh = config.get("ssh", {})
     reset_config()
     config = load_config()
-    assert config.get("ssh") == original_ssh
+    assert "ssh" not in config
 
 
 # ---------------------------------------------------------------------------
