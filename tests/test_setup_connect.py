@@ -40,7 +40,7 @@ def _mock_httpx(status=200, json_data=None, exc=None):
     ctx.__aenter__ = AsyncMock(return_value=inner)
     ctx.__aexit__ = AsyncMock(return_value=None)
 
-    return patch("app.auth_router.httpx.AsyncClient", return_value=ctx)
+    return patch("app.auth_router.make_client", return_value=ctx)
 
 
 # ---------------------------------------------------------------------------

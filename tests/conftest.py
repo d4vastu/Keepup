@@ -2,6 +2,15 @@ import pytest
 import yaml
 from fastapi.testclient import TestClient
 
+
+@pytest.fixture(autouse=True)
+def reset_circuit_breakers():
+    """Clear per-host circuit breaker state between tests to prevent bleed-over."""
+    import app.httpx_client as hc
+    hc._breakers.clear()
+    yield
+    hc._breakers.clear()
+
 SAMPLE_CONFIG = {
     "ssh": {
         "default_key": "/app/keys/id_ed25519",

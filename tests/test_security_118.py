@@ -8,9 +8,7 @@ Covers:
   M6 – session_version invalidates sessions on MFA/password changes
 """
 
-import time
 from pathlib import Path
-from unittest.mock import patch
 
 
 # ---------------------------------------------------------------------------

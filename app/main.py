@@ -36,6 +36,7 @@ from .ssh_client import (
     run_host_update_buffered,
 )
 from .__version__ import APP_VERSION
+from .httpx_client import make_client
 from .self_identity import is_self_on_proxmox_node
 from .ssl_manager import ssl_enabled
 from .templates_env import make_templates
@@ -54,9 +55,7 @@ _VERSION_CACHE_TTL = 3600
 async def _fetch_latest_version() -> tuple[str | None, str | None]:
     """Return (latest_tag, release_url) or (None, None) on failure."""
     try:
-        import httpx
-
-        async with httpx.AsyncClient(timeout=5) as c:
+        async with make_client() as c:
             resp = await c.get(
                 f"https://api.github.com/repos/{_GITHUB_REPO}/releases/latest",
                 headers={"Accept": "application/vnd.github+json"},
@@ -172,6 +171,38 @@ class RequestIDMiddleware(BaseHTTPMiddleware):
         return await call_next(request)
 
 
+_ACCESS_LOG = logging.getLogger("keepup.access")
+_REDACT_HEADERS = frozenset({"cookie", "authorization", "x-csrf-token"})
+
+
+def _safe_headers(headers) -> dict:
+    return {k: "[redacted]" if k.lower() in _REDACT_HEADERS else v for k, v in headers.items()}
+
+
+class AccessLogMiddleware(BaseHTTPMiddleware):
+    """Log every request with method, path, status, duration, and request_id.
+
+    Sensitive request headers (Cookie, Authorization, X-CSRF-Token) are redacted.
+    """
+
+    async def dispatch(self, request: Request, call_next):
+        start = time.perf_counter()
+        response = await call_next(request)
+        duration_ms = round((time.perf_counter() - start) * 1000)
+        request_id = getattr(request.state, "request_id", "-")
+        safe_hdrs = _safe_headers(request.headers)
+        _ACCESS_LOG.info(
+            "method=%s path=%s status=%d duration_ms=%d request_id=%s headers=%s",
+            request.method,
+            request.url.path,
+            response.status_code,
+            duration_ms,
+            request_id,
+            safe_hdrs,
+        )
+        return response
+
+
 # ---------------------------------------------------------------------------
 # App setup
 # ---------------------------------------------------------------------------
@@ -189,12 +220,16 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 # middleware wraps all the others (outermost = first in request chain).
 #
 # Resulting request chain (outermost → innermost):
-#   ConditionalHTTPSRedirect → SecurityHeaders → SlowAPI → Session → CSRF → Auth → RequestID → routes
+#   ConditionalHTTPSRedirect → SecurityHeaders → SlowAPI → Session → CSRF → Auth → AdminRateLimit → AccessLog → RequestID → routes
 # ---------------------------------------------------------------------------
 
 # RequestID: stamp every request with a unique ID for log correlation.
 # Registered first so it runs innermost — just before the route handler.
 app.add_middleware(RequestIDMiddleware)
+
+# Access log: runs just outside RequestID so request_id is already set when
+# call_next returns; logs method, path, status, duration, and redacted headers.
+app.add_middleware(AccessLogMiddleware)
 
 # Admin rate limit: 30 mutating requests per IP per minute on /admin/* routes.
 app.add_middleware(AdminPostRateLimitMiddleware)
@@ -397,6 +432,10 @@ def _format_log_lines(lines: list[str]) -> str:
     return "\n".join(parts)
 
 
+def _log_line_items(lines: list[str]) -> list[dict]:
+    return [{"cls": _classify_log_line(line), "text": line} for line in lines]
+
+
 # ---------------------------------------------------------------------------
 # Background job runners
 # ---------------------------------------------------------------------------
@@ -570,7 +609,6 @@ async def dashboard_redirect(request: Request) -> HTMLResponse:
 @app.get("/api/integration/pbs/status", response_class=HTMLResponse)
 async def pbs_status(request: Request) -> HTMLResponse:
     """Return a small status card for PBS — version and connectivity."""
-    import httpx
     import logging
 
     log = logging.getLogger(__name__)
@@ -592,7 +630,7 @@ async def pbs_status(request: Request) -> HTMLResponse:
         return HTMLResponse("")
 
     try:
-        async with httpx.AsyncClient(verify=verify_ssl, timeout=8) as c:
+        async with make_client(verify=verify_ssl) as c:
             resp = await c.get(f"{url}/api2/json/version", headers={"Authorization": auth})
             resp.raise_for_status()
             ver = resp.json().get("data", {}).get("version", "unknown")
@@ -1062,7 +1100,7 @@ async def job_modal(request: Request, job_id: str) -> HTMLResponse:
             "request": request,
             "job_id": job_id,
             "job": job,
-            "log_html": _format_log_lines(job.get("lines", [])),
+            "log_lines": _log_line_items(job.get("lines", [])),
         },
     )
 

@@ -5,7 +5,6 @@ from pathlib import Path
 from urllib.parse import urlparse
 from zoneinfo import available_timezones
 
-import httpx
 import pyotp
 from fastapi import APIRouter, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -67,6 +66,7 @@ from .audit import audit
 from .proxmox_client import ProxmoxClient
 from .ssh_client import discover_containers, verify_connection
 from .backend_loader import reload_backends
+from .httpx_client import make_client
 from .templates_env import make_templates
 
 router = APIRouter()
@@ -816,7 +816,7 @@ async def setup_test_pbs(
         )
     # PBS auth: PBSAPIToken=<tokenid>:<secret>  (colon separator, not equals)
     try:
-        async with httpx.AsyncClient(verify=verify_ssl, timeout=10) as c:
+        async with make_client(verify=verify_ssl) as c:
             resp = await c.get(
                 f"{url}/api2/json/version",
                 headers={"Authorization": f"PBSAPIToken={token_id}:{secret}"},
@@ -886,7 +886,7 @@ async def setup_test_opnsense(
             '<span class="text-amber-400 text-sm">Enter URL, API key, and API secret first.</span>'
         )
     try:
-        async with httpx.AsyncClient(verify=verify_ssl, timeout=10) as c:
+        async with make_client(verify=verify_ssl) as c:
             resp = await c.get(
                 f"{url}/api/core/firmware/info",
                 auth=(key, secret),
@@ -946,7 +946,7 @@ async def setup_test_pfsense(
             '<span class="text-amber-400 text-sm">Enter a URL and API key first.</span>'
         )
     try:
-        async with httpx.AsyncClient(verify=verify_ssl, timeout=10) as c:
+        async with make_client(verify=verify_ssl) as c:
             resp = await c.get(
                 f"{url}/api/v1/system/version",
                 headers={"Authorization": key},
@@ -996,7 +996,7 @@ async def setup_test_homeassistant(
             '<span class="text-amber-400 text-sm">Enter a URL and access token first.</span>'
         )
     try:
-        async with httpx.AsyncClient(verify=False, timeout=10) as c:
+        async with make_client(verify=False) as c:
             resp = await c.get(
                 f"{url}/api/",
                 headers={"Authorization": f"Bearer {token}"},
@@ -1107,6 +1107,11 @@ async def login_submit(
 
     _clear_attempts(ip)
     audit(request, "auth.login.success", actor=username.strip() or "unknown")
+
+    # Clear any pre-login session data before writing authenticated state to
+    # prevent session fixation: an attacker who obtained a session cookie before
+    # login cannot reuse it after login because the payload changes on clear().
+    request.session.clear()
     request.session["authenticated"] = True
     request.session["session_version"] = get_session_version()
     if remember_me == "on":
@@ -1804,7 +1809,7 @@ async def setup_test_pushover(
             '<span class="text-amber-400 text-sm">Enter an app token and user key first.</span>'
         )
     try:
-        async with httpx.AsyncClient(timeout=10) as c:
+        async with make_client() as c:
             resp = await c.post(
                 "https://api.pushover.net/1/messages.json",
                 data={

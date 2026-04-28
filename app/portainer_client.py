@@ -11,8 +11,8 @@ Handles:
 import asyncio
 import logging
 
-import httpx
 
+from .httpx_client import make_breaker_client
 from .registry_client import extract_local_digest, check_image_update
 from .self_identity import get_self_container_id
 
@@ -25,13 +25,8 @@ class PortainerClient:
         self.headers = {"X-API-Key": api_key}
         self.verify_ssl = verify_ssl
 
-    def _client(self) -> httpx.AsyncClient:
-        return httpx.AsyncClient(
-            base_url=self.base,
-            headers=self.headers,
-            verify=self.verify_ssl,
-            timeout=30,
-        )
+    def _client(self):
+        return make_breaker_client(base_url=self.base, headers=self.headers, verify=self.verify_ssl)
 
     async def get(self, path: str) -> dict | list:
         async with self._client() as c:

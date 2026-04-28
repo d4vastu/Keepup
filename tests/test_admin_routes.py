@@ -79,7 +79,7 @@ def test_admin_about_page_returns_200(client):
     mock_client.__aenter__ = AsyncMock(return_value=mock_client)
     mock_client.__aexit__ = AsyncMock(return_value=False)
     mock_client.get = AsyncMock(return_value=mock_resp)
-    with patch("app.admin.httpx.AsyncClient", return_value=mock_client):
+    with patch("app.admin.make_client", return_value=mock_client):
         response = client.get("/admin/about")
     assert response.status_code == 200
     assert "v0.11.0" in response.text
@@ -92,7 +92,7 @@ def test_admin_about_page_handles_github_error(client):
     mock_client.__aenter__ = AsyncMock(return_value=mock_client)
     mock_client.__aexit__ = AsyncMock(return_value=False)
     mock_client.get = AsyncMock(side_effect=Exception("no network"))
-    with patch("app.admin.httpx.AsyncClient", return_value=mock_client):
+    with patch("app.admin.make_client", return_value=mock_client):
         response = client.get("/admin/about")
     assert response.status_code == 200
 

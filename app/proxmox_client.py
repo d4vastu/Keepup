@@ -9,6 +9,8 @@ import logging
 
 import httpx
 
+from .httpx_client import make_breaker_client
+
 log = logging.getLogger(__name__)
 
 
@@ -18,13 +20,8 @@ class ProxmoxClient:
         self.headers = {"Authorization": f"PVEAPIToken={api_token}"}
         self.verify_ssl = verify_ssl
 
-    def _client(self) -> httpx.AsyncClient:
-        return httpx.AsyncClient(
-            base_url=self.base,
-            headers=self.headers,
-            verify=self.verify_ssl,
-            timeout=15,
-        )
+    def _client(self):
+        return make_breaker_client(base_url=self.base, headers=self.headers, verify=self.verify_ssl)
 
     async def get_version(self) -> dict:
         log.info("Proxmox: testing API at %s", self.base)
@@ -376,11 +373,11 @@ class ProxmoxClient:
             await asyncio.sleep(5)
             elapsed += 5
             try:
-                async with httpx.AsyncClient(
+                async with make_breaker_client(
                     base_url=self.base,
                     headers=self.headers,
                     verify=self.verify_ssl,
-                    timeout=5,
+                    timeout=httpx.Timeout(connect=5, read=5, write=5, pool=5),
                 ) as c:
                     r = await c.get(f"/api2/json/nodes/{node}/status")
                     if r.status_code == 200:
