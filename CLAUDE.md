@@ -88,6 +88,18 @@ git push -u origin 'user-story/{id}-{slug}'
 
 ---
 
+## Project Philosophy
+
+Keepup is intentionally designed as a project others can fork and build on. The audience for this repo is not just current contributors — it's a developer skimming the code on GitHub deciding whether to spend time on it. Every commit, comment, and PR should respect that audience.
+
+- **Readability over cleverness.** A function should be understandable on first read by someone who has never seen this codebase. If a block requires tribal knowledge or conversation context, add a one-line comment with the *why*.
+- **Module-level docstrings.** Every `.py` file in `app/` opens with a 1–3 line docstring describing its role. Update it when the role changes.
+- **Document non-obvious contracts.** Public functions get a docstring when their behaviour, constraints, or side effects aren't clear from name and signature alone. Skip docstrings that just restate the code.
+- **PR descriptions are self-contained.** Reference the OP ticket, but write the description so a GitHub reader understands the *what* and the *why* without leaving the page. Include screenshots for user-visible changes.
+- **README is part of the product.** Keep features, screenshots, and setup instructions current. If a change touches what the user sees, the README probably needs an update too.
+
+---
+
 ## Development Rules
 
 - **After cloning**, run `bash scripts/install-hooks.sh` to install the workflow guard pre-commit hook.
