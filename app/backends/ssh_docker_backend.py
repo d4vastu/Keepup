@@ -21,7 +21,7 @@ from urllib.parse import quote, unquote, urlparse
 from ..ssh_client import _connect
 from ..registry_client import check_image_update, extract_local_digest
 from ..credentials import get_credentials, get_integration_credentials
-from ..config_manager import get_hosts, get_ssh_config, get_proxmox_config, get_portainer_config, set_docker_monitoring
+from ..config_manager import get_hosts, get_proxmox_config, get_portainer_config, set_docker_monitoring
 from ..self_identity import get_self_container_id
 
 log = logging.getLogger(__name__)
@@ -121,10 +121,9 @@ class SSHDockerBackend:
         supported. Also routes through `_ssh_params_for` so Proxmox LXC
         hosts are reached via `pct exec`.
         """
-        ssh_cfg = get_ssh_config()
         host_entry, ssh_creds, wrap = self._ssh_params_for(host)
         try:
-            async with await _connect(host_entry, ssh_cfg, ssh_creds) as conn:
+            async with await _connect(host_entry, ssh_creds) as conn:
                 result = await conn.run(
                     wrap("docker ps -a --format '{{json .}}'"), check=False
                 )
@@ -144,9 +143,8 @@ class SSHDockerBackend:
         Also routes through _ssh_params_for so Proxmox LXC hosts are
         reached via pct exec.
         """
-        ssh_cfg = get_ssh_config()
         host_entry, ssh_creds, wrap = self._ssh_params_for(host)
-        async with await _connect(host_entry, ssh_cfg, ssh_creds) as conn:
+        async with await _connect(host_entry, ssh_creds) as conn:
             result = await conn.run(
                 wrap("docker ps -a --format '{{json .}}'"), check=False
             )
@@ -163,8 +161,7 @@ class SSHDockerBackend:
         self, dockerhub_creds: dict | None = None
     ) -> list[dict]:
         hosts = self._docker_hosts()
-        ssh_cfg = get_ssh_config()
-        tasks = [self._containers_for_host(h, ssh_cfg, dockerhub_creds) for h in hosts]
+        tasks = [self._containers_for_host(h, dockerhub_creds) for h in hosts]
         results = await asyncio.gather(*tasks, return_exceptions=True)
         all_entries = []
         for host, r in zip(hosts, results):
@@ -208,7 +205,6 @@ class SSHDockerBackend:
     async def _containers_for_host(
         self,
         host: dict,
-        ssh_cfg: dict,
         dockerhub_creds: dict | None,
     ) -> list[dict]:
         slug = host["slug"]
@@ -230,7 +226,7 @@ class SSHDockerBackend:
         host_entry, ssh_creds, wrap = self._ssh_params_for(host)
         entries = []
 
-        async with await _connect(host_entry, ssh_cfg, ssh_creds) as conn:
+        async with await _connect(host_entry, ssh_creds) as conn:
             ps_result = await conn.run(
                 wrap("docker ps -a --format '{{json .}}'"), check=False
             )
@@ -449,9 +445,8 @@ class SSHDockerBackend:
         slug = host["slug"]
         h = host.get("host", slug)
         log.info("Docker SSH: updating compose project %s on %s", project_name, h)
-        ssh_cfg = get_ssh_config()
         host_entry, ssh_creds, wrap = self._ssh_params_for(host)
-        async with await _connect(host_entry, ssh_cfg, ssh_creds) as conn:
+        async with await _connect(host_entry, ssh_creds) as conn:
             # Safety net: refuse to update a project that contains the self-container.
             self_id = get_self_container_id()
             if self_id:
@@ -481,9 +476,8 @@ class SSHDockerBackend:
         slug = host["slug"]
         h = host.get("host", slug)
         log.info("Docker SSH: updating standalone container %s on %s", container_name, h)
-        ssh_cfg = get_ssh_config()
         host_entry, ssh_creds, wrap = self._ssh_params_for(host)
-        async with await _connect(host_entry, ssh_cfg, ssh_creds) as conn:
+        async with await _connect(host_entry, ssh_creds) as conn:
             inspect_result = await conn.run(
                 wrap(f"docker inspect {shlex.quote(container_name)}"), check=False
             )

@@ -7,6 +7,12 @@
 </div>
 <script>setTimeout(function(){var el=document.getElementById('admin-save-flash');if(el)el.remove();},3000);</script>
 {% endif %}
+{% if root_warning is defined and root_warning %}
+<div id="admin-root-warn-flash" class="mb-3 px-4 py-2 rounded-lg bg-amber-900/30 border border-amber-700 text-amber-300 text-sm">
+  Host saved with SSH user <code class="font-mono">root</code>. Running as root is not recommended — consider creating a dedicated user with passwordless sudo access.
+</div>
+<script>setTimeout(function(){var el=document.getElementById('admin-root-warn-flash');if(el)el.remove();},8000);</script>
+{% endif %}
 
 <!-- Hosts table -->
 <div class="bg-slate-800/50 rounded-xl border border-slate-700 overflow-x-auto mb-4">
@@ -28,7 +34,7 @@
         <td class="px-5 py-3 text-sm font-medium text-slate-200">{{ host.name }}</td>
         <td class="px-5 py-3 text-sm font-mono text-slate-400">{{ host.host }}</td>
         <td class="px-5 py-3 text-sm text-slate-400">
-          {% if host.user %}{{ host.user }}{% else %}<span class="text-slate-600">default</span>{% endif %}
+          {% if host.user %}{{ host.user }}{% else %}<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs bg-amber-900/40 text-amber-400 border border-amber-800">Set SSH user</span>{% endif %}
         </td>
         <td class="px-5 py-3">
           <div class="flex items-center gap-1.5 flex-wrap">
@@ -181,13 +187,13 @@
           class="w-full bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-200 placeholder-slate-600 font-mono focus:outline-none focus:border-blue-500 transition-colors" />
       </div>
       <div>
-        <label class="block text-xs font-medium text-slate-400 mb-1.5">SSH User <span class="text-slate-600 font-normal">(optional)</span></label>
-        <input type="text" name="user" placeholder="Defaults to SSH default user"
+        <label class="block text-xs font-medium text-slate-400 mb-1.5">SSH User <span class="text-red-400">*</span></label>
+        <input type="text" name="user" placeholder="e.g. ubuntu" required
           class="w-full bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-200 placeholder-slate-600 focus:outline-none focus:border-blue-500 transition-colors" />
       </div>
       <div>
         <label class="block text-xs font-medium text-slate-400 mb-1.5">SSH Port <span class="text-slate-600 font-normal">(optional)</span></label>
-        <input type="number" name="port" placeholder="Defaults to SSH default port" min="1" max="65535"
+        <input type="number" name="port" placeholder="22" min="1" max="65535"
           class="w-full bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-200 placeholder-slate-600 focus:outline-none focus:border-blue-500 transition-colors" />
       </div>
     </div>

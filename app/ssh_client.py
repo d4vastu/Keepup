@@ -7,22 +7,31 @@ from .package_managers import DETECT_CMD, get_package_manager
 
 log = logging.getLogger(__name__)
 
+_CONNECT_TIMEOUT = 15
+_COMMAND_TIMEOUT = 600
+_CHECK_TIMEOUT = 60
 
-def _needs_sudo(host: dict, ssh_cfg: dict) -> bool:
-    user = host.get("user") or ssh_cfg.get("default_user", "root")
-    return user != "root"
+
+def _needs_sudo(host: dict) -> bool:
+    return host.get("user", "") != "root"
 
 
 async def _connect(
-    host: dict, ssh_cfg: dict, creds: dict | None = None
+    host: dict, creds: dict | None = None
 ) -> asyncssh.SSHClientConnection:
+    user = (host.get("user") or "").strip()
+    if not user:
+        raise ValueError(
+            f"Host {host.get('name', host['host'])!r} has no SSH user configured. "
+            "Set the SSH user in Admin › Hosts."
+        )
     creds = creds or {}
     kwargs: dict = {
         "host": host["host"],
-        "port": host.get("port", ssh_cfg.get("default_port", 22)),
-        "username": host.get("user", ssh_cfg.get("default_user", "root")),
+        "port": host.get("port", 22),
+        "username": user,
         "known_hosts": None,
-        "connect_timeout": ssh_cfg.get("connect_timeout", 15),
+        "connect_timeout": _CONNECT_TIMEOUT,
     }
     if creds.get("ssh_password"):
         kwargs["password"] = creds["ssh_password"]
@@ -31,7 +40,7 @@ async def _connect(
         key = asyncssh.import_private_key(creds["ssh_key"])
         kwargs["client_keys"] = [key]
     else:
-        key_path = host.get("key", ssh_cfg.get("default_key"))
+        key_path = host.get("key")
         if key_path:
             kwargs["client_keys"] = [key_path]
     return await asyncssh.connect(**kwargs)
@@ -68,14 +77,14 @@ async def _detect_pm(
 
 
 async def verify_connection(
-    host: dict, ssh_cfg: dict, creds: dict | None = None
+    host: dict, creds: dict | None = None
 ) -> dict:
     """Returns {"ok": bool, "message": str}."""
     h = host["host"]
-    user = host.get("user") or ssh_cfg.get("default_user", "root")
+    user = (host.get("user") or "").strip()
     log.info("SSH: testing connection to %s as %s", h, user)
     try:
-        async with await _connect(host, ssh_cfg, creds) as conn:
+        async with await _connect(host, creds) as conn:
             result = await conn.run("echo ok", check=False)
         if result.stdout.strip() == "ok":
             log.info("SSH: %s connected", h)
@@ -89,15 +98,15 @@ async def verify_connection(
 
 
 async def discover_containers(
-    host: dict, ssh_cfg: dict, creds: dict | None = None
+    host: dict, creds: dict | None = None
 ) -> list[dict]:
     """Return list of running containers as [{"id": name, "name": name, "image": image}, ...].
     Returns empty list on error or if Docker not available."""
     creds = creds or {}
-    needs_sudo = _needs_sudo(host, ssh_cfg)
+    needs_sudo = _needs_sudo(host)
     sudo_password = creds.get("sudo_password")
     try:
-        async with await _connect(host, ssh_cfg, creds) as conn:
+        async with await _connect(host, creds) as conn:
             result = await _run(
                 conn,
                 'docker ps --format \'{"name":"{{.Names}}","image":"{{.Image}}"}\'',
@@ -126,14 +135,14 @@ async def discover_containers(
 
 
 async def detect_docker_stacks(
-    host: dict, ssh_cfg: dict, creds: dict | None = None
+    host: dict, creds: dict | None = None
 ) -> int:
     """Return the number of Docker Compose stacks found on the host, or -1 on error."""
     creds = creds or {}
-    needs_sudo = _needs_sudo(host, ssh_cfg)
+    needs_sudo = _needs_sudo(host)
     sudo_password = creds.get("sudo_password")
     try:
-        async with await _connect(host, ssh_cfg, creds) as conn:
+        async with await _connect(host, creds) as conn:
             result = await _run(
                 conn,
                 "docker compose ls --all --format json 2>/dev/null || echo '[]'",
@@ -149,7 +158,7 @@ async def detect_docker_stacks(
 
 
 async def check_host_updates(
-    host: dict, ssh_cfg: dict, creds: dict | None = None
+    host: dict, creds: dict | None = None
 ) -> dict:
     """
     Returns:
@@ -165,24 +174,23 @@ async def check_host_updates(
     h = host["host"]
     log.info("SSH: checking %s for OS updates", h)
     creds = creds or {}
-    use_sudo = _needs_sudo(host, ssh_cfg)
+    use_sudo = _needs_sudo(host)
     sudo_password = creds.get("sudo_password")
 
     cache_key = f"ssh:{host.get('slug') or h}"
     ttl = get_update_check_ttl_minutes()
     refresh = not is_cache_fresh(cache_key, ttl)
 
-    check_timeout = ssh_cfg.get("check_timeout", 60)
-    async with await _connect(host, ssh_cfg, creds) as conn:
+    async with await _connect(host, creds) as conn:
         pm = await asyncio.wait_for(
-            _detect_pm(conn, sudo_password, use_sudo), timeout=check_timeout
+            _detect_pm(conn, sudo_password, use_sudo), timeout=_CHECK_TIMEOUT
         )
         result = await _run(
             conn,
             pm.list_cmd(refresh=refresh),
             sudo_password=sudo_password,
             needs_sudo=use_sudo,
-            timeout=check_timeout,
+            timeout=_CHECK_TIMEOUT,
         )
     if refresh:
         mark_refreshed(cache_key)
@@ -201,14 +209,14 @@ async def check_host_updates(
 
 
 async def reboot_host(
-    host: dict, ssh_cfg: dict, creds: dict | None = None
+    host: dict, creds: dict | None = None
 ) -> list[str]:
     """Schedules an immediate reboot and returns. The SSH connection will drop."""
     creds = creds or {}
-    use_sudo = _needs_sudo(host, ssh_cfg)
+    use_sudo = _needs_sudo(host)
     sudo_password = creds.get("sudo_password")
 
-    async with await _connect(host, ssh_cfg, creds) as conn:
+    async with await _connect(host, creds) as conn:
         await _run(
             conn,
             "nohup sh -c 'sleep 2 && reboot' >/dev/null 2>&1 &",
@@ -219,24 +227,23 @@ async def reboot_host(
 
 
 async def run_host_update_buffered(
-    host: dict, ssh_cfg: dict, creds: dict | None = None
+    host: dict, creds: dict | None = None
 ) -> list[str]:
     """Detects the package manager, runs the appropriate upgrade command, returns all output lines."""
     h = host["host"]
     log.info("SSH: running upgrade on %s", h)
     creds = creds or {}
-    use_sudo = _needs_sudo(host, ssh_cfg)
+    use_sudo = _needs_sudo(host)
     sudo_password = creds.get("sudo_password")
-    timeout = ssh_cfg.get("command_timeout", 600)
 
-    async with await _connect(host, ssh_cfg, creds) as conn:
+    async with await _connect(host, creds) as conn:
         pm = await _detect_pm(conn, sudo_password, use_sudo)
         result = await _run(
             conn,
             pm.upgrade_cmd(),
             sudo_password=sudo_password,
             needs_sudo=use_sudo,
-            timeout=timeout,
+            timeout=_COMMAND_TIMEOUT,
         )
 
     lines = result.stdout.splitlines()

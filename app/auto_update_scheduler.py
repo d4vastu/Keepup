@@ -4,7 +4,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 
 from .auto_update_log import append_log
-from .config_manager import get_all_stack_auto_updates, get_hosts, get_ssh_config
+from .config_manager import get_all_stack_auto_updates, get_hosts
 from .notifications import notify
 from .credentials import get_credentials
 from .ssh_client import (
@@ -56,10 +56,9 @@ async def _run_os_update(slug: str) -> None:
     if not au.get("os_enabled"):
         return
 
-    ssh_cfg = get_ssh_config()
     creds = get_credentials(slug)
 
-    if _needs_sudo(host, ssh_cfg) and not creds.get("sudo_password"):
+    if _needs_sudo(host) and not creds.get("sudo_password"):
         append_log(
             "os",
             slug,
@@ -76,13 +75,13 @@ async def _run_os_update(slug: str) -> None:
         return
 
     try:
-        lines = await run_host_update_buffered(host, ssh_cfg, creds)
+        lines = await run_host_update_buffered(host, creds)
         append_log("os", slug, host["name"], "success", lines)
 
         if au.get("auto_reboot"):
-            check = await check_host_updates(host, ssh_cfg, creds)
+            check = await check_host_updates(host, creds)
             if check.get("reboot_required"):
-                await reboot_host(host, ssh_cfg, creds)
+                await reboot_host(host, creds)
                 append_log(
                     "os",
                     slug,

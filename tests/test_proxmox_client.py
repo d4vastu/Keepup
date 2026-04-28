@@ -255,7 +255,6 @@ async def test_get_lxc_updates_no_credentials_raises(mock_client):
         await mock_client.get_lxc_updates(
             node="pve", vmid=100,
             ssh_host="192.168.1.10",
-            ssh_cfg={},
             ssh_creds={},  # no key_path, no ssh_password
         )
 
@@ -280,7 +279,6 @@ async def test_get_lxc_updates_parses_apt_output(mock_client):
         result = await mock_client.get_lxc_updates(
             node="pve", vmid=100,
             ssh_host="192.168.1.10",
-            ssh_cfg={},
             ssh_creds={"key_path": "/home/user/.ssh/id_rsa"},
         )
 
@@ -311,7 +309,6 @@ async def test_get_lxc_updates_skips_refresh_when_cache_fresh(mock_client):
         await mock_client.get_lxc_updates(
             node="pve", vmid=100,
             ssh_host="192.168.1.10",
-            ssh_cfg={},
             ssh_creds={"key_path": "/home/user/.ssh/id_rsa"},
         )
 
@@ -333,7 +330,6 @@ async def test_get_lxc_updates_no_packages(mock_client):
         result = await mock_client.get_lxc_updates(
             node="pve", vmid=100,
             ssh_host="192.168.1.10",
-            ssh_cfg={},
             ssh_creds={"ssh_password": "secret"},
         )
 
@@ -427,7 +423,6 @@ async def test_upgrade_lxc_returns_output_lines(mock_client):
     ):
         result = await mock_client.upgrade_lxc(
             "pve", 101, "192.168.1.10",
-            {},
             {"key_path": "/root/.ssh/id_rsa"},
         )
 
@@ -439,7 +434,7 @@ async def test_upgrade_lxc_returns_output_lines(mock_client):
 async def test_upgrade_lxc_raises_without_credentials(mock_client):
     """upgrade_lxc raises RuntimeError when no SSH credentials supplied."""
     with pytest.raises(RuntimeError, match="No SSH credentials"):
-        await mock_client.upgrade_lxc("pve", 101, "192.168.1.10", {}, {})
+        await mock_client.upgrade_lxc("pve", 101, "192.168.1.10", {})
 
 
 @pytest.mark.asyncio
@@ -456,7 +451,7 @@ async def test_upgrade_lxc_filters_blank_lines(mock_client):
         patch("app.ssh_client._run", new=AsyncMock(return_value=run_result)),
     ):
         result = await mock_client.upgrade_lxc(
-            "pve", 101, "192.168.1.10", {}, {"key_path": "/root/.ssh/id_rsa"}
+            "pve", 101, "192.168.1.10", {"key_path": "/root/.ssh/id_rsa"}
         )
 
     assert result == ["line1", "line2"]

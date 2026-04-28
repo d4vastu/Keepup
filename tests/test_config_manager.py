@@ -5,10 +5,9 @@ from app.config_manager import (
     delete_host,
     derive_api_user,
     get_hosts,
-    get_ssh_config,
+    migrate_ssh_config,
     slugify,
     update_host,
-    update_ssh_config,
 )
 
 
@@ -105,7 +104,7 @@ def test_load_config_missing_file_returns_defaults(tmp_path, monkeypatch):
 
     monkeypatch.setattr(cm, "_CONFIG_PATH", tmp_path / "nonexistent.yml")
     config = cm.load_config()
-    assert config == {"hosts": [], "ssh": {}}
+    assert config == {"hosts": []}
 
 
 # ---------------------------------------------------------------------------
@@ -228,36 +227,80 @@ def test_delete_host_unknown_slug_is_noop(config_file):
 
 
 # ---------------------------------------------------------------------------
-# SSH config
+# migrate_ssh_config
 # ---------------------------------------------------------------------------
 
 
-def test_get_ssh_config_returns_defaults(config_file):
-    ssh = get_ssh_config()
-    assert ssh["default_user"] == "root"
-    assert ssh["default_port"] == 22
-    assert ssh["connect_timeout"] == 15
-
-
-def test_update_ssh_config_persists(config_file):
-    update_ssh_config(
-        default_user="ubuntu",
-        default_port=2222,
-        default_key="/app/keys/new_key",
-        connect_timeout=30,
-        command_timeout=300,
-    )
-    ssh = get_ssh_config()
-    assert ssh["default_user"] == "ubuntu"
-    assert ssh["default_port"] == 2222
-    assert ssh["connect_timeout"] == 30
-    assert ssh["command_timeout"] == 300
-
-
-def test_update_ssh_config_writes_to_file(config_file):
-    update_ssh_config("admin", 22, "/app/keys/id_ed25519", 10, 120)
+def test_migrate_removes_ssh_block(config_file):
+    """After migration the top-level ssh key must be gone from the file."""
+    migrate_ssh_config()
     raw = yaml.safe_load(config_file.read_text())
-    assert raw["ssh"]["default_user"] == "admin"
+    assert "ssh" not in raw
+
+
+def test_migrate_copies_default_port_to_hosts_without_port(config_file):
+    """Hosts that had no per-host port should inherit the old global default_port."""
+    import app.config_manager as cm
+    import yaml
+
+    # Write a config where default_port=2222 and one host lacks a port
+    cfg = {
+        "ssh": {"default_port": 2222},
+        "hosts": [
+            {"name": "A", "host": "1.1.1.1", "slug": "a"},
+            {"name": "B", "host": "2.2.2.2", "slug": "b", "port": 22},
+        ],
+    }
+    cm._CONFIG_PATH.write_text(yaml.dump(cfg))
+    migrate_ssh_config()
+    hosts = {h["slug"]: h for h in cm.get_hosts()}
+    assert hosts["a"]["port"] == 2222
+    assert hosts["b"]["port"] == 22
+
+
+def test_migrate_does_not_overwrite_existing_port(config_file):
+    """Per-host port must survive migration unchanged."""
+    import app.config_manager as cm
+    import yaml
+
+    cfg = {
+        "ssh": {"default_port": 9999},
+        "hosts": [{"name": "A", "host": "1.1.1.1", "slug": "a", "port": 2222}],
+    }
+    cm._CONFIG_PATH.write_text(yaml.dump(cfg))
+    migrate_ssh_config()
+    hosts = cm.get_hosts()
+    assert hosts[0]["port"] == 2222
+
+
+def test_migrate_returns_count_of_hosts_missing_user(config_file):
+    """Return value = number of hosts that still have no SSH user after migration."""
+    import app.config_manager as cm
+    import yaml
+
+    cfg = {
+        "ssh": {},
+        "hosts": [
+            {"name": "A", "host": "1.1.1.1", "slug": "a", "user": "ubuntu"},
+            {"name": "B", "host": "2.2.2.2", "slug": "b"},
+        ],
+    }
+    cm._CONFIG_PATH.write_text(yaml.dump(cfg))
+    missing = migrate_ssh_config()
+    assert missing == 1
+
+
+def test_migrate_no_op_when_no_ssh_block(config_file):
+    """If there is no ssh block the function is idempotent."""
+    import app.config_manager as cm
+    import yaml
+
+    cfg = {"hosts": [{"name": "A", "host": "1.1.1.1", "slug": "a", "user": "ubuntu"}]}
+    cm._CONFIG_PATH.write_text(yaml.dump(cfg))
+    missing = migrate_ssh_config()
+    assert missing == 0
+    raw = yaml.safe_load(cm._CONFIG_PATH.read_text())
+    assert "ssh" not in raw
 
 
 # ---------------------------------------------------------------------------

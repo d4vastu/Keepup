@@ -186,7 +186,7 @@ def test_setup_add_host_passes_sudo_password_to_discovery(
                 "ssh_password": "secret",
             },
         )
-    creds_passed = discover_mock.call_args[0][2]
+    creds_passed = discover_mock.call_args[0][1]
     assert creds_passed.get("sudo_password") == "secret"
 
 

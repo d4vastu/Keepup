@@ -69,7 +69,7 @@ class ProxmoxClient:
         return ""
 
     async def get_lxc_updates(
-        self, node: str, vmid: int, ssh_host: str, ssh_cfg: dict, ssh_creds: dict
+        self, node: str, vmid: int, ssh_host: str, ssh_creds: dict
     ) -> list[dict]:
         """
         Return available apt packages for an LXC container by running
@@ -108,7 +108,7 @@ class ProxmoxClient:
         else:
             cmd = f"pct exec {vmid} -- apt list -qq --upgradable 2>/dev/null"
 
-        async with await _connect(host_entry, ssh_cfg, ssh_creds) as conn:
+        async with await _connect(host_entry, ssh_creds) as conn:
             result = await _run(conn, cmd, sudo_password=None, needs_sudo=False, timeout=90)
         if refresh:
             mark_refreshed(cache_key)
@@ -157,7 +157,7 @@ class ProxmoxClient:
         return packages
 
     async def upgrade_lxc(
-        self, node: str, vmid: int, ssh_host: str, ssh_cfg: dict, ssh_creds: dict
+        self, node: str, vmid: int, ssh_host: str, ssh_creds: dict
     ) -> list[str]:
         """Run apt-get upgrade inside an LXC container via pct exec over SSH."""
         from .ssh_client import _connect, _run
@@ -176,7 +176,7 @@ class ProxmoxClient:
             "port": ssh_creds.get("port", 22),
         }
         cmd = f"pct exec {vmid} -- apt-get upgrade -y 2>&1"
-        async with await _connect(host_entry, ssh_cfg, ssh_creds) as conn:
+        async with await _connect(host_entry, ssh_creds) as conn:
             result = await _run(conn, cmd, sudo_password=None, needs_sudo=False, timeout=300)
 
         lines = [ln for ln in result.stdout.splitlines() if ln.strip()]
