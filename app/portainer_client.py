@@ -14,7 +14,7 @@ import logging
 import httpx
 
 from .registry_client import extract_local_digest, check_image_update
-from .self_identity import get_self_container_id
+from .self_identity import get_self_container_id, get_self_container_name
 
 log = logging.getLogger(__name__)
 
@@ -72,7 +72,8 @@ class PortainerClient:
         """Pull latest images and redeploy the stack."""
         # Safety net: refuse to redeploy a stack that contains the self-container.
         self_id = get_self_container_id()
-        if self_id:
+        self_name = get_self_container_name()
+        if self_id or self_name:
             try:
                 containers = await self._get_containers(endpoint_id)
                 stack_meta = await self.get(f"/api/stacks/{stack_id}")
@@ -82,7 +83,14 @@ class PortainerClient:
                     if c.get("Labels", {}).get("com.docker.compose.project", "").lower()
                     == stack_name_lower
                 ]
-                if any((c.get("Id", "") or "")[:12] == self_id for c in stack_containers):
+                id_match = self_id and any(
+                    (c.get("Id", "") or "")[:12] == self_id for c in stack_containers
+                )
+                name_match = self_name and any(
+                    self_name in [n.lstrip("/") for n in c.get("Names", [])]
+                    for c in stack_containers
+                )
+                if id_match or name_match:
                     raise ValueError(
                         f"Self-update refused: Keepup is in Portainer stack {stack_id}"
                     )
@@ -155,6 +163,7 @@ class PortainerClient:
                 endpoint_containers[ep["Id"]] = []
 
         self_id = get_self_container_id()
+        self_name = get_self_container_name()
 
         results = []
         for stack in stacks:
@@ -175,9 +184,15 @@ class PortainerClient:
             ]
 
             # Skip the stack that contains the running Keepup container.
-            if self_id and any(
+            # Check by container ID first; fall back to name when HOSTNAME is overridden.
+            id_match = self_id and any(
                 (c.get("Id", "") or "")[:12] == self_id for c in stack_containers
-            ):
+            )
+            name_match = self_name and any(
+                self_name in [n.lstrip("/") for n in c.get("Names", [])]
+                for c in stack_containers
+            )
+            if id_match or name_match:
                 endpoint_name = endpoint_map.get(endpoint_id, f"env-{endpoint_id}")
                 log.info(
                     "Portainer: excluding self-stack %s on %s from discovery",
