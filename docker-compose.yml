@@ -4,6 +4,8 @@ services:
     container_name: keepup
     ports:
       - "8765:8765"
+    environment:
+      - KEEPUP_CONTAINER_NAME=keepup
     volumes:
       - ./config:/app/config    # config.yml — host list and SSH defaults
       - ./data:/app/data        # encrypted credentials and session secret

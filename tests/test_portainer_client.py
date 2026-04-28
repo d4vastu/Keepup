@@ -448,3 +448,76 @@ async def test_portainer_update_proceeds_when_check_fails(client, monkeypatch):
 
     assert result == {"Id": 20}
     put_mock.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# Name-based self-exclusion (OP#121) — fallback when HOSTNAME is overridden
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_self_stack_excluded_by_container_name(client, monkeypatch):
+    """Stack is excluded when KEEPUP_CONTAINER_NAME matches a container name, even if HOSTNAME
+    is not a hex ID (e.g. user set hostname: keepup in docker-compose)."""
+    monkeypatch.setenv("HOSTNAME", "keepup")  # not a hex ID
+    monkeypatch.setenv("KEEPUP_CONTAINER_NAME", "keepup")
+
+    self_container = {
+        "Id": "aabbccddeeff112233445566",
+        "Image": "ghcr.io/d4vastu/keepup:latest",
+        "ImageID": "sha256:keepup",
+        "Names": ["/keepup"],
+        "Labels": {"com.docker.compose.project": "keepup"},
+    }
+    other_container = {
+        "Id": "112233445566aabbccddeeff",
+        "Image": "linuxserver/sonarr:latest",
+        "ImageID": "sha256:sonarr",
+        "Names": ["/sonarr"],
+        "Labels": {"com.docker.compose.project": "sonarr"},
+    }
+    stacks = [
+        {"Id": 20, "Name": "keepup", "EndpointId": 1, "Env": []},
+        {"Id": 21, "Name": "sonarr", "EndpointId": 1, "Env": []},
+    ]
+
+    with (
+        patch("app.self_identity._container_id_from_cgroup", return_value=None),
+        patch.object(client, "get_endpoints", new=AsyncMock(return_value=ENDPOINTS[:1])),
+        patch.object(client, "get_stacks", new=AsyncMock(return_value=stacks)),
+        patch.object(
+            client, "_get_containers",
+            new=AsyncMock(return_value=[self_container, other_container]),
+        ),
+        patch.object(client, "_get_image_info", new=AsyncMock(return_value=IMAGE_INFO)),
+        patch("app.portainer_client.check_image_update", new=AsyncMock(return_value="up_to_date")),
+        patch("app.portainer_client.extract_local_digest", return_value="sha256:x"),
+    ):
+        results = await client.get_stacks_with_update_status()
+
+    names = {r["name"] for r in results}
+    assert "keepup" not in names
+    assert "sonarr" in names
+
+
+@pytest.mark.asyncio
+async def test_update_stack_refused_by_container_name(client, monkeypatch):
+    """update_stack raises ValueError when KEEPUP_CONTAINER_NAME matches, even without a hex HOSTNAME."""
+    monkeypatch.setenv("HOSTNAME", "keepup")
+    monkeypatch.setenv("KEEPUP_CONTAINER_NAME", "keepup")
+
+    self_container = {
+        "Id": "aabbccddeeff112233445566",
+        "Image": "ghcr.io/d4vastu/keepup:latest",
+        "Names": ["/keepup"],
+        "Labels": {"com.docker.compose.project": "keepup"},
+    }
+    stack_meta = {"Id": 20, "Name": "keepup", "Env": []}
+
+    with (
+        patch("app.self_identity._container_id_from_cgroup", return_value=None),
+        patch.object(client, "_get_containers", new=AsyncMock(return_value=[self_container])),
+        patch.object(client, "get", new=AsyncMock(return_value=stack_meta)),
+    ):
+        with pytest.raises(ValueError, match="Self-update refused"):
+            await client.update_stack(20, 1)
