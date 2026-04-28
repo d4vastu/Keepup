@@ -1116,12 +1116,14 @@ async def login_submit(
     if remember_me == "on":
         request.session["remember_me"] = True
 
-    # Show a soft notice on the home page if the stored password was set before
-    # the current minimum-length policy was adopted.  We cannot determine whether
-    # the plaintext password meets the policy from the hash alone, so we rely on
-    # the `password_meets_policy` flag that is written whenever a password is saved.
+    # At login time we have the plaintext password, so we can heal a missing
+    # password_meets_policy flag for accounts created before the flag was introduced,
+    # preventing false-positive upgrade notices for passwords that already meet policy.
     if not get_integration_credentials("admin").get("password_meets_policy"):
-        request.session["show_password_notice"] = True
+        if len(password) >= _MIN_PASSWORD_LEN:
+            save_integration_credentials("admin", password_meets_policy=True)
+        else:
+            request.session["show_password_notice"] = True
 
     # Sanitise the redirect target to prevent open-redirect attacks.
     next_url = _safe_next_url(request.query_params.get("next", "/home"))

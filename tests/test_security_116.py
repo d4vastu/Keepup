@@ -380,9 +380,77 @@ class TestLoginPasswordNotice:
 
     def test_home_hides_notice_when_policy_flag_set(self):
         """Home page must NOT show the notice when password already meets policy."""
-        # Change password to something ≥ 12 chars to set the flag
         from app.auth import change_password
         change_password("LongPassword123")
+
+        self.client.post(
+            "/login",
+            data={"username": "testadmin", "password": "LongPassword123"},
+            follow_redirects=False,
+        )
+        resp = self.client.get("/home")
+        assert resp.status_code == 200
+        assert "may not meet the current minimum" not in resp.text
+
+
+# ---------------------------------------------------------------------------
+# Login heals missing password_meets_policy flag (OP#122)
+# ---------------------------------------------------------------------------
+
+
+class TestLoginPolicyFlagHealing:
+    """Login must heal a missing password_meets_policy flag using the plaintext password."""
+
+    @pytest.fixture(autouse=True)
+    def setup(self, config_file, data_dir, monkeypatch):
+        monkeypatch.setenv("PORTAINER_URL", "https://portainer.test:9443")
+        monkeypatch.setenv("PORTAINER_API_KEY", "test-api-key")
+        monkeypatch.setenv("PORTAINER_VERIFY_SSL", "false")
+
+        from app.main import app
+        from app.auth import create_admin
+
+        create_admin(username="testadmin", password="LongPassword123", totp_secret=None)
+        self.client = TestClient(app, raise_server_exceptions=True)
+
+    def _strip_policy_flag(self):
+        """Remove password_meets_policy from the store to simulate a pre-flag account."""
+        from app.credentials import save_integration_credentials
+        save_integration_credentials("admin", password_meets_policy="")
+
+    def test_no_notice_for_long_password_missing_flag(self):
+        """Login with a ≥12-char password must suppress the notice even when flag is absent."""
+        self._strip_policy_flag()
+        self.client.post(
+            "/login",
+            data={"username": "testadmin", "password": "LongPassword123"},
+            follow_redirects=False,
+        )
+        resp = self.client.get("/home")
+        assert resp.status_code == 200
+        assert "may not meet the current minimum" not in resp.text
+
+    def test_flag_healed_to_true_on_long_password_login(self):
+        """Login with a ≥12-char password must write password_meets_policy=True."""
+        from app.credentials import get_integration_credentials
+        self._strip_policy_flag()
+        assert get_integration_credentials("admin").get("password_meets_policy") is None
+
+        self.client.post(
+            "/login",
+            data={"username": "testadmin", "password": "LongPassword123"},
+            follow_redirects=False,
+        )
+        assert get_integration_credentials("admin").get("password_meets_policy") is True
+
+    def test_notice_shown_for_short_password_missing_flag(self):
+        """Login with a <12-char password must still show the notice when flag is absent."""
+        from app.auth import create_admin
+        from app.credentials import save_integration_credentials
+
+        # Re-create admin with a short password (bypassing UI validation) and strip flag.
+        create_admin(username="testadmin", password="short1234", totp_secret=None)
+        save_integration_credentials("admin", password_meets_policy="")
 
         self.client.post(
             "/login",
@@ -391,5 +459,4 @@ class TestLoginPasswordNotice:
         )
         resp = self.client.get("/home")
         assert resp.status_code == 200
-        # Notice banner should not be present — check for the specific notice text
-        assert "may not meet the current minimum" not in resp.text
+        assert "may not meet the current minimum" in resp.text
