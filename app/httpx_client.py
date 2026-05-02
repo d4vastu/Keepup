@@ -1,5 +1,6 @@
 """Central httpx client factory with standardised timeouts and per-host circuit breakers."""
 
+import ssl
 from contextlib import asynccontextmanager
 from datetime import timedelta
 from urllib.parse import urlparse
@@ -25,6 +26,7 @@ def get_breaker(host: str) -> aiobreaker.CircuitBreaker:
 def make_client(
     *,
     verify: bool | str = True,
+    ssl_context: ssl.SSLContext | None = None,
     base_url: str = "",
     headers: dict | None = None,
     timeout: httpx.Timeout | None = None,
@@ -33,7 +35,7 @@ def make_client(
     return httpx.AsyncClient(
         base_url=base_url,
         headers=headers or {},
-        verify=verify,
+        verify=ssl_context if ssl_context is not None else verify,
         timeout=timeout or _DEFAULT_TIMEOUT,
         follow_redirects=follow_redirects,
     )
@@ -67,6 +69,7 @@ async def make_breaker_client(
     *,
     base_url: str,
     verify: bool | str = True,
+    ssl_context: ssl.SSLContext | None = None,
     headers: dict | None = None,
     timeout: httpx.Timeout | None = None,
 ):
@@ -75,7 +78,11 @@ async def make_breaker_client(
     host = _host_from_url(base_url)
     breaker = get_breaker(host)
     async with make_client(
-        base_url=base_url, verify=verify, headers=headers, timeout=timeout
+        base_url=base_url,
+        verify=verify,
+        ssl_context=ssl_context,
+        headers=headers,
+        timeout=timeout,
     ) as client:
         yield _BreakerClient(client, breaker)
 

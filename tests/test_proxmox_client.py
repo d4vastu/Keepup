@@ -13,7 +13,6 @@ def mock_client():
     return ProxmoxClient(
         url="https://192.168.1.10:8006",
         api_token="user@pam!token=abc",
-        verify_ssl=False,
     )
 
 

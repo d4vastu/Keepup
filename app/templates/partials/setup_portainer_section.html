@@ -27,21 +27,17 @@
         class="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-blue-500 placeholder:text-slate-500">
       <p class="text-xs text-slate-500 mt-1">In Portainer: My Account → Access tokens → Add access token.</p>
     </div>
-    <label class="flex items-center gap-2 cursor-pointer select-none">
-      <input type="checkbox" name="portainer_verify_ssl" value="on" class="w-4 h-4 rounded accent-blue-500">
-      <span class="text-sm text-slate-300">Verify SSL certificate</span>
-    </label>
     <div class="flex gap-2 items-center flex-wrap">
       <button
         hx-post="/setup/portainer/test"
-        hx-include="[name='portainer_url'],[name='portainer_api_key'],[name='portainer_verify_ssl']"
+        hx-include="[name='portainer_url'],[name='portainer_api_key']"
         hx-target="#portainer-test-result"
         class="px-4 py-2 rounded-lg bg-slate-600 hover:bg-slate-500 text-sm font-medium text-slate-200 transition-colors">
         Test connection
       </button>
       <button
         hx-post="/setup/portainer/save"
-        hx-include="[name='portainer_url'],[name='portainer_api_key'],[name='portainer_verify_ssl']"
+        hx-include="[name='portainer_url'],[name='portainer_api_key']"
         hx-target="#portainer-section"
         hx-swap="outerHTML"
         class="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-sm font-medium text-white transition-colors">

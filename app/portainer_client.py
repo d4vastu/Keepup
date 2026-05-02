@@ -20,13 +20,23 @@ log = logging.getLogger(__name__)
 
 
 class PortainerClient:
-    def __init__(self, url: str, api_key: str, verify_ssl: bool = False):
+    def __init__(self, url: str, api_key: str, pinned_cert_pem: str = ""):
         self.base = url.rstrip("/")
         self.headers = {"X-API-Key": api_key}
-        self.verify_ssl = verify_ssl
+        self._pinned_cert_pem = pinned_cert_pem
+
+    def _ssl_ctx(self):
+        if self._pinned_cert_pem:
+            from .cert_utils import build_pinned_ssl_ctx
+            return build_pinned_ssl_ctx(self._pinned_cert_pem)
+        return None
 
     def _client(self):
-        return make_breaker_client(base_url=self.base, headers=self.headers, verify=self.verify_ssl)
+        return make_breaker_client(
+            base_url=self.base,
+            headers=self.headers,
+            ssl_context=self._ssl_ctx(),
+        )
 
     async def get(self, path: str) -> dict | list:
         async with self._client() as c:

@@ -65,11 +65,45 @@ from .audit import audit
 from .proxmox_client import ProxmoxClient
 from .ssh_client import discover_containers, verify_connection
 from .backend_loader import reload_backends
+from .cert_utils import build_pinned_ssl_ctx, cert_info, fetch_server_cert, fingerprint
 from .httpx_client import make_client
 from .templates_env import make_templates
 
 router = APIRouter()
 templates = make_templates()
+
+
+def _is_ssl_cert_error(exc: Exception) -> bool:
+    """Return True if exc is (or wraps) an SSL certificate verification failure."""
+    msg = str(exc)
+    if "CERTIFICATE_VERIFY_FAILED" in msg or "certificate verify failed" in msg.lower():
+        return True
+    cause = getattr(exc, "__cause__", None) or getattr(exc, "__context__", None)
+    if cause and cause is not exc:
+        return _is_ssl_cert_error(cause)
+    return False
+
+
+def _cert_trust_response(
+    request: Request,
+    info: dict,
+    test_url: str,
+    include_ids: str,
+    target_id: str,
+    changed: bool = False,
+):
+    """Render the cert-trust prompt partial."""
+    return templates.TemplateResponse(
+        "partials/cert_trust_prompt.html",
+        {
+            "request": request,
+            "info": info,
+            "test_url": test_url,
+            "include_ids": include_ids,
+            "target_id": target_id,
+            "changed": changed,
+        },
+    )
 
 
 def _ssh_section_ctx(request: Request, **extra) -> dict:
@@ -391,8 +425,8 @@ async def setup_connect(request: Request) -> HTMLResponse:
 # --- Proxmox ---
 
 
-def _setup_proxmox_client_parts() -> tuple[str, str, bool]:
-    """Return (url, token, verify_ssl) from saved Proxmox config."""
+def _setup_proxmox_client_parts() -> tuple[str, str, str]:
+    """Return (url, token, pinned_cert_pem) from saved Proxmox config."""
     cfg = get_proxmox_config()
     creds = get_integration_credentials("proxmox")
     url = cfg.get("url", "")
@@ -404,7 +438,7 @@ def _setup_proxmox_client_parts() -> tuple[str, str, bool]:
         token = f"{api_user}!{api_token}" if api_user else api_token
     else:
         token = f"{token_id}={secret}"
-    return url, token, cfg.get("verify_ssl", False)
+    return url, token, cfg.get("pinned_cert_pem", "")
 
 
 def _proxmox_lxc_step(request: Request, resources: list[dict]) -> HTMLResponse:
@@ -447,32 +481,63 @@ async def setup_test_proxmox(
     proxmox_url: str = Form(""),
     proxmox_token_id: str = Form(""),
     proxmox_secret: str = Form(""),
-    proxmox_verify_ssl: str = Form(""),
+    trust_accepted: str = Form(""),
 ) -> HTMLResponse:
     url = proxmox_url.strip().rstrip("/")
     token_id = proxmox_token_id.strip()
     secret = proxmox_secret.strip()
-    verify_ssl = proxmox_verify_ssl == "on"
     if not url or not token_id or not secret:
         return HTMLResponse(
             '<span class="text-amber-400 text-sm">Enter a URL, Token ID, and Secret first.</span>'
         )
     token = f"{token_id}={secret}"
+
+    if trust_accepted == "1":
+        pem = request.session.get("pending_cert_proxmox", "")
+        if not pem:
+            return HTMLResponse(
+                '<span class="text-red-400 text-sm">&#10007; Session expired — re-test to try again.</span>'
+            )
+    else:
+        pem = get_proxmox_config().get("pinned_cert_pem", "")
+
     try:
-        client = ProxmoxClient(url=url, api_token=token, verify_ssl=verify_ssl)
+        client = ProxmoxClient(url=url, api_token=token, pinned_cert_pem=pem)
         version = await client.get_version()
         ver = version.get("version", "")
+        if trust_accepted == "1":
+            fp = fingerprint(pem)
+            request.session["confirmed_cert_proxmox"] = {"pem": pem, "fingerprint": fp}
+            request.session.pop("pending_cert_proxmox", None)
+            return HTMLResponse(
+                f'<span class="text-green-400 text-sm">&#10003; Connected — Proxmox VE {ver}. Certificate pinned. Click Save to continue.</span>'
+            )
         return HTMLResponse(
             f'<span class="text-green-400 text-sm">&#10003; Connected — Proxmox VE {ver}. Click Save to continue.</span>'
         )
     except Exception as exc:
+        if _is_ssl_cert_error(exc):
+            changed = bool(pem)
+            try:
+                new_pem = fetch_server_cert(url)
+                info = cert_info(new_pem)
+                request.session["pending_cert_proxmox"] = new_pem
+            except Exception:
+                return HTMLResponse(
+                    '<span class="text-red-400 text-sm">&#10007; SSL certificate error — could not fetch certificate details.</span>'
+                )
+            return _cert_trust_response(
+                request, info,
+                test_url="/setup/connect/proxmox/test",
+                include_ids="#proxmox-url,#proxmox-api-user,#proxmox-token-id,#proxmox-secret",
+                target_id="#proxmox-test-result",
+                changed=changed,
+            )
         msg = str(exc)
         if "401" in msg or "403" in msg:
             hint = "Invalid API token."
         elif "connect" in msg.lower() or "Name or service" in msg:
             hint = "Can&#39;t reach that address — check the URL."
-        elif "SSL" in msg or "certificate" in msg.lower():
-            hint = "SSL error — try disabling SSL verification."
         else:
             hint = msg[:120]
         return HTMLResponse(f'<span class="text-red-400 text-sm">&#10007; {hint}</span>')
@@ -484,13 +549,16 @@ async def setup_save_proxmox(
     proxmox_url: str = Form(""),
     proxmox_token_id: str = Form(""),
     proxmox_secret: str = Form(""),
-    proxmox_verify_ssl: str = Form(""),
 ) -> HTMLResponse:
     url = proxmox_url.strip().rstrip("/")
     token_id = proxmox_token_id.strip()
     secret = proxmox_secret.strip()
-    verify_ssl = proxmox_verify_ssl == "on"
-    save_proxmox_config(url=url, verify_ssl=verify_ssl)
+    confirmed = request.session.pop("confirmed_cert_proxmox", {})
+    save_proxmox_config(
+        url=url,
+        pinned_cert_pem=confirmed.get("pem", ""),
+        pinned_fingerprint=confirmed.get("fingerprint", ""),
+    )
     cred_kwargs: dict = {}
     if token_id:
         cred_kwargs["token_id"] = token_id
@@ -506,7 +574,8 @@ async def setup_save_proxmox(
         try:
             import urllib.parse
             token = f"{token_id}={secret}"
-            client = ProxmoxClient(url=url, api_token=token, verify_ssl=verify_ssl)
+            pinned_pem = get_proxmox_config().get("pinned_cert_pem", "")
+            client = ProxmoxClient(url=url, api_token=token, pinned_cert_pem=pinned_pem)
             nodes = await client.get_nodes()
             resources = await client.discover_resources()
             request.session["setup_proxmox_resources"] = resources
@@ -536,11 +605,11 @@ async def setup_save_proxmox(
 async def setup_proxmox_discover(request: Request) -> HTMLResponse:
     """For already-connected Proxmox: discover resources and enter the guided flow."""
     import urllib.parse
-    url, token, verify_ssl = _setup_proxmox_client_parts()
+    url, token, pinned_pem = _setup_proxmox_client_parts()
     if not url or not token:
         return HTMLResponse('<p class="text-sm text-red-400">Proxmox not configured.</p>')
     try:
-        client = ProxmoxClient(url=url, api_token=token, verify_ssl=verify_ssl)
+        client = ProxmoxClient(url=url, api_token=token, pinned_cert_pem=pinned_pem)
         nodes = await client.get_nodes()
         resources = await client.discover_resources()
         request.session["setup_proxmox_resources"] = resources
@@ -803,34 +872,68 @@ async def setup_test_pbs(
     pbs_api_user: str = Form(""),
     pbs_token_id: str = Form(""),
     pbs_secret: str = Form(""),
-    pbs_verify_ssl: str = Form(""),
+    trust_accepted: str = Form(""),
 ) -> HTMLResponse:
     url = pbs_url.strip().rstrip("/")
     token_id = pbs_token_id.strip()
     secret = pbs_secret.strip()
-    verify_ssl = pbs_verify_ssl == "on"
     if not url or not token_id or not secret:
         return HTMLResponse(
             '<span class="text-amber-400 text-sm">Enter a URL, Token ID, and Secret first.</span>'
         )
     # PBS auth: PBSAPIToken=<tokenid>:<secret>  (colon separator, not equals)
+    import logging
+    _log = logging.getLogger(__name__)
+
+    if trust_accepted == "1":
+        pem = request.session.get("pending_cert_pbs", "")
+        if not pem:
+            return HTMLResponse(
+                '<span class="text-red-400 text-sm">&#10007; Session expired — re-test to try again.</span>'
+            )
+    else:
+        pem = get_pbs_config().get("pinned_cert_pem", "")
+
+    ssl_ctx = build_pinned_ssl_ctx(pem) if pem else None
     try:
-        async with make_client(verify=verify_ssl) as c:
+        async with make_client(ssl_context=ssl_ctx) as c:
             resp = await c.get(
                 f"{url}/api2/json/version",
                 headers={"Authorization": f"PBSAPIToken={token_id}:{secret}"},
             )
             resp.raise_for_status()
             ver = resp.json().get("data", {}).get("version", "")
-        import logging
-        logging.getLogger(__name__).info("PBS connected: version %s", ver)
+        _log.info("PBS connected: version %s", ver)
+        if trust_accepted == "1":
+            fp = fingerprint(pem)
+            request.session["confirmed_cert_pbs"] = {"pem": pem, "fingerprint": fp}
+            request.session.pop("pending_cert_pbs", None)
+            return HTMLResponse(
+                f'<span class="text-green-400 text-sm">&#10003; Connected — Proxmox Backup Server {ver}. Certificate pinned. Click Save to continue.</span>'
+            )
         return HTMLResponse(
             f'<span class="text-green-400 text-sm">&#10003; Connected — Proxmox Backup Server {ver}. Click Save to continue.</span>'
         )
     except Exception as exc:
+        if _is_ssl_cert_error(exc):
+            changed = bool(pem)
+            try:
+                new_pem = fetch_server_cert(url)
+                info = cert_info(new_pem)
+                request.session["pending_cert_pbs"] = new_pem
+            except Exception:
+                return HTMLResponse(
+                    '<span class="text-red-400 text-sm">&#10007; SSL certificate error — could not fetch certificate details.</span>'
+                )
+            return _cert_trust_response(
+                request, info,
+                test_url="/setup/connect/pbs/test",
+                include_ids="#pbs-url,#pbs-user,#pbs-token-id,#pbs-secret",
+                target_id="#pbs-test-result",
+                changed=changed,
+            )
         msg = str(exc)
-        import logging
-        logging.getLogger(__name__).warning("PBS connection failed: %s", msg)
+        _log.warning("PBS connection failed: %s", msg)
         hint = "Invalid Token ID or Secret." if ("401" in msg or "403" in msg) else msg[:120]
         return HTMLResponse(
             f'<span class="text-red-400 text-sm">&#10007; {hint}</span>'
@@ -844,14 +947,17 @@ async def setup_save_pbs(
     pbs_api_user: str = Form(""),
     pbs_token_id: str = Form(""),
     pbs_secret: str = Form(""),
-    pbs_verify_ssl: str = Form(""),
 ) -> HTMLResponse:
     url = pbs_url.strip().rstrip("/")
     api_user = pbs_api_user.strip()
     token_id = pbs_token_id.strip()
     secret = pbs_secret.strip()
-    verify_ssl = pbs_verify_ssl == "on"
-    save_pbs_config(url=url, verify_ssl=verify_ssl)
+    confirmed = request.session.pop("confirmed_cert_pbs", {})
+    save_pbs_config(
+        url=url,
+        pinned_cert_pem=confirmed.get("pem", ""),
+        pinned_fingerprint=confirmed.get("fingerprint", ""),
+    )
     if api_user or token_id or secret:
         save_integration_credentials(
             "proxmox_backup",
@@ -874,27 +980,61 @@ async def setup_test_opnsense(
     opnsense_url: str = Form(""),
     opnsense_api_key: str = Form(""),
     opnsense_api_secret: str = Form(""),
-    opnsense_verify_ssl: str = Form(""),
+    trust_accepted: str = Form(""),
 ) -> HTMLResponse:
     url = opnsense_url.strip().rstrip("/")
     key = opnsense_api_key.strip()
     secret = opnsense_api_secret.strip()
-    verify_ssl = opnsense_verify_ssl == "on"
     if not url or not key or not secret:
         return HTMLResponse(
             '<span class="text-amber-400 text-sm">Enter URL, API key, and API secret first.</span>'
         )
+
+    if trust_accepted == "1":
+        pem = request.session.get("pending_cert_opnsense", "")
+        if not pem:
+            return HTMLResponse(
+                '<span class="text-red-400 text-sm">&#10007; Session expired — re-test to try again.</span>'
+            )
+    else:
+        pem = get_opnsense_config().get("pinned_cert_pem", "")
+
+    ssl_ctx = build_pinned_ssl_ctx(pem) if pem else None
     try:
-        async with make_client(verify=verify_ssl) as c:
+        async with make_client(ssl_context=ssl_ctx) as c:
             resp = await c.get(
                 f"{url}/api/core/firmware/info",
                 auth=(key, secret),
             )
             resp.raise_for_status()
+        if trust_accepted == "1":
+            fp = fingerprint(pem)
+            request.session["confirmed_cert_opnsense"] = {"pem": pem, "fingerprint": fp}
+            request.session.pop("pending_cert_opnsense", None)
+            return HTMLResponse(
+                '<span class="text-green-400 text-sm">&#10003; Connected. Certificate pinned. Click Save to continue.</span>'
+            )
         return HTMLResponse(
             '<span class="text-green-400 text-sm">&#10003; Connected. Click Save to continue.</span>'
         )
     except Exception as exc:
+        if _is_ssl_cert_error(exc):
+            changed = bool(pem)
+            try:
+                new_pem = fetch_server_cert(url)
+                info = cert_info(new_pem)
+                request.session["pending_cert_opnsense"] = new_pem
+            except Exception:
+                return HTMLResponse(
+                    '<span class="text-red-400 text-sm">&#10007; SSL certificate error — could not fetch certificate details.</span>'
+                )
+            return _cert_trust_response(
+                request, info,
+                test_url="/setup/connect/opnsense/test",
+                include_ids="#opn-url,#opn-key,#opn-secret",
+                target_id="#opnsense-test-result",
+                changed=changed,
+            )
         msg = str(exc)
         hint = (
             "Invalid API key or secret."
@@ -912,13 +1052,16 @@ async def setup_save_opnsense(
     opnsense_url: str = Form(""),
     opnsense_api_key: str = Form(""),
     opnsense_api_secret: str = Form(""),
-    opnsense_verify_ssl: str = Form(""),
 ) -> HTMLResponse:
     url = opnsense_url.strip().rstrip("/")
     key = opnsense_api_key.strip()
     secret = opnsense_api_secret.strip()
-    verify_ssl = opnsense_verify_ssl == "on"
-    save_opnsense_config(url=url, verify_ssl=verify_ssl)
+    confirmed = request.session.pop("confirmed_cert_opnsense", {})
+    save_opnsense_config(
+        url=url,
+        pinned_cert_pem=confirmed.get("pem", ""),
+        pinned_fingerprint=confirmed.get("fingerprint", ""),
+    )
     if key and secret:
         save_integration_credentials("opnsense", api_key=key, api_secret=secret)
     _queue_integration_host(request, "opnsense", "OPNsense", url)
@@ -935,26 +1078,60 @@ async def setup_test_pfsense(
     request: Request,
     pfsense_url: str = Form(""),
     pfsense_api_key: str = Form(""),
-    pfsense_verify_ssl: str = Form(""),
+    trust_accepted: str = Form(""),
 ) -> HTMLResponse:
     url = pfsense_url.strip().rstrip("/")
     key = pfsense_api_key.strip()
-    verify_ssl = pfsense_verify_ssl == "on"
     if not url or not key:
         return HTMLResponse(
             '<span class="text-amber-400 text-sm">Enter a URL and API key first.</span>'
         )
+
+    if trust_accepted == "1":
+        pem = request.session.get("pending_cert_pfsense", "")
+        if not pem:
+            return HTMLResponse(
+                '<span class="text-red-400 text-sm">&#10007; Session expired — re-test to try again.</span>'
+            )
+    else:
+        pem = get_pfsense_config().get("pinned_cert_pem", "")
+
+    ssl_ctx = build_pinned_ssl_ctx(pem) if pem else None
     try:
-        async with make_client(verify=verify_ssl) as c:
+        async with make_client(ssl_context=ssl_ctx) as c:
             resp = await c.get(
                 f"{url}/api/v1/system/version",
                 headers={"Authorization": key},
             )
             resp.raise_for_status()
+        if trust_accepted == "1":
+            fp = fingerprint(pem)
+            request.session["confirmed_cert_pfsense"] = {"pem": pem, "fingerprint": fp}
+            request.session.pop("pending_cert_pfsense", None)
+            return HTMLResponse(
+                '<span class="text-green-400 text-sm">&#10003; Connected. Certificate pinned. Click Save to continue.</span>'
+            )
         return HTMLResponse(
             '<span class="text-green-400 text-sm">&#10003; Connected. Click Save to continue.</span>'
         )
     except Exception as exc:
+        if _is_ssl_cert_error(exc):
+            changed = bool(pem)
+            try:
+                new_pem = fetch_server_cert(url)
+                info = cert_info(new_pem)
+                request.session["pending_cert_pfsense"] = new_pem
+            except Exception:
+                return HTMLResponse(
+                    '<span class="text-red-400 text-sm">&#10007; SSL certificate error — could not fetch certificate details.</span>'
+                )
+            return _cert_trust_response(
+                request, info,
+                test_url="/setup/connect/pfsense/test",
+                include_ids="#pf-url,#pf-key",
+                target_id="#pfsense-test-result",
+                changed=changed,
+            )
         msg = str(exc)
         hint = "Invalid API key." if ("401" in msg or "403" in msg) else msg[:120]
         return HTMLResponse(
@@ -967,12 +1144,15 @@ async def setup_save_pfsense(
     request: Request,
     pfsense_url: str = Form(""),
     pfsense_api_key: str = Form(""),
-    pfsense_verify_ssl: str = Form(""),
 ) -> HTMLResponse:
     url = pfsense_url.strip().rstrip("/")
     key = pfsense_api_key.strip()
-    verify_ssl = pfsense_verify_ssl == "on"
-    save_pfsense_config(url=url, verify_ssl=verify_ssl)
+    confirmed = request.session.pop("confirmed_cert_pfsense", {})
+    save_pfsense_config(
+        url=url,
+        pinned_cert_pem=confirmed.get("pem", ""),
+        pinned_fingerprint=confirmed.get("fingerprint", ""),
+    )
     if key:
         save_integration_credentials("pfsense", api_key=key)
     _queue_integration_host(request, "pfsense", "pfSense", url)
@@ -1546,32 +1726,63 @@ async def setup_test_portainer(
     request: Request,
     portainer_url: str = Form(""),
     portainer_api_key: str = Form(""),
-    portainer_verify_ssl: str = Form(""),
+    trust_accepted: str = Form(""),
 ) -> HTMLResponse:
     url = portainer_url.strip().rstrip("/")
     key = portainer_api_key.strip()
-    verify_ssl = portainer_verify_ssl == "on"
     if not url or not key:
         return HTMLResponse(
             '<span class="text-amber-400 text-sm">Enter a URL and API token first.</span>'
         )
+
+    if trust_accepted == "1":
+        pem = request.session.get("pending_cert_portainer", "")
+        if not pem:
+            return HTMLResponse(
+                '<span class="text-red-400 text-sm">&#10007; Session expired — re-test to try again.</span>'
+            )
+    else:
+        pem = get_portainer_config().get("pinned_cert_pem", "")
+
     try:
         from .portainer_client import PortainerClient
 
-        client = PortainerClient(url=url, api_key=key, verify_ssl=verify_ssl)
+        client = PortainerClient(url=url, api_key=key, pinned_cert_pem=pem)
         endpoints = await client.get_endpoints()
         count = len(endpoints)
+        if trust_accepted == "1":
+            fp = fingerprint(pem)
+            request.session["confirmed_cert_portainer"] = {"pem": pem, "fingerprint": fp}
+            request.session.pop("pending_cert_portainer", None)
+            return HTMLResponse(
+                f'<span class="text-green-400 text-sm">&#10003; Connected — {count} environment{"s" if count != 1 else ""} found. Certificate pinned. Click Save to apply.</span>'
+            )
         return HTMLResponse(
             f'<span class="text-green-400 text-sm">&#10003; Connected — {count} environment{"s" if count != 1 else ""} found. Click Save to apply.</span>'
         )
     except Exception as exc:
+        if _is_ssl_cert_error(exc):
+            changed = bool(pem)
+            try:
+                new_pem = fetch_server_cert(url)
+                info = cert_info(new_pem)
+                request.session["pending_cert_portainer"] = new_pem
+            except Exception:
+                return HTMLResponse(
+                    '<span class="text-red-400 text-sm">&#10007; SSL certificate error — could not fetch certificate details.</span>'
+                )
+            return _cert_trust_response(
+                request, info,
+                test_url="/setup/portainer/test",
+                include_ids="[name='portainer_url'],[name='portainer_api_key']",
+                target_id="#portainer-test-result",
+                changed=changed,
+            )
         msg = str(exc)
         if "401" in msg or "403" in msg:
             hint = "Invalid API token."
         elif "connect" in msg.lower() or "Name or service" in msg:
             hint = "Can&#39;t reach that address — check the URL."
-        elif "SSL" in msg or "certificate" in msg.lower():
-            hint = "SSL error — try disabling SSL verification."
         else:
             hint = msg[:120]
         return HTMLResponse(
@@ -1584,12 +1795,15 @@ async def setup_save_portainer(
     request: Request,
     portainer_url: str = Form(""),
     portainer_api_key: str = Form(""),
-    portainer_verify_ssl: str = Form(""),
 ) -> HTMLResponse:
     url = portainer_url.strip().rstrip("/")
     key = portainer_api_key.strip()
-    verify_ssl = portainer_verify_ssl == "on"
-    save_portainer_config(url=url, verify_ssl=verify_ssl)
+    confirmed = request.session.pop("confirmed_cert_portainer", {})
+    save_portainer_config(
+        url=url,
+        pinned_cert_pem=confirmed.get("pem", ""),
+        pinned_fingerprint=confirmed.get("fingerprint", ""),
+    )
     if key:
         save_integration_credentials("portainer", api_key=key)
     await reload_backends()

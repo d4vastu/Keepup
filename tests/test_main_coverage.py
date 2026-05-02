@@ -105,11 +105,13 @@ async def test_startup_calls_all_hooks(monkeypatch):
     mock_reload = AsyncMock()
     mock_apply = MagicMock()
     mock_start = MagicMock()
+    mock_migrate = AsyncMock()
 
     monkeypatch.setattr(m, "_check_version_notification", mock_check)
     monkeypatch.setattr(m, "reload_backends", mock_reload)
     monkeypatch.setattr(m, "apply_all_schedules", mock_apply)
     monkeypatch.setattr(m.scheduler, "start", mock_start)
+    monkeypatch.setattr(m, "_migrate_tofu_certs", mock_migrate)
 
     await m._startup()
 
@@ -117,6 +119,7 @@ async def test_startup_calls_all_hooks(monkeypatch):
     mock_reload.assert_awaited_once()
     mock_apply.assert_called_once()
     mock_start.assert_called_once()
+    mock_migrate.assert_awaited_once()
 
 
 # ---------------------------------------------------------------------------
@@ -267,7 +270,7 @@ def test_pbs_status_success(client, data_dir, config_file):
     from app.config_manager import save_pbs_config
     from app.credentials import save_integration_credentials
 
-    save_pbs_config(url="https://pbs.test:8007", verify_ssl=False)
+    save_pbs_config(url="https://pbs.test:8007")
     save_integration_credentials("proxmox_backup", token_id="root@pam!pbs", secret="abc")
 
     import httpx
@@ -285,7 +288,7 @@ def test_pbs_status_failure_returns_error_card(client, data_dir, config_file):
     from app.config_manager import save_pbs_config
     from app.credentials import save_integration_credentials
 
-    save_pbs_config(url="https://pbs.test:8007", verify_ssl=False)
+    save_pbs_config(url="https://pbs.test:8007")
     save_integration_credentials("proxmox_backup", token_id="root@pam!pbs", secret="abc")
 
     import httpx
@@ -309,7 +312,7 @@ def test_host_check_proxmox_node_returns_status(client, data_dir, config_file):
     from app.auth_router import save_proxmox_config
     from app.credentials import save_integration_credentials
 
-    save_proxmox_config(url="https://192.168.1.10:8006", verify_ssl=False)
+    save_proxmox_config(url="https://192.168.1.10:8006")
     save_integration_credentials("proxmox", token_id="root@pam!tok", secret="abc")
 
     packages = [{"name": "curl", "current": "7.81", "available": "7.90"}]
@@ -337,7 +340,7 @@ def test_host_check_proxmox_lxc_returns_status(client, data_dir, config_file):
     from app.auth_router import save_proxmox_config
     from app.credentials import save_integration_credentials
 
-    save_proxmox_config(url="https://192.168.1.10:8006", verify_ssl=False)
+    save_proxmox_config(url="https://192.168.1.10:8006")
     save_integration_credentials(
         "proxmox", token_id="root@pam!tok", secret="abc",
         ssh_user="root", ssh_key="", ssh_password="secret",

@@ -228,10 +228,21 @@ def get_portainer_config() -> dict:
     return load_config().get("portainer", {})
 
 
-def save_portainer_config(url: str, verify_ssl: bool) -> None:
+def save_portainer_config(
+    url: str,
+    pinned_cert_pem: str = "",
+    pinned_fingerprint: str = "",
+) -> None:
     config = load_config()
     if url:
-        config["portainer"] = {"url": url.rstrip("/"), "verify_ssl": verify_ssl}
+        existing = config.get("portainer", {})
+        pem = pinned_cert_pem or existing.get("pinned_cert_pem", "")
+        fp = pinned_fingerprint or existing.get("pinned_fingerprint", "")
+        entry: dict = {"url": url.rstrip("/")}
+        if pem:
+            entry["pinned_cert_pem"] = pem
+            entry["pinned_fingerprint"] = fp
+        config["portainer"] = entry
     else:
         config.pop("portainer", None)
     save_config(config)
@@ -325,10 +336,21 @@ def get_proxmox_config() -> dict:
     return load_config().get("proxmox", {})
 
 
-def save_proxmox_config(url: str, verify_ssl: bool) -> None:
+def save_proxmox_config(
+    url: str,
+    pinned_cert_pem: str = "",
+    pinned_fingerprint: str = "",
+) -> None:
     config = load_config()
     if url:
-        config["proxmox"] = {"url": url.rstrip("/"), "verify_ssl": verify_ssl}
+        existing = config.get("proxmox", {})
+        pem = pinned_cert_pem or existing.get("pinned_cert_pem", "")
+        fp = pinned_fingerprint or existing.get("pinned_fingerprint", "")
+        entry: dict = {"url": url.rstrip("/")}
+        if pem:
+            entry["pinned_cert_pem"] = pem
+            entry["pinned_fingerprint"] = fp
+        config["proxmox"] = entry
     else:
         config.pop("proxmox", None)
     save_config(config)
@@ -338,10 +360,21 @@ def get_pbs_config() -> dict:
     return load_config().get("proxmox_backup", {})
 
 
-def save_pbs_config(url: str, verify_ssl: bool) -> None:
+def save_pbs_config(
+    url: str,
+    pinned_cert_pem: str = "",
+    pinned_fingerprint: str = "",
+) -> None:
     config = load_config()
     if url:
-        config["proxmox_backup"] = {"url": url.rstrip("/"), "verify_ssl": verify_ssl}
+        existing = config.get("proxmox_backup", {})
+        pem = pinned_cert_pem or existing.get("pinned_cert_pem", "")
+        fp = pinned_fingerprint or existing.get("pinned_fingerprint", "")
+        entry: dict = {"url": url.rstrip("/")}
+        if pem:
+            entry["pinned_cert_pem"] = pem
+            entry["pinned_fingerprint"] = fp
+        config["proxmox_backup"] = entry
     else:
         config.pop("proxmox_backup", None)
     save_config(config)
@@ -351,10 +384,21 @@ def get_opnsense_config() -> dict:
     return load_config().get("opnsense", {})
 
 
-def save_opnsense_config(url: str, verify_ssl: bool) -> None:
+def save_opnsense_config(
+    url: str,
+    pinned_cert_pem: str = "",
+    pinned_fingerprint: str = "",
+) -> None:
     config = load_config()
     if url:
-        config["opnsense"] = {"url": url.rstrip("/"), "verify_ssl": verify_ssl}
+        existing = config.get("opnsense", {})
+        pem = pinned_cert_pem or existing.get("pinned_cert_pem", "")
+        fp = pinned_fingerprint or existing.get("pinned_fingerprint", "")
+        entry: dict = {"url": url.rstrip("/")}
+        if pem:
+            entry["pinned_cert_pem"] = pem
+            entry["pinned_fingerprint"] = fp
+        config["opnsense"] = entry
     else:
         config.pop("opnsense", None)
     save_config(config)
@@ -364,12 +408,34 @@ def get_pfsense_config() -> dict:
     return load_config().get("pfsense", {})
 
 
-def save_pfsense_config(url: str, verify_ssl: bool) -> None:
+def save_pfsense_config(
+    url: str,
+    pinned_cert_pem: str = "",
+    pinned_fingerprint: str = "",
+) -> None:
     config = load_config()
     if url:
-        config["pfsense"] = {"url": url.rstrip("/"), "verify_ssl": verify_ssl}
+        existing = config.get("pfsense", {})
+        pem = pinned_cert_pem or existing.get("pinned_cert_pem", "")
+        fp = pinned_fingerprint or existing.get("pinned_fingerprint", "")
+        entry: dict = {"url": url.rstrip("/")}
+        if pem:
+            entry["pinned_cert_pem"] = pem
+            entry["pinned_fingerprint"] = fp
+        config["pfsense"] = entry
     else:
         config.pop("pfsense", None)
+    save_config(config)
+
+
+def get_tofu_migrated() -> bool:
+    """Return True if the one-shot verify_ssl→TOFU migration has already run."""
+    return load_config().get("tofu_migrated", False)
+
+
+def mark_tofu_migrated() -> None:
+    config = load_config()
+    config["tofu_migrated"] = True
     save_config(config)
 
 

@@ -47,6 +47,7 @@ from .config_manager import (
     set_docker_monitoring,
     update_host,
 )
+from .cert_utils import build_pinned_ssl_ctx, cert_info, fetch_server_cert, fingerprint
 from .proxmox_client import ProxmoxClient
 from .credentials import (
     credential_status,
@@ -65,6 +66,37 @@ from .templates_env import make_templates
 
 router = APIRouter(prefix="/admin")
 templates = make_templates()
+
+
+def _is_ssl_cert_error(exc: Exception) -> bool:
+    msg = str(exc)
+    if "CERTIFICATE_VERIFY_FAILED" in msg or "certificate verify failed" in msg.lower():
+        return True
+    cause = getattr(exc, "__cause__", None) or getattr(exc, "__context__", None)
+    if cause and cause is not exc:
+        return _is_ssl_cert_error(cause)
+    return False
+
+
+def _cert_trust_response(
+    request: Request,
+    info: dict,
+    test_url: str,
+    include_ids: str,
+    target_id: str,
+    changed: bool = False,
+):
+    return templates.TemplateResponse(
+        "partials/cert_trust_prompt.html",
+        {
+            "request": request,
+            "info": info,
+            "test_url": test_url,
+            "include_ids": include_ids,
+            "target_id": target_id,
+            "changed": changed,
+        },
+    )
 
 
 def _connection_status() -> dict:
@@ -112,7 +144,8 @@ def _integration_status() -> dict:
         "proxmox_token_id": px_creds.get("token_id", ""),
         "proxmox_secret_set": bool(px_creds.get("secret") or px_creds.get("api_token")),
         "proxmox_configured": bool(px_cfg.get("url") and (px_creds.get("secret") or px_creds.get("api_token"))),
-        "proxmox_verify_ssl": px_cfg.get("verify_ssl", False),
+        "proxmox_pinned": bool(px_cfg.get("pinned_fingerprint")),
+        "proxmox_cert_fingerprint": px_cfg.get("pinned_fingerprint", ""),
         "proxmox_ssh_user": px_creds.get("ssh_user", ""),
         "proxmox_ssh_key": px_creds.get("ssh_key", ""),
         "proxmox_ssh_password_set": bool(px_creds.get("ssh_password")),
@@ -121,18 +154,22 @@ def _integration_status() -> dict:
         "pbs_token_id": pbs_creds.get("token_id", ""),
         "pbs_secret_set": bool(pbs_creds.get("secret") or pbs_creds.get("api_token")),
         "pbs_configured": bool(pbs_cfg.get("url") and (pbs_creds.get("secret") or pbs_creds.get("api_token"))),
-        "pbs_verify_ssl": pbs_cfg.get("verify_ssl", False),
+        "pbs_pinned": bool(pbs_cfg.get("pinned_fingerprint")),
+        "pbs_cert_fingerprint": pbs_cfg.get("pinned_fingerprint", ""),
         "opnsense_url": opn_cfg.get("url", ""),
         "opnsense_configured": bool(opn_cfg.get("url") and opn_creds.get("api_key")),
-        "opnsense_verify_ssl": opn_cfg.get("verify_ssl", False),
+        "opnsense_pinned": bool(opn_cfg.get("pinned_fingerprint")),
+        "opnsense_cert_fingerprint": opn_cfg.get("pinned_fingerprint", ""),
         "pfsense_url": pf_cfg.get("url", ""),
         "pfsense_configured": bool(pf_cfg.get("url") and pf_creds.get("api_key")),
-        "pfsense_verify_ssl": pf_cfg.get("verify_ssl", False),
+        "pfsense_pinned": bool(pf_cfg.get("pinned_fingerprint")),
+        "pfsense_cert_fingerprint": pf_cfg.get("pinned_fingerprint", ""),
         "ha_url": ha_cfg.get("url", ""),
         "ha_configured": bool(ha_cfg.get("url") and ha_creds.get("token")),
         "portainer_url": port_cfg.get("url", ""),
         "portainer_key_set": bool(port_creds.get("api_key")),
-        "portainer_verify_ssl": port_cfg.get("verify_ssl", False),
+        "portainer_pinned": bool(port_cfg.get("pinned_fingerprint")),
+        "portainer_cert_fingerprint": port_cfg.get("pinned_fingerprint", ""),
         "portainer_configured": bool(port_cfg.get("url") and port_creds.get("api_key")),
         "dockerhub_user": dh_cfg.get("username", ""),
         "dockerhub_token_set": bool(dh_creds.get("token")),
@@ -179,35 +216,68 @@ async def admin_integrations_test_portainer(
     request: Request,
     portainer_url: str = Form(""),
     portainer_api_key: str = Form(""),
-    portainer_verify_ssl: str = Form(""),
+    trust_accepted: str = Form(""),
 ) -> HTMLResponse:
     """Test Portainer connection — same logic as connections test, returns inline HTML."""
     url = portainer_url.strip().rstrip("/")
     key = portainer_api_key.strip()
-    verify_ssl = portainer_verify_ssl == "on"
     if not url or not key:
         return HTMLResponse(
             '<span class="text-amber-400 text-sm">Enter a URL and API token first.</span>'
         )
+
+    if trust_accepted == "1":
+        pem = request.session.get("pending_cert_portainer", "")
+        if not pem:
+            return HTMLResponse(
+                '<span class="text-red-400 text-sm">&#10007; Session expired — re-test to try again.</span>'
+            )
+    else:
+        pem = get_portainer_config().get("pinned_cert_pem", "")
+
     try:
         from .portainer_client import PortainerClient
 
-        client = PortainerClient(url=url, api_key=key, verify_ssl=verify_ssl)
+        client = PortainerClient(url=url, api_key=key, pinned_cert_pem=pem)
         endpoints = await client.get_endpoints()
         count = len(endpoints)
+        if trust_accepted == "1":
+            fp = fingerprint(pem)
+            request.session["confirmed_cert_portainer"] = {"pem": pem, "fingerprint": fp}
+            request.session.pop("pending_cert_portainer", None)
+            return HTMLResponse(
+                f'<span class="text-green-400 text-sm">&#10003; Connected — '
+                f'{count} environment{"s" if count != 1 else ""} found. '
+                f'Certificate pinned. Click Save to apply.</span>'
+            )
         return HTMLResponse(
             f'<span class="text-green-400 text-sm">&#10003; Connected — '
             f'{count} environment{"s" if count != 1 else ""} found. '
             f'Click Save to apply.</span>'
         )
     except Exception as exc:
+        if _is_ssl_cert_error(exc):
+            changed = bool(pem)
+            try:
+                new_pem = fetch_server_cert(url)
+                info = cert_info(new_pem)
+                request.session["pending_cert_portainer"] = new_pem
+            except Exception:
+                return HTMLResponse(
+                    '<span class="text-red-400 text-sm">&#10007; SSL certificate error — could not fetch certificate details.</span>'
+                )
+            return _cert_trust_response(
+                request, info,
+                test_url="/admin/integrations/portainer/test",
+                include_ids="#port-url,#port-key",
+                target_id="#portainer-test-result",
+                changed=changed,
+            )
         msg = str(exc)
         if "401" in msg or "403" in msg:
             hint = "Invalid API token — check you copied it correctly."
         elif "Name or service not known" in msg or "connect" in msg.lower():
             hint = "Can't reach that address — check the URL and that Portainer is running."
-        elif "SSL" in msg or "certificate" in msg.lower():
-            hint = "SSL error — try disabling SSL verification."
         else:
             hint = msg
         return HTMLResponse(f'<span class="text-red-400 text-sm">&#10007; {hint}</span>')
@@ -218,13 +288,15 @@ async def admin_integrations_save_portainer(
     request: Request,
     portainer_url: str = Form(""),
     portainer_api_key: str = Form(""),
-    portainer_verify_ssl: str = Form(""),
 ) -> HTMLResponse:
     url = portainer_url.strip().rstrip("/")
     key = portainer_api_key.strip()
-    verify_ssl = portainer_verify_ssl == "on"
-
-    save_portainer_config(url=url, verify_ssl=verify_ssl)
+    confirmed = request.session.pop("confirmed_cert_portainer", {})
+    save_portainer_config(
+        url=url,
+        pinned_cert_pem=confirmed.get("pem", ""),
+        pinned_fingerprint=confirmed.get("fingerprint", ""),
+    )
     if key:
         save_integration_credentials("portainer", api_key=key)
         audit(request, "credential.save", target="portainer")
@@ -272,13 +344,13 @@ async def admin_proxmox_discover(request: Request) -> HTMLResponse:
         token = f"{api_user}!{api_token}" if api_user else api_token
     else:
         token = f"{token_id}={secret}"
-    verify_ssl = cfg.get("verify_ssl", False)
+    pinned_pem = cfg.get("pinned_cert_pem", "")
     if not url or not token:
         return HTMLResponse(
             '<span style="font-size:12px;color:#f85149">Proxmox not configured.</span>'
         )
     try:
-        client = ProxmoxClient(url=url, api_token=token, verify_ssl=verify_ssl)
+        client = ProxmoxClient(url=url, api_token=token, pinned_cert_pem=pinned_pem)
         resources = await client.discover_resources()
         return templates.TemplateResponse(
             "partials/admin_proxmox_discover.html",
@@ -375,7 +447,7 @@ async def admin_proxmox_add_node_host(request: Request) -> HTMLResponse:
         token = f"{api_user}!{api_token}" if api_user else api_token
     else:
         token = f"{token_id}={secret}"
-    verify_ssl = cfg.get("verify_ssl", False)
+    pinned_pem = cfg.get("pinned_cert_pem", "")
     if not url or not token:
         return HTMLResponse(
             '<span style="font-size:12px;color:#f85149">Proxmox not configured.</span>'
@@ -385,7 +457,7 @@ async def admin_proxmox_add_node_host(request: Request) -> HTMLResponse:
     px_host = urllib.parse.urlparse(url).hostname or ""
 
     try:
-        client = ProxmoxClient(url=url, api_token=token, verify_ssl=verify_ssl)
+        client = ProxmoxClient(url=url, api_token=token, pinned_cert_pem=pinned_pem)
         nodes = await client.get_nodes()
     except Exception as exc:
         return HTMLResponse(
@@ -744,29 +816,64 @@ async def admin_test_portainer(
     request: Request,
     portainer_url: str = Form(""),
     portainer_api_key: str = Form(""),
-    portainer_verify_ssl: str = Form(""),
+    trust_accepted: str = Form(""),
 ) -> HTMLResponse:
     """Test Portainer connection with provided (unsaved) values."""
     url = portainer_url.strip().rstrip("/")
     key = portainer_api_key.strip()
-    verify_ssl = portainer_verify_ssl == "on"
 
     if not url or not key:
         return HTMLResponse(
             '<span class="text-amber-400 text-sm">Enter a URL and API token first.</span>'
         )
+
+    if trust_accepted == "1":
+        pem = request.session.get("pending_cert_portainer", "")
+        if not pem:
+            return HTMLResponse(
+                '<span class="text-red-400 text-sm">&#10007; Session expired — re-test to try again.</span>'
+            )
+    else:
+        pem = get_portainer_config().get("pinned_cert_pem", "")
+
     try:
         from .portainer_client import PortainerClient
 
-        client = PortainerClient(url=url, api_key=key, verify_ssl=verify_ssl)
+        client = PortainerClient(url=url, api_key=key, pinned_cert_pem=pem)
         endpoints = await client.get_endpoints()
         count = len(endpoints)
+        if trust_accepted == "1":
+            fp = fingerprint(pem)
+            request.session["confirmed_cert_portainer"] = {"pem": pem, "fingerprint": fp}
+            request.session.pop("pending_cert_portainer", None)
+            return HTMLResponse(
+                f'<span class="text-green-400 text-sm">&#10003; Connected — '
+                f'{count} environment{"s" if count != 1 else ""} found. '
+                f'Certificate pinned. Click Save to apply.</span>'
+            )
         return HTMLResponse(
             f'<span class="text-green-400 text-sm">&#10003; Connected — '
             f'{count} environment{"s" if count != 1 else ""} found. '
             f'Click Save to apply.</span>'
         )
     except Exception as exc:
+        if _is_ssl_cert_error(exc):
+            changed = bool(pem)
+            try:
+                new_pem = fetch_server_cert(url)
+                info = cert_info(new_pem)
+                request.session["pending_cert_portainer"] = new_pem
+            except Exception:
+                return HTMLResponse(
+                    '<span class="text-red-400 text-sm">&#10007; SSL certificate error — could not fetch certificate details.</span>'
+                )
+            return _cert_trust_response(
+                request, info,
+                test_url="/admin/connections/portainer/test",
+                include_ids="#port-url,#port-key",
+                target_id="#portainer-test-result",
+                changed=changed,
+            )
         msg = str(exc)
         if "401" in msg or "403" in msg:
             hint = "Invalid API token — check you copied it correctly."
@@ -776,8 +883,6 @@ async def admin_test_portainer(
             or "connect" in msg.lower()
         ):
             hint = "Can't reach that address — check the URL and that Portainer is running."
-        elif "SSL" in msg or "certificate" in msg.lower():
-            hint = "SSL error — try enabling &ldquo;Ignore SSL warnings&rdquo; below."
         else:
             hint = msg
         return HTMLResponse(
@@ -790,13 +895,15 @@ async def admin_save_portainer(
     request: Request,
     portainer_url: str = Form(""),
     portainer_api_key: str = Form(""),
-    portainer_verify_ssl: str = Form(""),
 ) -> HTMLResponse:
     url = portainer_url.strip().rstrip("/")
     key = portainer_api_key.strip()
-    verify_ssl = portainer_verify_ssl == "on"
-
-    save_portainer_config(url=url, verify_ssl=verify_ssl)
+    confirmed = request.session.pop("confirmed_cert_portainer", {})
+    save_portainer_config(
+        url=url,
+        pinned_cert_pem=confirmed.get("pem", ""),
+        pinned_fingerprint=confirmed.get("fingerprint", ""),
+    )
     if key:
         save_integration_credentials("portainer", api_key=key)
 

@@ -65,7 +65,7 @@ def test_setup_summary_shows_configured_integration(setup_client, data_dir):
     from app.credentials import save_integration_credentials
 
     _create_admin()
-    save_proxmox_config(url="https://192.168.1.10:8006", verify_ssl=False)
+    save_proxmox_config(url="https://192.168.1.10:8006")
     save_integration_credentials("proxmox", api_token="user@pam!token=abc")
     response = setup_client.get("/setup/summary")
     assert "Proxmox VE" in response.text
