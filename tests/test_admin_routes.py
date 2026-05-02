@@ -31,7 +31,7 @@ def test_admin_integrations_shows_portainer_configured(client, data_dir, config_
     from app.config_manager import save_portainer_config
     from app.credentials import save_integration_credentials
 
-    save_portainer_config(url="https://portainer.test:9443", verify_ssl=False)
+    save_portainer_config(url="https://portainer.test:9443")
     save_integration_credentials("portainer", api_key="test-api-key")
     response = client.get("/admin/integrations")
     assert "portainer.test" in response.text
@@ -462,7 +462,6 @@ def test_admin_integrations_test_portainer_success(client):
             data={
                 "portainer_url": "https://portainer.test:9443",
                 "portainer_api_key": "testkey",
-                "portainer_verify_ssl": "",
             },
         )
     assert response.status_code == 200
@@ -490,7 +489,7 @@ def test_admin_integrations_test_portainer_ssl_error(client):
     with patch(
         "app.portainer_client.PortainerClient.get_endpoints",
         new=AsyncMock(side_effect=Exception("SSL certificate verify failed")),
-    ):
+    ), patch("app.admin.fetch_server_cert", side_effect=Exception("no conn")):
         response = client.post(
             "/admin/integrations/portainer/test",
             data={
@@ -499,7 +498,7 @@ def test_admin_integrations_test_portainer_ssl_error(client):
             },
         )
     assert response.status_code == 200
-    assert "SSL error" in response.text
+    assert "SSL" in response.text
 
 
 # ---------------------------------------------------------------------------
@@ -514,7 +513,6 @@ def test_admin_integrations_save_portainer(client):
             data={
                 "portainer_url": "https://portainer.test:9443",
                 "portainer_api_key": "mykey",
-                "portainer_verify_ssl": "",
             },
         )
     assert response.status_code == 200
@@ -561,7 +559,7 @@ def test_admin_proxmox_discover_success(client, data_dir, config_file):
     from app.auth_router import save_proxmox_config
     from app.credentials import save_integration_credentials
 
-    save_proxmox_config(url="https://192.168.1.10:8006", verify_ssl=False)
+    save_proxmox_config(url="https://192.168.1.10:8006")
     save_integration_credentials("proxmox", token_id="root@pam!tok", secret="abc123")
 
     resources = [
@@ -583,7 +581,7 @@ def test_admin_proxmox_discover_error(client, data_dir, config_file):
     from app.auth_router import save_proxmox_config
     from app.credentials import save_integration_credentials
 
-    save_proxmox_config(url="https://192.168.1.10:8006", verify_ssl=False)
+    save_proxmox_config(url="https://192.168.1.10:8006")
     save_integration_credentials("proxmox", token_id="root@pam!tok", secret="abc123")
 
     with patch(
@@ -730,7 +728,7 @@ def test_admin_proxmox_add_node_host_success(client, data_dir, config_file):
     from app.auth_router import save_proxmox_config
     from app.credentials import save_integration_credentials
 
-    save_proxmox_config(url="https://192.168.1.10:8006", verify_ssl=False)
+    save_proxmox_config(url="https://192.168.1.10:8006")
     save_integration_credentials("proxmox", token_id="root@pam!tok", secret="abc")
 
     with patch(
@@ -752,7 +750,7 @@ def test_admin_proxmox_add_node_host_already_exists(client, data_dir, config_fil
     from app.credentials import save_integration_credentials
 
     # Use a Proxmox URL whose hostname resolves to an existing host IP
-    save_proxmox_config(url=f"https://{existing_ip}:8006", verify_ssl=False)
+    save_proxmox_config(url=f"https://{existing_ip}:8006")
     save_integration_credentials("proxmox", token_id="root@pam!tok", secret="abc")
 
     with patch(
@@ -768,7 +766,7 @@ def test_admin_proxmox_add_node_host_api_error(client, data_dir, config_file):
     from app.auth_router import save_proxmox_config
     from app.credentials import save_integration_credentials
 
-    save_proxmox_config(url="https://192.168.1.10:8006", verify_ssl=False)
+    save_proxmox_config(url="https://192.168.1.10:8006")
     save_integration_credentials("proxmox", token_id="root@pam!tok", secret="abc")
 
     with patch(

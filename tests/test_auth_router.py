@@ -431,7 +431,6 @@ def test_setup_save_proxmox(auth_client, data_dir):
             "proxmox_api_user": "user@pam",
             "proxmox_token_id": "user@pam!token",
             "proxmox_secret": "abc123",
-            "proxmox_verify_ssl": "",
         },
     )
     assert response.status_code == 200
@@ -446,7 +445,6 @@ def test_setup_save_opnsense(auth_client, data_dir):
             "opnsense_url": "https://192.168.1.1",
             "opnsense_api_key": "mykey",
             "opnsense_api_secret": "mysecret",
-            "opnsense_verify_ssl": "",
         },
     )
     assert response.status_code == 200
@@ -475,7 +473,6 @@ def test_setup_save_pbs(auth_client, data_dir):
             "pbs_api_user": "user@pbs",
             "pbs_token_id": "user@pbs!token",
             "pbs_secret": "abc",
-            "pbs_verify_ssl": "",
         },
     )
     assert response.status_code == 200
@@ -489,7 +486,6 @@ def test_setup_save_pfsense(auth_client, data_dir):
         data={
             "pfsense_url": "https://192.168.1.1",
             "pfsense_api_key": "mykey",
-            "pfsense_verify_ssl": "",
         },
     )
     assert response.status_code == 200

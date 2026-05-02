@@ -62,7 +62,7 @@ def test_reset_config_clears_hosts(config_file):
 def test_reset_config_clears_portainer(config_file):
     from app.config_manager import save_portainer_config, reset_config, load_config
 
-    save_portainer_config(url="https://portainer.test", verify_ssl=False)
+    save_portainer_config(url="https://portainer.test")
     reset_config()
     config = load_config()
     assert "portainer" not in config
@@ -171,7 +171,7 @@ def test_factory_reset_resets_config(config_file):
     """reset_config() clears portainer from config."""
     from app.config_manager import load_config, save_portainer_config, reset_config
 
-    save_portainer_config(url="https://portainer.example:9443", verify_ssl=False)
+    save_portainer_config(url="https://portainer.example:9443")
     reset_config()
     config = load_config()
     assert "portainer" not in config

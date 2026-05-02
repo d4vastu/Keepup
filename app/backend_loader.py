@@ -36,7 +36,7 @@ async def reload_backends() -> list:
     port_creds = get_integration_credentials("portainer")
     url = port_cfg.get("url", "")
     key = port_creds.get("api_key", "")
-    verify_ssl = port_cfg.get("verify_ssl", False)
+    pinned_pem = port_cfg.get("pinned_cert_pem", "")
 
     if url and key:
         from .portainer_client import PortainerClient
@@ -44,7 +44,7 @@ async def reload_backends() -> list:
 
         backends.append(
             PortainerBackend(
-                PortainerClient(url=url, api_key=key, verify_ssl=verify_ssl)
+                PortainerClient(url=url, api_key=key, pinned_cert_pem=pinned_pem)
             )
         )
 

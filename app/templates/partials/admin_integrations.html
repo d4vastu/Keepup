@@ -182,10 +182,7 @@
           <input type="password" id="proxmox-secret" name="proxmox_secret" placeholder="{% if integ.proxmox_secret_set %}Leave blank to keep{% else %}xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx{% endif %}" class="field-input">
         </div>
       </div>
-      <div class="ssl-row">
-        <input type="checkbox" id="proxmox-ssl" name="proxmox_verify_ssl" value="on" {% if integ.proxmox_verify_ssl %}checked{% endif %}>
-        <label for="proxmox-ssl">Verify SSL certificate</label>
-      </div>
+      {% if integ.proxmox_pinned %}<div class="field-hint" style="color:#3fb950;margin-bottom:6px;">&#128274; Certificate pinned &mdash; <span style="font-family:monospace;font-size:10px;">{{ integ.proxmox_cert_fingerprint[:29] }}&hellip;</span></div>{% endif %}
       {% if integ.proxmox_configured %}
       <div style="border-top:0.5px solid #21262d;margin:10px 0 12px;"></div>
       <div class="field-label" style="margin-bottom:6px;">SSH ACCESS FOR LXC UPDATES</div>
@@ -228,11 +225,11 @@
       <div class="btn-row">
         <button class="btn-test"
           hx-post="/setup/connect/proxmox/test"
-          hx-include="#proxmox-url,#proxmox-api-user,#proxmox-token-id,#proxmox-secret,#proxmox-ssl"
+          hx-include="#proxmox-url,#proxmox-api-user,#proxmox-token-id,#proxmox-secret"
           hx-target="#proxmox-test-result">Test API</button>
         <button class="btn-save"
           hx-post="/setup/connect/proxmox/save"
-          hx-include="#proxmox-url,#proxmox-api-user,#proxmox-token-id,#proxmox-secret,#proxmox-ssl,#proxmox-ssh-user,#proxmox-ssh-auth,#proxmox-ssh-key,#proxmox-ssh-pass"
+          hx-include="#proxmox-url,#proxmox-api-user,#proxmox-token-id,#proxmox-secret,#proxmox-ssh-user,#proxmox-ssh-auth,#proxmox-ssh-key,#proxmox-ssh-pass"
           hx-target="#proxmox-result">Save</button>
         {% if integ.proxmox_configured %}
         <button class="btn-test"
@@ -283,19 +280,16 @@
           <input type="password" id="pbs-secret" name="pbs_secret" placeholder="{% if integ.pbs_secret_set %}Leave blank to keep{% else %}xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx{% endif %}" class="field-input">
         </div>
       </div>
-      <div class="ssl-row">
-        <input type="checkbox" id="pbs-ssl" name="pbs_verify_ssl" value="on" {% if integ.pbs_verify_ssl %}checked{% endif %}>
-        <label for="pbs-ssl">Verify SSL certificate</label>
-      </div>
+      {% if integ.pbs_pinned %}<div class="field-hint" style="color:#3fb950;margin-bottom:6px;">&#128274; Certificate pinned &mdash; <span style="font-family:monospace;font-size:10px;">{{ integ.pbs_cert_fingerprint[:29] }}&hellip;</span></div>{% endif %}
       <div id="pbs-test-result" class="result-area"></div>
       <div class="btn-row">
         <button class="btn-test"
           hx-post="/setup/connect/pbs/test"
-          hx-include="#pbs-url,#pbs-user,#pbs-token-id,#pbs-secret,#pbs-ssl"
+          hx-include="#pbs-url,#pbs-user,#pbs-token-id,#pbs-secret"
           hx-target="#pbs-test-result">Test connection</button>
         <button class="btn-save"
           hx-post="/setup/connect/pbs/save"
-          hx-include="#pbs-url,#pbs-user,#pbs-token-id,#pbs-secret,#pbs-ssl"
+          hx-include="#pbs-url,#pbs-user,#pbs-token-id,#pbs-secret"
           hx-target="#pbs-result">Save</button>
       </div>
     </div>
@@ -331,19 +325,16 @@
         </div>
       </div>
       <div class="field-hint" style="margin-bottom:8px">System → Access → Users → your user → API keys</div>
-      <div class="ssl-row">
-        <input type="checkbox" id="opn-ssl" name="opnsense_verify_ssl" value="on" {% if integ.opnsense_verify_ssl %}checked{% endif %}>
-        <label for="opn-ssl">Verify SSL certificate</label>
-      </div>
+      {% if integ.opnsense_pinned %}<div class="field-hint" style="color:#3fb950;margin-bottom:6px;">&#128274; Certificate pinned &mdash; <span style="font-family:monospace;font-size:10px;">{{ integ.opnsense_cert_fingerprint[:29] }}&hellip;</span></div>{% endif %}
       <div id="opnsense-test-result" class="result-area"></div>
       <div class="btn-row">
         <button class="btn-test"
           hx-post="/setup/connect/opnsense/test"
-          hx-include="#opn-url,#opn-key,#opn-secret,#opn-ssl"
+          hx-include="#opn-url,#opn-key,#opn-secret"
           hx-target="#opnsense-test-result">Test connection</button>
         <button class="btn-save"
           hx-post="/setup/connect/opnsense/save"
-          hx-include="#opn-url,#opn-key,#opn-secret,#opn-ssl"
+          hx-include="#opn-url,#opn-key,#opn-secret"
           hx-target="#opnsense-result">Save</button>
       </div>
     </div>
@@ -373,19 +364,16 @@
         <input type="password" id="pf-key" name="pfsense_api_key" placeholder="{% if integ.pfsense_configured %}Leave blank to keep{% else %}Paste API key here{% endif %}" class="field-input">
         <div class="field-hint">System → API → Keys in the pfSense-API package</div>
       </div>
-      <div class="ssl-row">
-        <input type="checkbox" id="pf-ssl" name="pfsense_verify_ssl" value="on" {% if integ.pfsense_verify_ssl %}checked{% endif %}>
-        <label for="pf-ssl">Verify SSL certificate</label>
-      </div>
+      {% if integ.pfsense_pinned %}<div class="field-hint" style="color:#3fb950;margin-bottom:6px;">&#128274; Certificate pinned &mdash; <span style="font-family:monospace;font-size:10px;">{{ integ.pfsense_cert_fingerprint[:29] }}&hellip;</span></div>{% endif %}
       <div id="pfsense-test-result" class="result-area"></div>
       <div class="btn-row">
         <button class="btn-test"
           hx-post="/setup/connect/pfsense/test"
-          hx-include="#pf-url,#pf-key,#pf-ssl"
+          hx-include="#pf-url,#pf-key"
           hx-target="#pfsense-test-result">Test connection</button>
         <button class="btn-save"
           hx-post="/setup/connect/pfsense/save"
-          hx-include="#pf-url,#pf-key,#pf-ssl"
+          hx-include="#pf-url,#pf-key"
           hx-target="#pfsense-result">Save</button>
       </div>
     </div>
@@ -457,19 +445,16 @@
         <input type="password" id="port-key" name="portainer_api_key" placeholder="{% if integ.portainer_key_set %}Leave blank to keep{% else %}Paste token here{% endif %}" class="field-input">
         <div class="field-hint">Your account → Access tokens → Add access token</div>
       </div>
-      <div class="ssl-row">
-        <input type="checkbox" id="port-ssl" name="portainer_verify_ssl" value="on" {% if integ.portainer_verify_ssl %}checked{% endif %}>
-        <label for="port-ssl">Verify SSL certificate</label>
-      </div>
+      {% if integ.portainer_pinned %}<div class="field-hint" style="color:#3fb950;margin-bottom:6px;">&#128274; Certificate pinned &mdash; <span style="font-family:monospace;font-size:10px;">{{ integ.portainer_cert_fingerprint[:29] }}&hellip;</span></div>{% endif %}
       <div id="portainer-test-result" class="result-area"></div>
       <div class="btn-row">
         <button class="btn-test"
           hx-post="/admin/integrations/portainer/test"
-          hx-include="#port-url,#port-key,#port-ssl"
+          hx-include="#port-url,#port-key"
           hx-target="#portainer-test-result">Test connection</button>
         <button class="btn-save"
           hx-post="/admin/integrations/portainer"
-          hx-include="#port-url,#port-key,#port-ssl"
+          hx-include="#port-url,#port-key"
           hx-target="#portainer-result">Save</button>
       </div>
     </div>

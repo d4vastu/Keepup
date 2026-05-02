@@ -15,13 +15,23 @@ log = logging.getLogger(__name__)
 
 
 class ProxmoxClient:
-    def __init__(self, url: str, api_token: str, verify_ssl: bool = False):
+    def __init__(self, url: str, api_token: str, pinned_cert_pem: str = ""):
         self.base = url.rstrip("/")
         self.headers = {"Authorization": f"PVEAPIToken={api_token}"}
-        self.verify_ssl = verify_ssl
+        self._pinned_cert_pem = pinned_cert_pem
+
+    def _ssl_ctx(self):
+        if self._pinned_cert_pem:
+            from .cert_utils import build_pinned_ssl_ctx
+            return build_pinned_ssl_ctx(self._pinned_cert_pem)
+        return None
 
     def _client(self):
-        return make_breaker_client(base_url=self.base, headers=self.headers, verify=self.verify_ssl)
+        return make_breaker_client(
+            base_url=self.base,
+            headers=self.headers,
+            ssl_context=self._ssl_ctx(),
+        )
 
     async def get_version(self) -> dict:
         log.info("Proxmox: testing API at %s", self.base)
@@ -376,7 +386,7 @@ class ProxmoxClient:
                 async with make_breaker_client(
                     base_url=self.base,
                     headers=self.headers,
-                    verify=self.verify_ssl,
+                    ssl_context=self._ssl_ctx(),
                     timeout=httpx.Timeout(connect=5, read=5, write=5, pool=5),
                 ) as c:
                     r = await c.get(f"/api2/json/nodes/{node}/status")
