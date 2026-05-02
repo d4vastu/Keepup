@@ -370,7 +370,7 @@ async def _migrate_tofu_certs() -> None:
     pinned: list[str] = []
     for name, get_cfg, save_cfg in integrations:
         cfg = get_cfg()
-        if not cfg.get("verify_ssl") or cfg.get("pinned_cert_pem"):
+        if cfg.get("verify_ssl") is not False or cfg.get("pinned_cert_pem"):
             continue
         url = cfg.get("url", "")
         if not url:

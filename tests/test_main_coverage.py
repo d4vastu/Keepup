@@ -353,3 +353,104 @@ def test_host_check_proxmox_lxc_returns_status(client, data_dir, config_file):
     ):
         response = client.get("/api/host/test-host/check")
     assert response.status_code == 200
+
+
+# ---------------------------------------------------------------------------
+# _migrate_tofu_certs
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_migrate_tofu_skips_when_already_migrated(data_dir, config_file, monkeypatch):
+    """Migration is a no-op when the tofu_migrated flag is set."""
+    import app.main as m
+
+    monkeypatch.setattr(m, "get_tofu_migrated", lambda: True)
+    with patch("app.cert_utils.fetch_server_cert") as mock_fetch:
+        await m._migrate_tofu_certs()
+    mock_fetch.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_migrate_tofu_pins_cert_for_verify_ssl_false(data_dir, config_file, monkeypatch):
+    """Migration auto-pins a cert when verify_ssl=False is in the saved config."""
+    import app.main as m
+    from app.config_manager import get_portainer_config
+
+    import yaml
+    import app.config_manager as cm
+    cfg_path = cm._CONFIG_PATH
+    raw = yaml.safe_load(cfg_path.read_text()) if cfg_path.exists() else {}
+    raw["portainer"] = {
+        "url": "https://portainer.test:9443",
+        "verify_ssl": False,
+    }
+    cfg_path.write_text(yaml.dump(raw))
+
+    monkeypatch.setattr(m, "get_tofu_migrated", lambda: False)
+    monkeypatch.setattr(m, "mark_tofu_migrated", lambda: None)
+
+    from app.ssl_manager import generate_self_signed_cert
+    pem, _ = generate_self_signed_cert("portainer.test")
+
+    with patch("app.cert_utils.fetch_server_cert", return_value=pem), \
+         patch("app.notifications.notify") as mock_notify:
+        await m._migrate_tofu_certs()
+
+    cfg = get_portainer_config()
+    assert cfg.get("pinned_cert_pem") == pem
+    assert cfg.get("pinned_fingerprint")
+    mock_notify.assert_called_once()
+    assert "portainer" in str(mock_notify.call_args)
+
+
+@pytest.mark.asyncio
+async def test_migrate_tofu_skips_when_already_pinned(data_dir, config_file, monkeypatch):
+    """Migration skips integrations that already have a pinned cert."""
+    import app.main as m
+    from app.ssl_manager import generate_self_signed_cert
+
+    import yaml
+    import app.config_manager as cm
+    pem, _ = generate_self_signed_cert("portainer.test")
+    cfg_path = cm._CONFIG_PATH
+    raw = yaml.safe_load(cfg_path.read_text()) if cfg_path.exists() else {}
+    raw["portainer"] = {
+        "url": "https://portainer.test:9443",
+        "verify_ssl": False,
+        "pinned_cert_pem": pem,
+        "pinned_fingerprint": "AA:BB:CC",
+    }
+    cfg_path.write_text(yaml.dump(raw))
+
+    monkeypatch.setattr(m, "get_tofu_migrated", lambda: False)
+    monkeypatch.setattr(m, "mark_tofu_migrated", lambda: None)
+
+    with patch("app.cert_utils.fetch_server_cert") as mock_fetch:
+        await m._migrate_tofu_certs()
+    mock_fetch.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_migrate_tofu_handles_fetch_error_gracefully(data_dir, config_file, monkeypatch):
+    """Migration logs and continues when cert fetch fails for an integration."""
+    import app.main as m
+
+    import yaml
+    import app.config_manager as cm
+    cfg_path = cm._CONFIG_PATH
+    raw = yaml.safe_load(cfg_path.read_text()) if cfg_path.exists() else {}
+    raw["portainer"] = {
+        "url": "https://portainer.test:9443",
+        "verify_ssl": False,
+    }
+    cfg_path.write_text(yaml.dump(raw))
+
+    monkeypatch.setattr(m, "get_tofu_migrated", lambda: False)
+    monkeypatch.setattr(m, "mark_tofu_migrated", lambda: None)
+
+    with patch("app.cert_utils.fetch_server_cert", side_effect=Exception("connection refused")), \
+         patch("app.notifications.notify") as mock_notify:
+        await m._migrate_tofu_certs()  # must not raise
+
+    mock_notify.assert_not_called()  # no notification when nothing was pinned
