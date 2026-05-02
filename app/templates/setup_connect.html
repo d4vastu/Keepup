@@ -287,19 +287,15 @@
               <div class="field-hint">Configuration → Access Control → API Tokens → Secret</div>
             </div>
           </div>
-          <div class="ssl-row">
-            <input type="checkbox" id="pbs-ssl" name="pbs_verify_ssl" value="on">
-            <label for="pbs-ssl">Verify SSL certificate</label>
-          </div>
           <div id="pbs-test-result" style="font-size:12px;margin-bottom:6px"></div>
           <div class="btn-row">
             <button class="btn-test"
               hx-post="/setup/connect/pbs/test"
-              hx-include="#pbs-url,#pbs-user,#pbs-token-id,#pbs-secret,#pbs-ssl"
+              hx-include="#pbs-url,#pbs-user,#pbs-token-id,#pbs-secret"
               hx-target="#pbs-test-result">Test connection</button>
             <button class="btn-save"
               hx-post="/setup/connect/pbs/save"
-              hx-include="#pbs-url,#pbs-user,#pbs-token-id,#pbs-secret,#pbs-ssl"
+              hx-include="#pbs-url,#pbs-user,#pbs-token-id,#pbs-secret"
               hx-target="#pbs-result">Save</button>
           </div>
         </div>
@@ -343,19 +339,15 @@
             </div>
           </div>
           <div class="field-hint" style="margin-bottom:8px">OPNsense: System → Access → Users → your user → API keys</div>
-          <div class="ssl-row">
-            <input type="checkbox" id="opn-ssl" name="opnsense_verify_ssl" value="on">
-            <label for="opn-ssl">Verify SSL certificate</label>
-          </div>
           <div id="opnsense-test-result" style="font-size:12px;margin-bottom:6px"></div>
           <div class="btn-row">
             <button class="btn-test"
               hx-post="/setup/connect/opnsense/test"
-              hx-include="#opn-url,#opn-key,#opn-secret,#opn-ssl"
+              hx-include="#opn-url,#opn-key,#opn-secret"
               hx-target="#opnsense-test-result">Test connection</button>
             <button class="btn-save"
               hx-post="/setup/connect/opnsense/save"
-              hx-include="#opn-url,#opn-key,#opn-secret,#opn-ssl"
+              hx-include="#opn-url,#opn-key,#opn-secret"
               hx-target="#opnsense-result">Save</button>
           </div>
         </div>
@@ -392,19 +384,15 @@
             <div class="field-label">API key</div>
             <input type="password" id="pf-key" name="pfsense_api_key" placeholder="API key" class="field-input">
           </div>
-          <div class="ssl-row">
-            <input type="checkbox" id="pf-ssl" name="pfsense_verify_ssl" value="on">
-            <label for="pf-ssl">Verify SSL certificate</label>
-          </div>
           <div id="pfsense-test-result" style="font-size:12px;margin-bottom:6px"></div>
           <div class="btn-row">
             <button class="btn-test"
               hx-post="/setup/connect/pfsense/test"
-              hx-include="#pf-url,#pf-key,#pf-ssl"
+              hx-include="#pf-url,#pf-key"
               hx-target="#pfsense-test-result">Test connection</button>
             <button class="btn-save"
               hx-post="/setup/connect/pfsense/save"
-              hx-include="#pf-url,#pf-key,#pf-ssl"
+              hx-include="#pf-url,#pf-key"
               hx-target="#pfsense-result">Save</button>
           </div>
         </div>

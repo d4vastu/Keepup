@@ -299,7 +299,7 @@ async def test_discover_stacks_pct_host_uses_pct_exec(config_file, data_dir):
     from app.config_manager import save_proxmox_config
     from app.credentials import save_integration_credentials
 
-    save_proxmox_config(url="https://pve.example:8006", verify_ssl=False)
+    save_proxmox_config(url="https://pve.example:8006")
     save_integration_credentials("proxmox", ssh_user="root", ssh_key="id_proxmox")
 
     raw = yaml.safe_load(config_file.read_text())
@@ -394,7 +394,7 @@ async def test_discover_containers_pct_host_uses_pct_exec(config_file, data_dir)
     from app.config_manager import save_proxmox_config
     from app.credentials import save_integration_credentials
 
-    save_proxmox_config(url="https://pve.example:8006", verify_ssl=False)
+    save_proxmox_config(url="https://pve.example:8006")
     save_integration_credentials("proxmox", ssh_user="root", ssh_key="id_proxmox")
 
     raw = yaml.safe_load(config_file.read_text())
@@ -618,7 +618,7 @@ async def test_proxmox_lxc_all_mode(config_file, data_dir):
     from app.config_manager import save_proxmox_config
     from app.credentials import save_integration_credentials
 
-    save_proxmox_config(url="https://pve.example:8006", verify_ssl=False)
+    save_proxmox_config(url="https://pve.example:8006")
     save_integration_credentials("proxmox", ssh_user="root", ssh_key="id_proxmox")
 
     raw = yaml.safe_load(config_file.read_text())
@@ -652,7 +652,7 @@ async def test_proxmox_lxc_selected_mode(config_file, data_dir):
     from app.config_manager import save_proxmox_config
     from app.credentials import save_integration_credentials
 
-    save_proxmox_config(url="https://pve.example:8006", verify_ssl=False)
+    save_proxmox_config(url="https://pve.example:8006")
     save_integration_credentials("proxmox", ssh_user="root", ssh_key="id_proxmox")
 
     raw = yaml.safe_load(config_file.read_text())
@@ -1747,7 +1747,7 @@ def test_ssh_params_for_pct_host_wraps_with_pct_exec(config_file, data_dir):
     from app.config_manager import save_proxmox_config
     from app.credentials import save_integration_credentials
 
-    save_proxmox_config(url="https://pve.example:8006", verify_ssl=False)
+    save_proxmox_config(url="https://pve.example:8006")
     save_integration_credentials(
         "proxmox", ssh_user="root", ssh_key="id_proxmox", ssh_password=""
     )
@@ -1776,7 +1776,7 @@ def test_ssh_params_for_pct_host_password_auth(config_file, data_dir):
     from app.config_manager import save_proxmox_config
     from app.credentials import save_integration_credentials
 
-    save_proxmox_config(url="https://pve.example:8006", verify_ssl=False)
+    save_proxmox_config(url="https://pve.example:8006")
     save_integration_credentials(
         "proxmox", ssh_user="root", ssh_key="", ssh_password="hunter2"
     )
@@ -1801,7 +1801,7 @@ async def test_containers_for_host_pct_wraps_docker_ps(config_file, data_dir):
     from app.config_manager import save_proxmox_config
     from app.credentials import save_integration_credentials
 
-    save_proxmox_config(url="https://pve.example:8006", verify_ssl=False)
+    save_proxmox_config(url="https://pve.example:8006")
     save_integration_credentials("proxmox", ssh_user="root", ssh_key="id_proxmox")
 
     raw = yaml.safe_load(config_file.read_text())
@@ -1845,7 +1845,7 @@ async def test_update_compose_pct_wraps_commands(config_file, data_dir):
     from app.config_manager import save_proxmox_config
     from app.credentials import save_integration_credentials
 
-    save_proxmox_config(url="https://pve.example:8006", verify_ssl=False)
+    save_proxmox_config(url="https://pve.example:8006")
     save_integration_credentials("proxmox", ssh_user="root", ssh_key="id_proxmox")
 
     raw = yaml.safe_load(config_file.read_text())
@@ -1891,7 +1891,7 @@ async def test_update_standalone_pct_wraps_commands(config_file, data_dir):
     from app.config_manager import save_proxmox_config
     from app.credentials import save_integration_credentials
 
-    save_proxmox_config(url="https://pve.example:8006", verify_ssl=False)
+    save_proxmox_config(url="https://pve.example:8006")
     save_integration_credentials("proxmox", ssh_user="root", ssh_key="id_proxmox")
 
     raw = yaml.safe_load(config_file.read_text())

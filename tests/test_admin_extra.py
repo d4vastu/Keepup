@@ -1,6 +1,6 @@
 """Additional admin route tests for coverage gaps."""
 
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 
 # ---------------------------------------------------------------------------
@@ -76,7 +76,8 @@ def test_portainer_test_connection_connect_error(client):
 
 
 def test_portainer_test_connection_ssl_error(client):
-    with patch("app.portainer_client.PortainerClient") as MockClient:
+    with patch("app.portainer_client.PortainerClient") as MockClient, \
+         patch("app.admin.fetch_server_cert", side_effect=Exception("no conn")):
         instance = MockClient.return_value
         instance.get_endpoints = AsyncMock(
             side_effect=Exception("SSL certificate verify failed")
@@ -118,7 +119,6 @@ def test_save_portainer_config(client):
         data={
             "portainer_url": "https://portainer.example.com:9443",
             "portainer_api_key": "my-api-key",
-            "portainer_verify_ssl": "",
         },
     )
     assert response.status_code == 200

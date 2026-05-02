@@ -25,7 +25,7 @@ async def test_reload_backends_with_portainer_ui_config():
     from app.config_manager import save_portainer_config
     from app.credentials import save_integration_credentials
 
-    save_portainer_config(url="https://portainer.test:9443", verify_ssl=False)
+    save_portainer_config(url="https://portainer.test:9443")
     save_integration_credentials("portainer", api_key="test-api-key")
 
     import app.backend_loader as bl

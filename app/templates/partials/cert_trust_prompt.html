@@ -1,0 +1,27 @@
+<div style="background:#161b22;border:1px solid {% if changed %}#9e6a03{% else %}#30363d{% endif %};border-radius:6px;padding:12px;font-size:12px;">
+  <div style="color:{% if changed %}#e3b341{% else %}#d29922{% endif %};font-weight:600;margin-bottom:6px;">
+    {% if changed %}&#9888;&#xFE0F; Certificate changed{% else %}&#128274; Untrusted certificate{% endif %}
+  </div>
+  <div style="color:#8b949e;margin-bottom:10px;">
+    {% if changed %}
+      This server&#39;s certificate no longer matches the one you pinned. Review the new certificate and re-trust to continue.
+    {% else %}
+      This server uses a self-signed certificate. Review it carefully — once trusted, Keepup will only accept this exact certificate from this server.
+    {% endif %}
+  </div>
+  <div style="background:#0d1117;border:1px solid #21262d;border-radius:4px;padding:8px;margin-bottom:10px;font-family:monospace;line-height:1.6;">
+    <div><span style="color:#8b949e;display:inline-block;width:80px;">SHA-256</span><span style="color:#cdd9e5;word-break:break-all;">{{ info.fingerprint }}</span></div>
+    <div><span style="color:#8b949e;display:inline-block;width:80px;">Subject</span><span style="color:#cdd9e5;">{{ info.subject_cn }}</span></div>
+    <div><span style="color:#8b949e;display:inline-block;width:80px;">Issuer</span><span style="color:#cdd9e5;">{{ info.issuer_cn }}</span></div>
+    <div><span style="color:#8b949e;display:inline-block;width:80px;">Valid from</span><span style="color:#cdd9e5;">{{ info.not_before }}</span></div>
+    <div><span style="color:#8b949e;display:inline-block;width:80px;">Valid to</span><span style="color:#cdd9e5;">{{ info.not_after }}</span></div>
+  </div>
+  <button
+    style="font-size:12px;padding:4px 12px;border-radius:5px;border:1px solid #388bfd;background:transparent;color:#388bfd;cursor:pointer;"
+    hx-post="{{ test_url }}"
+    hx-include="{{ include_ids }}"
+    hx-vals='{"trust_accepted": "1"}'
+    hx-target="{{ target_id }}">
+    Trust this certificate
+  </button>
+</div>

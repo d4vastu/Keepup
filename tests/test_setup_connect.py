@@ -177,7 +177,7 @@ def test_proxmox_discover_auto_adds_node(setup_client, data_dir, config_file):
     _create_admin()
     from app.config_manager import save_proxmox_config
     from app.credentials import save_integration_credentials
-    save_proxmox_config(url="https://192.168.5.227:8006", verify_ssl=False)
+    save_proxmox_config(url="https://192.168.5.227:8006")
     save_integration_credentials("proxmox", token_id="root@pam!t", secret="s", api_user="root@pam")
     with patch("app.auth_router.ProxmoxClient") as MockClient:
         instance = AsyncMock()
@@ -295,7 +295,7 @@ def test_proxmox_discover_success(setup_client, data_dir):
     from app.config_manager import save_proxmox_config
     from app.credentials import save_integration_credentials
 
-    save_proxmox_config(url="https://192.168.1.10:8006", verify_ssl=False)
+    save_proxmox_config(url="https://192.168.1.10:8006")
     save_integration_credentials("proxmox", api_user="user@pam", token_id="user@pam!token", secret="abc")
 
     with patch("app.auth_router.ProxmoxClient") as MockClient:
@@ -315,7 +315,7 @@ def test_proxmox_discover_failure(setup_client, data_dir):
     from app.config_manager import save_proxmox_config
     from app.credentials import save_integration_credentials
 
-    save_proxmox_config(url="https://192.168.1.10:8006", verify_ssl=False)
+    save_proxmox_config(url="https://192.168.1.10:8006")
     save_integration_credentials("proxmox", api_user="user@pam", token_id="user@pam!token", secret="abc")
 
     with patch("app.auth_router.ProxmoxClient") as MockClient:
@@ -350,7 +350,7 @@ def test_proxmox_test_ssh_success(setup_client, data_dir):
     _create_admin()
     from app.config_manager import save_proxmox_config
 
-    save_proxmox_config(url="https://192.168.1.10:8006", verify_ssl=False)
+    save_proxmox_config(url="https://192.168.1.10:8006")
 
     with patch("app.auth_router.verify_connection", new_callable=AsyncMock) as mock_vc:
         mock_vc.return_value = {"ok": True, "message": ""}
@@ -367,7 +367,7 @@ def test_proxmox_test_ssh_failure(setup_client, data_dir):
     _create_admin()
     from app.config_manager import save_proxmox_config
 
-    save_proxmox_config(url="https://192.168.1.10:8006", verify_ssl=False)
+    save_proxmox_config(url="https://192.168.1.10:8006")
 
     with patch("app.auth_router.verify_connection", new_callable=AsyncMock) as mock_vc:
         mock_vc.return_value = {"ok": False, "message": "Connection refused"}
@@ -831,7 +831,7 @@ def test_proxmox_discover_removes_proxmox_from_integration_pending(setup_client,
     from app.config_manager import save_proxmox_config
     from app.credentials import save_integration_credentials
     _create_admin()
-    save_proxmox_config(url="https://192.168.5.229:8006", verify_ssl=False)
+    save_proxmox_config(url="https://192.168.5.229:8006")
     save_integration_credentials("proxmox", token_id="root@pam!t", secret="s", api_user="root@pam")
     with patch("app.auth_router.ProxmoxClient") as MockClient:
         instance = AsyncMock()

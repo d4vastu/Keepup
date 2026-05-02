@@ -27,7 +27,22 @@ from .notifications import get_unread_count, get_notifications, mark_all_read
 from .auto_update_scheduler import apply_all_schedules, scheduler
 from .auto_updates_router import router as auto_updates_router
 from .backend_loader import get_backends, get_dockerhub_creds, reload_backends
-from .config_manager import get_hosts, get_pbs_config, get_proxmox_config, migrate_ssh_config
+from .config_manager import (
+    get_hosts,
+    get_opnsense_config,
+    get_pbs_config,
+    get_pfsense_config,
+    get_portainer_config,
+    get_proxmox_config,
+    get_tofu_migrated,
+    mark_tofu_migrated,
+    migrate_ssh_config,
+    save_opnsense_config,
+    save_pbs_config,
+    save_pfsense_config,
+    save_portainer_config,
+    save_proxmox_config,
+)
 from .credentials import get_credentials, get_integration_credentials, save_sudo_password
 from .ssh_client import (
     _needs_sudo,
@@ -335,6 +350,54 @@ def _check_version_notification() -> None:
         pass
 
 
+async def _migrate_tofu_certs() -> None:
+    """One-shot migration: for integrations previously using verify_ssl=False, auto-pin the cert."""
+    if get_tofu_migrated():
+        return
+
+    from .cert_utils import cert_info, fetch_server_cert, fingerprint as fp_of
+    from .notifications import notify
+
+    # Map integration key → (get_cfg_fn, save_cfg_fn, url_from_cfg)
+    integrations = [
+        ("proxmox", get_proxmox_config, save_proxmox_config),
+        ("proxmox_backup", get_pbs_config, save_pbs_config),
+        ("opnsense", get_opnsense_config, save_opnsense_config),
+        ("pfsense", get_pfsense_config, save_pfsense_config),
+        ("portainer", get_portainer_config, save_portainer_config),
+    ]
+
+    pinned: list[str] = []
+    for name, get_cfg, save_cfg in integrations:
+        cfg = get_cfg()
+        if not cfg.get("verify_ssl") or cfg.get("pinned_cert_pem"):
+            continue
+        url = cfg.get("url", "")
+        if not url:
+            continue
+        try:
+            pem = fetch_server_cert(url)
+            info = cert_info(pem)
+            save_cfg(url=url, pinned_cert_pem=pem, pinned_fingerprint=info["fingerprint"])
+            pinned.append(name)
+            log.info("TOFU migration: auto-pinned cert for %s (fp: %s)", name, info["fingerprint"])
+        except Exception as exc:
+            log.warning("TOFU migration: could not pin cert for %s — %s", name, exc)
+
+    mark_tofu_migrated()
+    if pinned:
+        names = ", ".join(pinned)
+        notify(
+            title="TLS certificates auto-pinned",
+            message=(
+                f"Keepup upgraded to certificate pinning (TOFU). "
+                f"Certificates were automatically captured for: {names}. "
+                f"Re-test each integration if connections fail."
+            ),
+            level="info",
+        )
+
+
 @app.on_event("startup")
 async def _startup() -> None:
     _check_version_notification()
@@ -343,6 +406,7 @@ async def _startup() -> None:
         log.warning(
             "%d host(s) have no SSH user configured — set it via Admin › Hosts.", missing
         )
+    await _migrate_tofu_certs()
     await reload_backends()
     apply_all_schedules()
     scheduler.start()
@@ -619,7 +683,7 @@ async def pbs_status(request: Request) -> HTMLResponse:
     cfg = get_pbs_config()
     creds = get_integration_credentials("proxmox_backup")
     url = cfg.get("url", "")
-    verify_ssl = cfg.get("verify_ssl", False)
+    pinned_pem = cfg.get("pinned_cert_pem", "")
     token_id = creds.get("token_id", "")
     secret = creds.get("secret", "")
     # Legacy fallback
@@ -633,8 +697,10 @@ async def pbs_status(request: Request) -> HTMLResponse:
     if not url or not (token_id or creds.get("api_token")):
         return HTMLResponse("")
 
+    from .cert_utils import build_pinned_ssl_ctx
+    ssl_ctx = build_pinned_ssl_ctx(pinned_pem) if pinned_pem else None
     try:
-        async with make_client(verify=verify_ssl) as c:
+        async with make_client(ssl_context=ssl_ctx) as c:
             resp = await c.get(f"{url}/api2/json/version", headers={"Authorization": auth})
             resp.raise_for_status()
             ver = resp.json().get("data", {}).get("version", "unknown")
@@ -670,10 +736,10 @@ async def _proxmox_client_from_config():
         token = f"{api_user}!{api_token}" if api_user else api_token
     else:
         token = f"{token_id}={secret}"
-    verify_ssl = cfg.get("verify_ssl", False)
+    pinned_pem = cfg.get("pinned_cert_pem", "")
     if not url or not token:
         raise RuntimeError("Proxmox integration not configured.")
-    return ProxmoxClient(url=url, api_token=token, verify_ssl=verify_ssl)
+    return ProxmoxClient(url=url, api_token=token, pinned_cert_pem=pinned_pem)
 
 
 @app.get("/api/host/{slug}/check", response_class=HTMLResponse)
