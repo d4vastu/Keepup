@@ -3,7 +3,6 @@
 import ssl
 from unittest.mock import AsyncMock, patch
 
-import pytest
 
 
 # ---------------------------------------------------------------------------
@@ -75,7 +74,6 @@ class TestCertUtils:
 
     def test_fetch_server_cert_returns_pem(self):
         """fetch_server_cert wraps socket I/O and returns a PEM string."""
-        import ssl
         from unittest.mock import MagicMock, patch
 
         from app.cert_utils import fetch_server_cert

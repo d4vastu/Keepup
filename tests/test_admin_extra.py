@@ -1,6 +1,6 @@
 """Additional admin route tests for coverage gaps."""
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 
 # ---------------------------------------------------------------------------

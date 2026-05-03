@@ -355,7 +355,7 @@ async def _migrate_tofu_certs() -> None:
     if get_tofu_migrated():
         return
 
-    from .cert_utils import cert_info, fetch_server_cert, fingerprint as fp_of
+    from .cert_utils import cert_info, fetch_server_cert
     from .notifications import notify
 
     # Map integration key → (get_cfg_fn, save_cfg_fn, url_from_cfg)
