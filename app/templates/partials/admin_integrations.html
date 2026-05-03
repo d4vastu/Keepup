@@ -183,6 +183,10 @@
         </div>
       </div>
       {% if integ.proxmox_pinned %}<div class="field-hint" style="color:#3fb950;margin-bottom:6px;">&#128274; Certificate pinned &mdash; <span style="font-family:monospace;font-size:10px;">{{ integ.proxmox_cert_fingerprint[:29] }}&hellip;</span></div>{% endif %}
+      <div class="ssl-row">
+        <input type="checkbox" id="proxmox-skip-ssl" name="skip_ssl_verify" value="1" {% if not integ.proxmox_verify_ssl %}checked{% endif %}>
+        <label for="proxmox-skip-ssl">Skip SSL verification <span style="color:#484f58">(for self-signed certificates)</span></label>
+      </div>
       {% if integ.proxmox_configured %}
       <div style="border-top:0.5px solid #21262d;margin:10px 0 12px;"></div>
       <div class="field-label" style="margin-bottom:6px;">SSH ACCESS FOR LXC UPDATES</div>
@@ -225,11 +229,11 @@
       <div class="btn-row">
         <button class="btn-test"
           hx-post="/setup/connect/proxmox/test"
-          hx-include="#proxmox-url,#proxmox-api-user,#proxmox-token-id,#proxmox-secret"
+          hx-include="#proxmox-url,#proxmox-api-user,#proxmox-token-id,#proxmox-secret,#proxmox-skip-ssl"
           hx-target="#proxmox-test-result">Test API</button>
         <button class="btn-save"
           hx-post="/setup/connect/proxmox/save"
-          hx-include="#proxmox-url,#proxmox-api-user,#proxmox-token-id,#proxmox-secret,#proxmox-ssh-user,#proxmox-ssh-auth,#proxmox-ssh-key,#proxmox-ssh-pass"
+          hx-include="#proxmox-url,#proxmox-api-user,#proxmox-token-id,#proxmox-secret,#proxmox-ssh-user,#proxmox-ssh-auth,#proxmox-ssh-key,#proxmox-ssh-pass,#proxmox-skip-ssl"
           hx-target="#proxmox-result">Save</button>
         {% if integ.proxmox_configured %}
         <button class="btn-test"
@@ -281,15 +285,19 @@
         </div>
       </div>
       {% if integ.pbs_pinned %}<div class="field-hint" style="color:#3fb950;margin-bottom:6px;">&#128274; Certificate pinned &mdash; <span style="font-family:monospace;font-size:10px;">{{ integ.pbs_cert_fingerprint[:29] }}&hellip;</span></div>{% endif %}
+      <div class="ssl-row">
+        <input type="checkbox" id="pbs-skip-ssl" name="skip_ssl_verify" value="1" {% if not integ.pbs_verify_ssl %}checked{% endif %}>
+        <label for="pbs-skip-ssl">Skip SSL verification <span style="color:#484f58">(for self-signed certificates)</span></label>
+      </div>
       <div id="pbs-test-result" class="result-area"></div>
       <div class="btn-row">
         <button class="btn-test"
           hx-post="/setup/connect/pbs/test"
-          hx-include="#pbs-url,#pbs-user,#pbs-token-id,#pbs-secret"
+          hx-include="#pbs-url,#pbs-user,#pbs-token-id,#pbs-secret,#pbs-skip-ssl"
           hx-target="#pbs-test-result">Test connection</button>
         <button class="btn-save"
           hx-post="/setup/connect/pbs/save"
-          hx-include="#pbs-url,#pbs-user,#pbs-token-id,#pbs-secret"
+          hx-include="#pbs-url,#pbs-user,#pbs-token-id,#pbs-secret,#pbs-skip-ssl"
           hx-target="#pbs-result">Save</button>
       </div>
     </div>
@@ -326,15 +334,19 @@
       </div>
       <div class="field-hint" style="margin-bottom:8px">System → Access → Users → your user → API keys</div>
       {% if integ.opnsense_pinned %}<div class="field-hint" style="color:#3fb950;margin-bottom:6px;">&#128274; Certificate pinned &mdash; <span style="font-family:monospace;font-size:10px;">{{ integ.opnsense_cert_fingerprint[:29] }}&hellip;</span></div>{% endif %}
+      <div class="ssl-row">
+        <input type="checkbox" id="opnsense-skip-ssl" name="skip_ssl_verify" value="1" {% if not integ.opnsense_verify_ssl %}checked{% endif %}>
+        <label for="opnsense-skip-ssl">Skip SSL verification <span style="color:#484f58">(for self-signed certificates)</span></label>
+      </div>
       <div id="opnsense-test-result" class="result-area"></div>
       <div class="btn-row">
         <button class="btn-test"
           hx-post="/setup/connect/opnsense/test"
-          hx-include="#opn-url,#opn-key,#opn-secret"
+          hx-include="#opn-url,#opn-key,#opn-secret,#opnsense-skip-ssl"
           hx-target="#opnsense-test-result">Test connection</button>
         <button class="btn-save"
           hx-post="/setup/connect/opnsense/save"
-          hx-include="#opn-url,#opn-key,#opn-secret"
+          hx-include="#opn-url,#opn-key,#opn-secret,#opnsense-skip-ssl"
           hx-target="#opnsense-result">Save</button>
       </div>
     </div>
@@ -365,15 +377,19 @@
         <div class="field-hint">System → API → Keys in the pfSense-API package</div>
       </div>
       {% if integ.pfsense_pinned %}<div class="field-hint" style="color:#3fb950;margin-bottom:6px;">&#128274; Certificate pinned &mdash; <span style="font-family:monospace;font-size:10px;">{{ integ.pfsense_cert_fingerprint[:29] }}&hellip;</span></div>{% endif %}
+      <div class="ssl-row">
+        <input type="checkbox" id="pf-skip-ssl" name="skip_ssl_verify" value="1" {% if not integ.pfsense_verify_ssl %}checked{% endif %}>
+        <label for="pf-skip-ssl">Skip SSL verification <span style="color:#484f58">(for self-signed certificates)</span></label>
+      </div>
       <div id="pfsense-test-result" class="result-area"></div>
       <div class="btn-row">
         <button class="btn-test"
           hx-post="/setup/connect/pfsense/test"
-          hx-include="#pf-url,#pf-key"
+          hx-include="#pf-url,#pf-key,#pf-skip-ssl"
           hx-target="#pfsense-test-result">Test connection</button>
         <button class="btn-save"
           hx-post="/setup/connect/pfsense/save"
-          hx-include="#pf-url,#pf-key"
+          hx-include="#pf-url,#pf-key,#pf-skip-ssl"
           hx-target="#pfsense-result">Save</button>
       </div>
     </div>
@@ -406,15 +422,19 @@
         <input type="password" id="ha-token" name="ha_token" placeholder="{% if integ.ha_configured %}Leave blank to keep{% else %}eyJ…{% endif %}" class="field-input">
         <div class="field-hint">Profile → Security → Long-lived access tokens → Create token</div>
       </div>
+      <div class="ssl-row">
+        <input type="checkbox" id="ha-skip-ssl" name="skip_ssl_verify" value="1" {% if not integ.ha_verify_ssl %}checked{% endif %}>
+        <label for="ha-skip-ssl">Skip SSL verification <span style="color:#484f58">(for self-signed certificates)</span></label>
+      </div>
       <div id="ha-test-result" class="result-area"></div>
       <div class="btn-row">
         <button class="btn-test"
           hx-post="/setup/connect/homeassistant/test"
-          hx-include="#ha-url,#ha-token"
+          hx-include="#ha-url,#ha-token,#ha-skip-ssl"
           hx-target="#ha-test-result">Test connection</button>
         <button class="btn-save"
           hx-post="/setup/connect/homeassistant/save"
-          hx-include="#ha-url,#ha-token"
+          hx-include="#ha-url,#ha-token,#ha-skip-ssl"
           hx-target="#ha-result">Save</button>
       </div>
     </div>

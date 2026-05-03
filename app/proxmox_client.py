@@ -15,10 +15,11 @@ log = logging.getLogger(__name__)
 
 
 class ProxmoxClient:
-    def __init__(self, url: str, api_token: str, pinned_cert_pem: str = ""):
+    def __init__(self, url: str, api_token: str, pinned_cert_pem: str = "", verify_ssl: bool = True):
         self.base = url.rstrip("/")
         self.headers = {"Authorization": f"PVEAPIToken={api_token}"}
         self._pinned_cert_pem = pinned_cert_pem
+        self._verify_ssl = verify_ssl
 
     def _ssl_ctx(self):
         if self._pinned_cert_pem:
@@ -27,6 +28,12 @@ class ProxmoxClient:
         return None
 
     def _client(self):
+        if not self._verify_ssl:
+            return make_breaker_client(
+                base_url=self.base,
+                headers=self.headers,
+                verify=False,
+            )
         return make_breaker_client(
             base_url=self.base,
             headers=self.headers,

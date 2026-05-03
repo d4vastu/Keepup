@@ -340,13 +340,14 @@ def save_proxmox_config(
     url: str,
     pinned_cert_pem: str = "",
     pinned_fingerprint: str = "",
+    verify_ssl: bool = True,
 ) -> None:
     config = load_config()
     if url:
         existing = config.get("proxmox", {})
         pem = pinned_cert_pem or existing.get("pinned_cert_pem", "")
         fp = pinned_fingerprint or existing.get("pinned_fingerprint", "")
-        entry: dict = {"url": url.rstrip("/")}
+        entry: dict = {"url": url.rstrip("/"), "verify_ssl": verify_ssl}
         if pem:
             entry["pinned_cert_pem"] = pem
             entry["pinned_fingerprint"] = fp
@@ -364,13 +365,14 @@ def save_pbs_config(
     url: str,
     pinned_cert_pem: str = "",
     pinned_fingerprint: str = "",
+    verify_ssl: bool = True,
 ) -> None:
     config = load_config()
     if url:
         existing = config.get("proxmox_backup", {})
         pem = pinned_cert_pem or existing.get("pinned_cert_pem", "")
         fp = pinned_fingerprint or existing.get("pinned_fingerprint", "")
-        entry: dict = {"url": url.rstrip("/")}
+        entry: dict = {"url": url.rstrip("/"), "verify_ssl": verify_ssl}
         if pem:
             entry["pinned_cert_pem"] = pem
             entry["pinned_fingerprint"] = fp
@@ -388,13 +390,14 @@ def save_opnsense_config(
     url: str,
     pinned_cert_pem: str = "",
     pinned_fingerprint: str = "",
+    verify_ssl: bool = True,
 ) -> None:
     config = load_config()
     if url:
         existing = config.get("opnsense", {})
         pem = pinned_cert_pem or existing.get("pinned_cert_pem", "")
         fp = pinned_fingerprint or existing.get("pinned_fingerprint", "")
-        entry: dict = {"url": url.rstrip("/")}
+        entry: dict = {"url": url.rstrip("/"), "verify_ssl": verify_ssl}
         if pem:
             entry["pinned_cert_pem"] = pem
             entry["pinned_fingerprint"] = fp
@@ -412,13 +415,14 @@ def save_pfsense_config(
     url: str,
     pinned_cert_pem: str = "",
     pinned_fingerprint: str = "",
+    verify_ssl: bool = True,
 ) -> None:
     config = load_config()
     if url:
         existing = config.get("pfsense", {})
         pem = pinned_cert_pem or existing.get("pinned_cert_pem", "")
         fp = pinned_fingerprint or existing.get("pinned_fingerprint", "")
-        entry: dict = {"url": url.rstrip("/")}
+        entry: dict = {"url": url.rstrip("/"), "verify_ssl": verify_ssl}
         if pem:
             entry["pinned_cert_pem"] = pem
             entry["pinned_fingerprint"] = fp
@@ -443,10 +447,10 @@ def get_homeassistant_config() -> dict:
     return load_config().get("homeassistant", {})
 
 
-def save_homeassistant_config(url: str) -> None:
+def save_homeassistant_config(url: str, verify_ssl: bool = True) -> None:
     config = load_config()
     if url:
-        config["homeassistant"] = {"url": url.rstrip("/")}
+        config["homeassistant"] = {"url": url.rstrip("/"), "verify_ssl": verify_ssl}
     else:
         config.pop("homeassistant", None)
     save_config(config)

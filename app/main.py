@@ -698,9 +698,10 @@ async def pbs_status(request: Request) -> HTMLResponse:
         return HTMLResponse("")
 
     from .cert_utils import build_pinned_ssl_ctx
-    ssl_ctx = build_pinned_ssl_ctx(pinned_pem) if pinned_pem else None
+    verify_ssl = cfg.get("verify_ssl", True)
+    ssl_ctx = build_pinned_ssl_ctx(pinned_pem) if (pinned_pem and verify_ssl) else None
     try:
-        async with make_client(ssl_context=ssl_ctx) as c:
+        async with make_client(ssl_context=ssl_ctx, verify=False if not verify_ssl else True) as c:
             resp = await c.get(f"{url}/api2/json/version", headers={"Authorization": auth})
             resp.raise_for_status()
             ver = resp.json().get("data", {}).get("version", "unknown")
