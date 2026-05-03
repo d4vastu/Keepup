@@ -447,6 +447,8 @@ FastAPI (Python)
 └── HTMX frontend — server-rendered partials, no page reloads, no JS framework
 ```
 
+For a contributor-facing module map, request lifecycle, and integration patterns, see [docs/architecture.md](docs/architecture.md).
+
 ---
 
 ## Development
