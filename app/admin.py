@@ -47,7 +47,7 @@ from .config_manager import (
     set_docker_monitoring,
     update_host,
 )
-from .cert_utils import build_pinned_ssl_ctx, cert_info, fetch_server_cert, fingerprint
+from .cert_utils import cert_info, fetch_server_cert, fingerprint
 from .proxmox_client import ProxmoxClient
 from .credentials import (
     credential_status,
