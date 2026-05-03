@@ -1,7 +1,17 @@
+# Secrets and local config
 keys/
 config.yml
+.env
+
+# Python bytecode
 __pycache__/
 *.pyc
 *.pyo
-.env
+
+# Test and lint caches
+.coverage
+.pytest_cache/
+.ruff_cache/
+
+# AI coding assistant artifacts
 .aider*
