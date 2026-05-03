@@ -475,7 +475,7 @@ Keepup is in active development. It is built and maintained using Claude Code (A
 
 This project is intentionally scoped to **homelab and personal use**. It is not hardened for multi-user environments, enterprise networks, or exposure to the public internet without additional security controls.
 
-Issues and feedback welcome on the [GitHub Issues](https://github.com/d4vastu/Keepup/issues) page.
+Issues and feedback welcome on the [GitHub Issues](https://github.com/d4vastu/Keepup/issues) page. Contributions welcome — see [CONTRIBUTING.md](CONTRIBUTING.md). For security issues, please follow [SECURITY.md](SECURITY.md) instead of opening a public issue.
 
 ---
 

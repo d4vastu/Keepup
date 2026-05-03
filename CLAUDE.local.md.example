@@ -1,0 +1,135 @@
+# Keepup — Maintainer-Only Claude Code Instructions
+
+> **This file is gitignored.** Copy it to `CLAUDE.local.md` and fill in the
+> placeholders. Contains the maintainer's private workflow: issue tracker,
+> ticket templates, status flow, role definitions, and access credentials.
+>
+> Outside contributors do not need this file. See `CLAUDE.md` and
+> `CONTRIBUTING.md` for the public workflow.
+
+## OpenProject & GitHub Workflow
+
+These rules apply every time work touches OpenProject tickets or GitHub.
+
+### Ticket Creation Rules
+
+1. **NEVER create a work package without first showing the full draft to the
+   product owner and explicitly asking for confirmation before submitting.**
+2. **NEVER add comments to work packages** — if a description update fails,
+   inform the product owner and let them handle it manually. (The
+   technical-approach comment posted at the start of each user story is the
+   one allowed exception.)
+3. **NEVER list work package dependencies in the description.** Capture them
+   via the Relations API (`POST /api/v3/work_packages/{id}/relations`) using
+   relation types like `blocked_by` or `follows`. Non-work-package
+   dependencies (config changes, external systems) still go in a
+   **Dependencies** section. Omit that section if no such dependencies exist.
+
+### Ticket Templates
+
+**Bug:**
+```
+## Steps to Reproduce
+1. ...
+
+## Expected Result
+...
+
+## Actual Result
+...
+```
+
+**User Story:**
+```
+## Description
+...
+
+## Acceptance Criteria
+- ...
+
+## Dependencies
+(omit if none)
+```
+
+### Ticket Status Flow
+
+| Status | Meaning |
+|---|---|
+| **New** | Ticket created — waiting for product owner approval to begin work |
+| **In Progress** | Claude is actively working as Lead Developer |
+| **Ready for QA** | Development done — unit test summary posted |
+| **In QA** | Claude is testing as QA persona |
+| **Passed QA** | QA passed |
+| **Returned by QA** | QA failed — pick back up as Lead Developer |
+| **Closed** | Released to production |
+
+### Standard Workflow (per ticket)
+
+1. Search OpenProject for duplicates/related tickets first
+2. Draft the full ticket and present to the product owner for review
+3. Await explicit confirmation, then submit (status: **New**)
+4. Create relations for work package dependencies via the Relations API
+5. Post technical approach as a **comment** on each user story (never on epics)
+6. Wait for product owner approval comment → set **In Progress**, begin
+   implementation
+7. Maintain **95% test coverage** at all times
+8. When done: post unit test summary → set **Ready for QA**
+9. **Immediately post the PR URL as a comment on the OpenProject ticket** when
+   the PR is created
+10. Switch to QA persona → set **In QA** → test all acceptance criteria
+11. If passed: post QA notes → set **Passed QA**
+12. If failed: post failure notes → set **Returned by QA** → back to
+    **In Progress**
+13. Status moves to **Closed** after release
+
+### Feature Branch & PR Rules (maintainer)
+
+The maintainer's branches and commits use OpenProject-linked names so the OP
+GitHub integration auto-links the PR. Outside contributors use the simpler
+`feat|fix|docs|chore/<slug>` convention from `CONTRIBUTING.md`.
+
+**Branch name:** `user-story/{id}-{slugified-subject}`
+
+**Every commit message:** `[#{id}] {full subject}{op-base-url}/work_packages/{id}`
+
+**Start a ticket:**
+```
+git checkout main && git pull
+git checkout -b 'user-story/{id}-{slug}'
+git commit --allow-empty -m '[#{id}] {subject}{op-base-url}/work_packages/{id}'
+git push -u origin 'user-story/{id}-{slug}'
+```
+
+**PR description must start with `OP#{id}` on its own line** — required for
+OpenProject's GitHub integration to auto-link the PR.
+
+### Release Rules
+
+- Do NOT bump `app/__version__.py` or create git tags/GitHub releases
+  autonomously
+- The product owner decides when to release and what version number to use
+- When QA is done, notify the product owner and wait for an explicit "release"
+  instruction
+
+---
+
+## OpenProject Access
+
+- **Instance:** `{op-base-url}`  (e.g. `https://op.example.com/openproject`)
+- **Claude AI user:** `claude`, user id: `{claude-user-id}`
+- **API token:** `<YOUR_API_KEY>`
+- **Auth:** `apikey:<token>` as HTTP basic auth
+- **Project:** identifier `keepup`, id: `{project-id}`
+- **Work package types:** Task (1), Epic (5), User Story (6), Bug (7)
+
+> Treat the API token like any other secret: do not paste it into chat
+> transcripts, commit messages, or PR descriptions. Rotate it if it leaks.
+
+---
+
+## Roles
+
+- **Product Owner** — defines what and why
+- **Claude = Solutions Architect** — provides technical approach per ticket
+- **Claude = Lead Developer** — implements once approved
+- **Claude = QA** — tests before release

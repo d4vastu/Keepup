@@ -15,3 +15,6 @@ __pycache__/
 
 # AI coding assistant artifacts
 .aider*
+
+# Maintainer-private Claude Code instructions (template at CLAUDE.local.md.example)
+CLAUDE.local.md
