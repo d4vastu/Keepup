@@ -482,6 +482,7 @@ async def setup_test_proxmox(
     proxmox_token_id: str = Form(""),
     proxmox_secret: str = Form(""),
     trust_accepted: str = Form(""),
+    skip_ssl_verify: str = Form(""),
 ) -> HTMLResponse:
     url = proxmox_url.strip().rstrip("/")
     token_id = proxmox_token_id.strip()
@@ -491,6 +492,17 @@ async def setup_test_proxmox(
             '<span class="text-amber-400 text-sm">Enter a URL, Token ID, and Secret first.</span>'
         )
     token = f"{token_id}={secret}"
+
+    if skip_ssl_verify == "1":
+        try:
+            client = ProxmoxClient(url=url, api_token=token, verify_ssl=False)
+            version = await client.get_version()
+            ver = version.get("version", "")
+            return HTMLResponse(
+                f'<span class="text-green-400 text-sm">&#10003; Connected — Proxmox VE {ver}. Click Save to continue.</span>'
+            )
+        except Exception as exc:
+            return HTMLResponse(f'<span class="text-red-400 text-sm">&#10007; {str(exc)[:120]}</span>')
 
     if trust_accepted == "1":
         pem = request.session.get("pending_cert_proxmox", "")
@@ -549,6 +561,7 @@ async def setup_save_proxmox(
     proxmox_url: str = Form(""),
     proxmox_token_id: str = Form(""),
     proxmox_secret: str = Form(""),
+    skip_ssl_verify: str = Form(""),
 ) -> HTMLResponse:
     url = proxmox_url.strip().rstrip("/")
     token_id = proxmox_token_id.strip()
@@ -558,6 +571,7 @@ async def setup_save_proxmox(
         url=url,
         pinned_cert_pem=confirmed.get("pem", ""),
         pinned_fingerprint=confirmed.get("fingerprint", ""),
+        verify_ssl=skip_ssl_verify != "1",
     )
     cred_kwargs: dict = {}
     if token_id:
@@ -574,8 +588,9 @@ async def setup_save_proxmox(
         try:
             import urllib.parse
             token = f"{token_id}={secret}"
-            pinned_pem = get_proxmox_config().get("pinned_cert_pem", "")
-            client = ProxmoxClient(url=url, api_token=token, pinned_cert_pem=pinned_pem)
+            px_cfg = get_proxmox_config()
+            pinned_pem = px_cfg.get("pinned_cert_pem", "")
+            client = ProxmoxClient(url=url, api_token=token, pinned_cert_pem=pinned_pem, verify_ssl=px_cfg.get("verify_ssl", True))
             nodes = await client.get_nodes()
             resources = await client.discover_resources()
             request.session["setup_proxmox_resources"] = resources
@@ -873,6 +888,7 @@ async def setup_test_pbs(
     pbs_token_id: str = Form(""),
     pbs_secret: str = Form(""),
     trust_accepted: str = Form(""),
+    skip_ssl_verify: str = Form(""),
 ) -> HTMLResponse:
     url = pbs_url.strip().rstrip("/")
     token_id = pbs_token_id.strip()
@@ -884,6 +900,21 @@ async def setup_test_pbs(
     # PBS auth: PBSAPIToken=<tokenid>:<secret>  (colon separator, not equals)
     import logging
     _log = logging.getLogger(__name__)
+
+    if skip_ssl_verify == "1":
+        try:
+            async with make_client(verify=False) as c:
+                resp = await c.get(
+                    f"{url}/api2/json/version",
+                    headers={"Authorization": f"PBSAPIToken={token_id}:{secret}"},
+                )
+                resp.raise_for_status()
+                ver = resp.json().get("data", {}).get("version", "")
+            return HTMLResponse(
+                f'<span class="text-green-400 text-sm">&#10003; Connected — Proxmox Backup Server {ver}. Click Save to continue.</span>'
+            )
+        except Exception as exc:
+            return HTMLResponse(f'<span class="text-red-400 text-sm">&#10007; {str(exc)[:120]}</span>')
 
     if trust_accepted == "1":
         pem = request.session.get("pending_cert_pbs", "")
@@ -947,6 +978,7 @@ async def setup_save_pbs(
     pbs_api_user: str = Form(""),
     pbs_token_id: str = Form(""),
     pbs_secret: str = Form(""),
+    skip_ssl_verify: str = Form(""),
 ) -> HTMLResponse:
     url = pbs_url.strip().rstrip("/")
     api_user = pbs_api_user.strip()
@@ -957,6 +989,7 @@ async def setup_save_pbs(
         url=url,
         pinned_cert_pem=confirmed.get("pem", ""),
         pinned_fingerprint=confirmed.get("fingerprint", ""),
+        verify_ssl=skip_ssl_verify != "1",
     )
     if api_user or token_id or secret:
         save_integration_credentials(
@@ -981,6 +1014,7 @@ async def setup_test_opnsense(
     opnsense_api_key: str = Form(""),
     opnsense_api_secret: str = Form(""),
     trust_accepted: str = Form(""),
+    skip_ssl_verify: str = Form(""),
 ) -> HTMLResponse:
     url = opnsense_url.strip().rstrip("/")
     key = opnsense_api_key.strip()
@@ -989,6 +1023,17 @@ async def setup_test_opnsense(
         return HTMLResponse(
             '<span class="text-amber-400 text-sm">Enter URL, API key, and API secret first.</span>'
         )
+
+    if skip_ssl_verify == "1":
+        try:
+            async with make_client(verify=False) as c:
+                resp = await c.get(f"{url}/api/core/firmware/info", auth=(key, secret))
+                resp.raise_for_status()
+            return HTMLResponse(
+                '<span class="text-green-400 text-sm">&#10003; Connected. Click Save to continue.</span>'
+            )
+        except Exception as exc:
+            return HTMLResponse(f'<span class="text-red-400 text-sm">&#10007; {str(exc)[:120]}</span>')
 
     if trust_accepted == "1":
         pem = request.session.get("pending_cert_opnsense", "")
@@ -1052,6 +1097,7 @@ async def setup_save_opnsense(
     opnsense_url: str = Form(""),
     opnsense_api_key: str = Form(""),
     opnsense_api_secret: str = Form(""),
+    skip_ssl_verify: str = Form(""),
 ) -> HTMLResponse:
     url = opnsense_url.strip().rstrip("/")
     key = opnsense_api_key.strip()
@@ -1061,6 +1107,7 @@ async def setup_save_opnsense(
         url=url,
         pinned_cert_pem=confirmed.get("pem", ""),
         pinned_fingerprint=confirmed.get("fingerprint", ""),
+        verify_ssl=skip_ssl_verify != "1",
     )
     if key and secret:
         save_integration_credentials("opnsense", api_key=key, api_secret=secret)
@@ -1079,6 +1126,7 @@ async def setup_test_pfsense(
     pfsense_url: str = Form(""),
     pfsense_api_key: str = Form(""),
     trust_accepted: str = Form(""),
+    skip_ssl_verify: str = Form(""),
 ) -> HTMLResponse:
     url = pfsense_url.strip().rstrip("/")
     key = pfsense_api_key.strip()
@@ -1086,6 +1134,17 @@ async def setup_test_pfsense(
         return HTMLResponse(
             '<span class="text-amber-400 text-sm">Enter a URL and API key first.</span>'
         )
+
+    if skip_ssl_verify == "1":
+        try:
+            async with make_client(verify=False) as c:
+                resp = await c.get(f"{url}/api/v1/system/version", headers={"Authorization": key})
+                resp.raise_for_status()
+            return HTMLResponse(
+                '<span class="text-green-400 text-sm">&#10003; Connected. Click Save to continue.</span>'
+            )
+        except Exception as exc:
+            return HTMLResponse(f'<span class="text-red-400 text-sm">&#10007; {str(exc)[:120]}</span>')
 
     if trust_accepted == "1":
         pem = request.session.get("pending_cert_pfsense", "")
@@ -1144,6 +1203,7 @@ async def setup_save_pfsense(
     request: Request,
     pfsense_url: str = Form(""),
     pfsense_api_key: str = Form(""),
+    skip_ssl_verify: str = Form(""),
 ) -> HTMLResponse:
     url = pfsense_url.strip().rstrip("/")
     key = pfsense_api_key.strip()
@@ -1152,6 +1212,7 @@ async def setup_save_pfsense(
         url=url,
         pinned_cert_pem=confirmed.get("pem", ""),
         pinned_fingerprint=confirmed.get("fingerprint", ""),
+        verify_ssl=skip_ssl_verify != "1",
     )
     if key:
         save_integration_credentials("pfsense", api_key=key)
@@ -1199,10 +1260,11 @@ async def setup_save_homeassistant(
     request: Request,
     ha_url: str = Form(""),
     ha_token: str = Form(""),
+    skip_ssl_verify: str = Form(""),
 ) -> HTMLResponse:
     url = ha_url.strip().rstrip("/")
     token = ha_token.strip()
-    save_homeassistant_config(url=url)
+    save_homeassistant_config(url=url, verify_ssl=skip_ssl_verify != "1")
     if token:
         save_integration_credentials("homeassistant", token=token)
     _queue_integration_host(request, "homeassistant", "Home Assistant", url)

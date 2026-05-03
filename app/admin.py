@@ -146,6 +146,7 @@ def _integration_status() -> dict:
         "proxmox_configured": bool(px_cfg.get("url") and (px_creds.get("secret") or px_creds.get("api_token"))),
         "proxmox_pinned": bool(px_cfg.get("pinned_fingerprint")),
         "proxmox_cert_fingerprint": px_cfg.get("pinned_fingerprint", ""),
+        "proxmox_verify_ssl": px_cfg.get("verify_ssl", True),
         "proxmox_ssh_user": px_creds.get("ssh_user", ""),
         "proxmox_ssh_key": px_creds.get("ssh_key", ""),
         "proxmox_ssh_password_set": bool(px_creds.get("ssh_password")),
@@ -156,16 +157,20 @@ def _integration_status() -> dict:
         "pbs_configured": bool(pbs_cfg.get("url") and (pbs_creds.get("secret") or pbs_creds.get("api_token"))),
         "pbs_pinned": bool(pbs_cfg.get("pinned_fingerprint")),
         "pbs_cert_fingerprint": pbs_cfg.get("pinned_fingerprint", ""),
+        "pbs_verify_ssl": pbs_cfg.get("verify_ssl", True),
         "opnsense_url": opn_cfg.get("url", ""),
         "opnsense_configured": bool(opn_cfg.get("url") and opn_creds.get("api_key")),
         "opnsense_pinned": bool(opn_cfg.get("pinned_fingerprint")),
         "opnsense_cert_fingerprint": opn_cfg.get("pinned_fingerprint", ""),
+        "opnsense_verify_ssl": opn_cfg.get("verify_ssl", True),
         "pfsense_url": pf_cfg.get("url", ""),
         "pfsense_configured": bool(pf_cfg.get("url") and pf_creds.get("api_key")),
         "pfsense_pinned": bool(pf_cfg.get("pinned_fingerprint")),
         "pfsense_cert_fingerprint": pf_cfg.get("pinned_fingerprint", ""),
+        "pfsense_verify_ssl": pf_cfg.get("verify_ssl", True),
         "ha_url": ha_cfg.get("url", ""),
         "ha_configured": bool(ha_cfg.get("url") and ha_creds.get("token")),
+        "ha_verify_ssl": ha_cfg.get("verify_ssl", True),
         "portainer_url": port_cfg.get("url", ""),
         "portainer_key_set": bool(port_creds.get("api_key")),
         "portainer_pinned": bool(port_cfg.get("pinned_fingerprint")),
@@ -345,12 +350,13 @@ async def admin_proxmox_discover(request: Request) -> HTMLResponse:
     else:
         token = f"{token_id}={secret}"
     pinned_pem = cfg.get("pinned_cert_pem", "")
+    verify_ssl = cfg.get("verify_ssl", True)
     if not url or not token:
         return HTMLResponse(
             '<span style="font-size:12px;color:#f85149">Proxmox not configured.</span>'
         )
     try:
-        client = ProxmoxClient(url=url, api_token=token, pinned_cert_pem=pinned_pem)
+        client = ProxmoxClient(url=url, api_token=token, pinned_cert_pem=pinned_pem, verify_ssl=verify_ssl)
         resources = await client.discover_resources()
         return templates.TemplateResponse(
             "partials/admin_proxmox_discover.html",
@@ -448,6 +454,7 @@ async def admin_proxmox_add_node_host(request: Request) -> HTMLResponse:
     else:
         token = f"{token_id}={secret}"
     pinned_pem = cfg.get("pinned_cert_pem", "")
+    verify_ssl = cfg.get("verify_ssl", True)
     if not url or not token:
         return HTMLResponse(
             '<span style="font-size:12px;color:#f85149">Proxmox not configured.</span>'
@@ -457,7 +464,7 @@ async def admin_proxmox_add_node_host(request: Request) -> HTMLResponse:
     px_host = urllib.parse.urlparse(url).hostname or ""
 
     try:
-        client = ProxmoxClient(url=url, api_token=token, pinned_cert_pem=pinned_pem)
+        client = ProxmoxClient(url=url, api_token=token, pinned_cert_pem=pinned_pem, verify_ssl=verify_ssl)
         nodes = await client.get_nodes()
     except Exception as exc:
         return HTMLResponse(
