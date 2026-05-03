@@ -131,7 +131,7 @@ volumes:
   - ./keys:/app/keys:ro
 ```
 
-Then set the key path in **Admin → SSH Settings → Default key** to `/app/keys/id_ed25519`.
+Then set the key path in **Admin → SSH → Default key** to `/app/keys/id_ed25519`.
 
 ### SSH Password
 
@@ -148,7 +148,7 @@ If your SSH user is not root, updates and reboots require `sudo`. The dashboard 
 Docker monitoring works over the same SSH connection used for OS updates — no Portainer or agent required on the remote host.
 
 **Requirements on the remote host:**
-- Docker Engine and Docker Compose v2 (`docker compose` subcommand)
+- Docker Engine and Docker Compose — v2 (`docker compose`) or legacy v1 (`docker-compose`); Keepup auto-detects which is available
 - The SSH user must be root or a member of the `docker` group
 
 **How it works:**
@@ -248,7 +248,7 @@ Configure push notifications in the setup wizard (step 8) or **Admin → Connect
 
 **Email (SMTP)** — sends email alerts. Configure sender address, recipient address, SMTP host, port, and optional password.
 
-Notifications fire when auto-update jobs complete or fail. You can configure which events trigger alerts in **Admin → Notifications** after setup.
+Notifications fire when auto-update jobs complete or fail. You can configure Pushover and Email settings in **Admin → Connections** after setup.
 
 ---
 
