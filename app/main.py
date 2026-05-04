@@ -738,9 +738,10 @@ async def _proxmox_client_from_config():
     else:
         token = f"{token_id}={secret}"
     pinned_pem = cfg.get("pinned_cert_pem", "")
+    verify_ssl = cfg.get("verify_ssl", True)
     if not url or not token:
         raise RuntimeError("Proxmox integration not configured.")
-    return ProxmoxClient(url=url, api_token=token, pinned_cert_pem=pinned_pem)
+    return ProxmoxClient(url=url, api_token=token, pinned_cert_pem=pinned_pem, verify_ssl=verify_ssl)
 
 
 @app.get("/api/host/{slug}/check", response_class=HTMLResponse)
