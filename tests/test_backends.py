@@ -723,6 +723,7 @@ async def test_update_stack_runs_pull_and_up(config_file, data_dir, monkeypatch)
         side_effect=[
             probe,                                              # compose version probe
             MagicMock(stdout=ps_output, returncode=0),          # docker ps -a (config file lookup)
+            MagicMock(stdout="exists", returncode=0),           # test -f config file
             pull_result,
             up_result,
         ]
@@ -1023,6 +1024,7 @@ async def test_update_stack_pull_failure_raises(config_file, data_dir):
         [
             MagicMock(stdout="v2\n", returncode=0),
             MagicMock(stdout=ps_output, returncode=0),
+            MagicMock(stdout="exists", returncode=0),        # test -f config file
             MagicMock(stdout="error output", returncode=1),  # pull fails
         ]
     )
@@ -1056,7 +1058,8 @@ async def test_update_stack_up_failure_raises(config_file, data_dir):
         [
             MagicMock(stdout="v2\n", returncode=0),
             MagicMock(stdout=ps_output, returncode=0),
-            MagicMock(stdout="Pulled", returncode=0),  # pull succeeds
+            MagicMock(stdout="exists", returncode=0),        # test -f config file
+            MagicMock(stdout="Pulled", returncode=0),        # pull succeeds
             MagicMock(stdout="error output", returncode=1),  # up fails
         ]
     )
@@ -1315,6 +1318,7 @@ async def test_update_compose_ref_triggers_compose_update(config_file, data_dir)
         [
             MagicMock(stdout="v2\n", returncode=0),        # compose binary probe
             MagicMock(stdout=ps_output, returncode=0),     # docker ps -a (config file lookup)
+            MagicMock(stdout="exists", returncode=0),      # test -f config file
             MagicMock(stdout="Pulled", returncode=0),      # compose pull
             MagicMock(stdout="Started", returncode=0),     # compose up -d
         ]
@@ -1867,6 +1871,7 @@ async def test_update_compose_pct_wraps_commands(config_file, data_dir):
         [
             MagicMock(stdout="v2\n", returncode=0),
             MagicMock(stdout=ps_output, returncode=0),
+            MagicMock(stdout="exists", returncode=0),      # test -f config file
             MagicMock(stdout="Pulled", returncode=0),
             MagicMock(stdout="Started", returncode=0),
         ]
@@ -2027,6 +2032,7 @@ async def test_update_compose_v1_uses_legacy_binary(config_file, data_dir):
         [
             MagicMock(stdout="v1\n", returncode=0),     # probe → v1
             MagicMock(stdout=ps_output, returncode=0),  # docker ps -a
+            MagicMock(stdout="exists", returncode=0),   # test -f config file
             MagicMock(stdout="Pulled", returncode=0),
             MagicMock(stdout="Started", returncode=0),
         ]
@@ -2068,6 +2074,7 @@ async def test_update_compose_v2_uses_plugin_binary(config_file, data_dir):
         [
             MagicMock(stdout="v2\n", returncode=0),
             MagicMock(stdout=ps_output, returncode=0),
+            MagicMock(stdout="exists", returncode=0),   # test -f config file
             MagicMock(stdout="Pulled", returncode=0),
             MagicMock(stdout="Started", returncode=0),
         ]
@@ -2328,6 +2335,7 @@ async def test_update_compose_v1_relative_path_resolved(config_file, data_dir):
         [
             MagicMock(stdout="v1\n", returncode=0),
             MagicMock(stdout=ps_output, returncode=0),
+            MagicMock(stdout="exists", returncode=0),   # test -f config file
             MagicMock(stdout="Pulled", returncode=0),
             MagicMock(stdout="Started", returncode=0),
         ]

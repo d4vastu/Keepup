@@ -461,7 +461,17 @@ class SSHDockerBackend:
                             )
             binary = await self._detect_compose_binary(conn, wrap, h)
             config_file = await self._get_config_file(conn, project_name, wrap)
-            args = f"-f {config_file}" if config_file else f"-p {shlex.quote(project_name)}"
+            if config_file:
+                check = await conn.run(
+                    wrap(f"test -f {shlex.quote(config_file)} && echo exists"), check=False
+                )
+                if "exists" not in (check.stdout or ""):
+                    log.warning(
+                        "Docker SSH: compose config %r not found on %s, falling back to -p",
+                        config_file, h,
+                    )
+                    config_file = ""
+            args = f"-f {shlex.quote(config_file)}" if config_file else f"-p {shlex.quote(project_name)}"
             pull = await conn.run(wrap(f"{binary} {args} pull 2>&1"), check=False)
             if pull.returncode != 0:
                 log.error("Docker SSH: pull failed for %s on %s", project_name, h)
