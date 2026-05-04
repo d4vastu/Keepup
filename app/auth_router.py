@@ -624,7 +624,7 @@ async def setup_proxmox_discover(request: Request) -> HTMLResponse:
     if not url or not token:
         return HTMLResponse('<p class="text-sm text-red-400">Proxmox not configured.</p>')
     try:
-        client = ProxmoxClient(url=url, api_token=token, pinned_cert_pem=pinned_pem)
+        client = ProxmoxClient(url=url, api_token=token, pinned_cert_pem=pinned_pem, verify_ssl=get_proxmox_config().get("verify_ssl", True))
         nodes = await client.get_nodes()
         resources = await client.discover_resources()
         request.session["setup_proxmox_resources"] = resources
