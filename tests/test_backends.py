@@ -1201,6 +1201,128 @@ def test_build_docker_run_cmd_on_failure_with_retries():
     assert "--restart on-failure:3" in cmd
 
 
+# --- OP#177: extended field coverage -------------------------------------
+
+
+def test_build_docker_run_cmd_user_and_workdir():
+    data = _minimal_inspect()
+    data["Config"]["User"] = "1000:1000"
+    data["Config"]["WorkingDir"] = "/app"
+    cmd = _build_docker_run_cmd(data)
+    assert "--user 1000:1000" in cmd
+    assert "--workdir /app" in cmd
+
+
+def test_build_docker_run_cmd_resource_limits():
+    data = _minimal_inspect()
+    data["HostConfig"]["Memory"] = 536870912
+    data["HostConfig"]["NanoCpus"] = 1500000000
+    data["HostConfig"]["CpuShares"] = 512
+    cmd = _build_docker_run_cmd(data)
+    assert "--memory 536870912" in cmd
+    assert "--cpus 1.5" in cmd
+    assert "--cpu-shares 512" in cmd
+
+
+def test_build_docker_run_cmd_zero_resource_limits_omitted():
+    data = _minimal_inspect()
+    data["HostConfig"]["Memory"] = 0
+    data["HostConfig"]["NanoCpus"] = 0
+    data["HostConfig"]["CpuShares"] = 0
+    cmd = _build_docker_run_cmd(data)
+    assert "--memory" not in cmd
+    assert "--cpus" not in cmd
+    assert "--cpu-shares" not in cmd
+
+
+def test_build_docker_run_cmd_ulimits_and_sysctls():
+    data = _minimal_inspect()
+    data["HostConfig"]["Ulimits"] = [{"Name": "nofile", "Soft": 1024, "Hard": 2048}]
+    data["HostConfig"]["Sysctls"] = {"net.ipv4.ip_forward": "1"}
+    cmd = _build_docker_run_cmd(data)
+    assert "--ulimit nofile=1024:2048" in cmd
+    assert "--sysctl net.ipv4.ip_forward=1" in cmd
+
+
+def test_build_docker_run_cmd_security_opt():
+    data = _minimal_inspect()
+    data["HostConfig"]["SecurityOpt"] = ["no-new-privileges:true"]
+    cmd = _build_docker_run_cmd(data)
+    assert "--security-opt no-new-privileges:true" in cmd
+
+
+def test_build_docker_run_cmd_stop_signal_and_timeout():
+    data = _minimal_inspect()
+    data["Config"]["StopSignal"] = "SIGINT"
+    data["Config"]["StopTimeout"] = 30
+    cmd = _build_docker_run_cmd(data)
+    assert "--stop-signal SIGINT" in cmd
+    assert "--stop-timeout 30" in cmd
+
+
+def test_build_docker_run_cmd_healthcheck_cmd_shell():
+    data = _minimal_inspect()
+    data["Config"]["Healthcheck"] = {
+        "Test": ["CMD-SHELL", "curl -f http://localhost/ || exit 1"],
+        "Interval": 30000000000,
+        "Timeout": 5000000000,
+        "Retries": 3,
+    }
+    cmd = _build_docker_run_cmd(data)
+    assert "--health-cmd" in cmd
+    assert "--health-interval 30s" in cmd
+    assert "--health-timeout 5s" in cmd
+    assert "--health-retries 3" in cmd
+
+
+def test_build_docker_run_cmd_healthcheck_none():
+    data = _minimal_inspect()
+    data["Config"]["Healthcheck"] = {"Test": ["NONE"]}
+    cmd = _build_docker_run_cmd(data)
+    assert "--no-healthcheck" in cmd
+
+
+def test_build_docker_run_cmd_static_ip():
+    data = _minimal_inspect()
+    data["HostConfig"]["NetworkMode"] = "mynet"
+    data["NetworkSettings"]["Networks"] = {
+        "mynet": {"IPAMConfig": {"IPv4Address": "172.20.0.5"}, "Aliases": ["web"]}
+    }
+    cmd = _build_docker_run_cmd(data)
+    assert "--network mynet" in cmd
+    assert "--ip 172.20.0.5" in cmd
+
+
+def test_build_docker_run_cmd_static_ipv6():
+    data = _minimal_inspect()
+    data["HostConfig"]["NetworkMode"] = "mynet"
+    data["NetworkSettings"]["Networks"] = {
+        "mynet": {"IPAMConfig": {"IPv6Address": "fd00::5"}}
+    }
+    cmd = _build_docker_run_cmd(data)
+    assert "--ip6 fd00::5" in cmd
+
+
+def test_build_docker_run_cmd_healthcheck_cmd_exec_form_and_startperiod():
+    data = _minimal_inspect()
+    data["Config"]["Healthcheck"] = {
+        "Test": ["CMD", "curl", "-f", "http://localhost/"],
+        "Interval": 500000000,  # 500ms — exercises the sub-second branch
+        "StartPeriod": 5000000000,
+    }
+    cmd = _build_docker_run_cmd(data)
+    assert "--health-cmd" in cmd
+    assert "curl" in cmd
+    assert "--health-interval 500ms" in cmd
+    assert "--health-start-period 5s" in cmd
+
+
+def test_ns_to_duration_sub_millisecond_falls_back_to_ns():
+    from app.backends.ssh_docker_backend import _ns_to_duration
+
+    assert _ns_to_duration(1500) == "1500ns"
+
+
 # ---------------------------------------------------------------------------
 # SSHDockerBackend — standalone container discovery
 # ---------------------------------------------------------------------------
@@ -1359,25 +1481,22 @@ async def test_update_standalone_ref_triggers_recreate(config_file, data_dir):
         "NetworkSettings": {"Networks": {}},
     }])
 
-    conn = _make_multi_conn(
-        [
-            MagicMock(stdout=inspect_data, returncode=0),    # docker inspect
-            MagicMock(stdout="Pulled", returncode=0),        # docker pull
-            MagicMock(stdout="", returncode=0),              # docker stop
-            MagicMock(stdout="", returncode=0),              # docker rm
-            MagicMock(stdout="new-container-id", returncode=0),  # docker run
-        ]
-    )
+    def handler(cmd):
+        if "docker inspect" in cmd and "State.Running" in cmd:
+            return MagicMock(stdout="true", returncode=0)
+        if "docker inspect" in cmd:
+            return MagicMock(stdout=inspect_data, returncode=0)
+        return MagicMock(stdout="ok", returncode=0)
 
+    conn = _cmd_conn(handler)
     with patch("app.backends.ssh_docker_backend._connect", new=AsyncMock(return_value=conn)):
         backend = SSHDockerBackend()
         await backend.update_stack("test-host/~myapp")
 
-    calls = [call.args[0] for call in conn.run.call_args_list]
-    assert any("docker pull" in c for c in calls)
-    assert any("docker stop" in c for c in calls)
-    assert any("docker rm" in c for c in calls)
-    assert any("docker run" in c and "-d" in c for c in calls)
+    cmds = conn.commands
+    assert any("docker pull" in c for c in cmds)
+    assert any("docker rename" in c and "myapp__keepup_old" in c for c in cmds)
+    assert any("docker run" in c and "-d" in c for c in cmds)
 
 
 @pytest.mark.asyncio
@@ -1414,6 +1533,152 @@ async def test_update_standalone_pull_failure_raises(config_file, data_dir):
         backend = SSHDockerBackend()
         with pytest.raises(RuntimeError, match="pull failed"):
             await backend.update_stack("test-host/~myapp")
+
+
+# ---------------------------------------------------------------------------
+# OP#177 — standalone update: verify-before-destroy + rollback
+# ---------------------------------------------------------------------------
+
+
+_STANDALONE_INSPECT = json.dumps([{
+    "Name": "/myapp", "Id": "abc123",
+    "Config": {"Image": "myimage:latest", "Env": [], "Cmd": None,
+               "Entrypoint": None, "Labels": {}, "Hostname": "myapp"},
+    "HostConfig": {
+        "RestartPolicy": {"Name": "unless-stopped", "MaximumRetryCount": 0},
+        "NetworkMode": "bridge", "Privileged": False,
+        "Binds": None, "PortBindings": {}, "Devices": None,
+        "CapAdd": None, "CapDrop": None, "Dns": None,
+        "ExtraHosts": None, "Tmpfs": None, "PidMode": "",
+        "IpcMode": "private", "LogConfig": {"Type": "json-file", "Config": {}},
+    },
+    "NetworkSettings": {"Networks": {}},
+}])
+
+
+def _cmd_conn(handler):
+    """Connection whose .run(cmd) is dispatched by a command-aware handler.
+
+    handler(cmd: str) -> MagicMock(stdout=..., returncode=...). Records each
+    command on conn.commands for ordering assertions.
+    """
+    conn = MagicMock()
+    conn.__aenter__ = AsyncMock(return_value=conn)
+    conn.__aexit__ = AsyncMock(return_value=False)
+    conn.commands = []
+
+    async def _run(cmd, **kwargs):
+        conn.commands.append(cmd)
+        return handler(cmd)
+
+    conn.run = AsyncMock(side_effect=_run)
+    return conn
+
+
+@pytest.mark.asyncio
+async def test_update_standalone_removes_backup_only_after_verify(config_file, data_dir):
+    """Happy path: original is renamed aside and only deleted after the new one is verified running."""
+    import yaml
+    raw = yaml.safe_load(config_file.read_text())
+    raw["hosts"][0]["docker_mode"] = "all"
+    config_file.write_text(yaml.dump(raw))
+
+    def handler(cmd):
+        if "docker inspect" in cmd and "State.Running" in cmd:
+            return MagicMock(stdout="true", returncode=0)
+        if "docker inspect" in cmd:
+            return MagicMock(stdout=_STANDALONE_INSPECT, returncode=0)
+        return MagicMock(stdout="ok", returncode=0)
+
+    conn = _cmd_conn(handler)
+    with patch("app.backends.ssh_docker_backend._connect", new=AsyncMock(return_value=conn)):
+        await SSHDockerBackend().update_stack("test-host/~myapp")
+
+    cmds = conn.commands
+    # The original is renamed to a backup, not removed outright.
+    assert any("docker rename" in c and "myapp__keepup_old" in c for c in cmds)
+    # The new container is created before the backup is deleted.
+    run_idx = next(i for i, c in enumerate(cmds) if "docker run" in c)
+    rm_idx = next(i for i, c in enumerate(cmds) if "docker rm" in c and "myapp__keepup_old" in c)
+    assert run_idx < rm_idx
+    # Only the backup is removed — never the live container before verification.
+    assert not any("docker rm myapp" in c and "__keepup_old" not in c for c in cmds[:run_idx])
+
+
+@pytest.mark.asyncio
+async def test_update_standalone_rolls_back_when_run_fails(config_file, data_dir):
+    """If `docker run` fails, the backup is restored and started, and an error is raised."""
+    import yaml
+    raw = yaml.safe_load(config_file.read_text())
+    raw["hosts"][0]["docker_mode"] = "all"
+    config_file.write_text(yaml.dump(raw))
+
+    def handler(cmd):
+        if "docker inspect" in cmd and "State.Running" in cmd:
+            return MagicMock(stdout="false", returncode=1)
+        if "docker inspect" in cmd:
+            return MagicMock(stdout=_STANDALONE_INSPECT, returncode=0)
+        if "docker run" in cmd:
+            return MagicMock(stdout="boom", returncode=1)
+        return MagicMock(stdout="ok", returncode=0)
+
+    conn = _cmd_conn(handler)
+    with patch("app.backends.ssh_docker_backend._connect", new=AsyncMock(return_value=conn)):
+        with pytest.raises(RuntimeError):
+            await SSHDockerBackend().update_stack("test-host/~myapp")
+
+    cmds = conn.commands
+    # Rollback: backup renamed back to the original name and started again.
+    assert any("docker rename" in c and "myapp__keepup_old myapp" in c.replace("'", "") for c in cmds)
+    assert any("docker start" in c and "myapp" in c for c in cmds)
+
+
+@pytest.mark.asyncio
+async def test_update_standalone_rolls_back_when_not_running(config_file, data_dir):
+    """If the new container starts but isn't running, roll back to the backup."""
+    import yaml
+    raw = yaml.safe_load(config_file.read_text())
+    raw["hosts"][0]["docker_mode"] = "all"
+    config_file.write_text(yaml.dump(raw))
+
+    def handler(cmd):
+        if "docker inspect" in cmd and "State.Running" in cmd:
+            return MagicMock(stdout="false", returncode=0)
+        if "docker inspect" in cmd:
+            return MagicMock(stdout=_STANDALONE_INSPECT, returncode=0)
+        return MagicMock(stdout="ok", returncode=0)
+
+    conn = _cmd_conn(handler)
+    with patch("app.backends.ssh_docker_backend._connect", new=AsyncMock(return_value=conn)):
+        with pytest.raises(RuntimeError):
+            await SSHDockerBackend().update_stack("test-host/~myapp")
+
+    assert any("docker rename" in c and "myapp__keepup_old myapp" in c.replace("'", "") for c in conn.commands)
+
+
+@pytest.mark.asyncio
+async def test_update_standalone_rename_failure_preserves_original(config_file, data_dir):
+    """If the initial rename-aside fails, nothing is destroyed and no new container is run."""
+    import yaml
+    raw = yaml.safe_load(config_file.read_text())
+    raw["hosts"][0]["docker_mode"] = "all"
+    config_file.write_text(yaml.dump(raw))
+
+    def handler(cmd):
+        if "docker inspect" in cmd:
+            return MagicMock(stdout=_STANDALONE_INSPECT, returncode=0)
+        if "docker rename" in cmd:
+            return MagicMock(stdout="name in use", returncode=1)
+        return MagicMock(stdout="ok", returncode=0)
+
+    conn = _cmd_conn(handler)
+    with patch("app.backends.ssh_docker_backend._connect", new=AsyncMock(return_value=conn)):
+        with pytest.raises(RuntimeError):
+            await SSHDockerBackend().update_stack("test-host/~myapp")
+
+    # Original was never started anew and never removed.
+    assert not any("docker run" in c for c in conn.commands)
+    assert not any("docker rm" in c for c in conn.commands)
 
 
 # ---------------------------------------------------------------------------
@@ -1629,16 +1894,16 @@ async def test_update_standalone_run_failure_raises(config_file, data_dir):
         "NetworkSettings": {"Networks": {}},
     }])
 
-    conn = _make_multi_conn(
-        [
-            MagicMock(stdout=inspect_data, returncode=0),
-            MagicMock(stdout="Pulled", returncode=0),    # pull
-            MagicMock(stdout="", returncode=0),          # stop
-            MagicMock(stdout="", returncode=0),          # rm
-            MagicMock(stdout="run error", returncode=1), # run fails
-        ]
-    )
+    def handler(cmd):
+        if "docker inspect" in cmd and "State.Running" in cmd:
+            return MagicMock(stdout="false", returncode=1)
+        if "docker inspect" in cmd:
+            return MagicMock(stdout=inspect_data, returncode=0)
+        if "docker run" in cmd:
+            return MagicMock(stdout="run error", returncode=1)
+        return MagicMock(stdout="ok", returncode=0)
 
+    conn = _cmd_conn(handler)
     with patch("app.backends.ssh_docker_backend._connect", new=AsyncMock(return_value=conn)):
         backend = SSHDockerBackend()
         with pytest.raises(RuntimeError, match="docker run failed"):
@@ -1919,28 +2184,25 @@ async def test_update_standalone_pct_wraps_commands(config_file, data_dir):
         },
         "NetworkSettings": {"Networks": {}},
     }])
-    conn = _make_multi_conn(
-        [
-            MagicMock(stdout=inspect_data, returncode=0),
-            MagicMock(stdout="Pulled", returncode=0),
-            MagicMock(stdout="", returncode=0),
-            MagicMock(stdout="", returncode=0),
-            MagicMock(stdout="new-id", returncode=0),
-        ]
-    )
+    def handler(cmd):
+        if "State.Running" in cmd:
+            return MagicMock(stdout="true", returncode=0)
+        if "docker inspect" in cmd:
+            return MagicMock(stdout=inspect_data, returncode=0)
+        return MagicMock(stdout="ok", returncode=0)
 
+    conn = _cmd_conn(handler)
     with patch(
         "app.backends.ssh_docker_backend._connect", new=AsyncMock(return_value=conn)
     ):
         backend = SSHDockerBackend()
         await backend.update_stack("test-host/~myapp")
 
-    calls = [call.args[0] for call in conn.run.call_args_list]
+    calls = conn.commands
     assert all(c.startswith("pct exec 303 -- sh -c ") for c in calls)
     assert any("docker inspect" in c for c in calls)
     assert any("docker pull" in c for c in calls)
-    assert any("docker stop" in c for c in calls)
-    assert any("docker rm" in c for c in calls)
+    assert any("docker rename" in c for c in calls)
     assert any("docker run" in c for c in calls)
 
 
