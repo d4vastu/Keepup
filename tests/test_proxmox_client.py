@@ -727,6 +727,46 @@ async def test_reboot_node_posts_reboot_command(mock_client):
 
 
 # ---------------------------------------------------------------------------
+# reboot_lxc
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_reboot_lxc_posts_to_lxc_status_reboot(mock_client):
+    post_resp = _make_response("")
+    with patch("httpx.AsyncClient.post", new_callable=AsyncMock, return_value=post_resp) as mock_post:
+        await mock_client.reboot_lxc("pve", 101)
+    mock_post.assert_called_once()
+    url = mock_post.call_args[0][0]
+    assert "/nodes/pve/lxc/101/status/reboot" in url
+
+
+# ---------------------------------------------------------------------------
+# client_from_config
+# ---------------------------------------------------------------------------
+
+
+def test_client_from_config_builds_token_from_token_id(config_file, data_dir):
+    from app.proxmox_client import client_from_config
+    from app.config_manager import save_proxmox_config
+    from app.credentials import save_integration_credentials
+
+    save_proxmox_config(url="https://pve.example:8006", verify_ssl=True)
+    save_integration_credentials("proxmox", token_id="root@pam!kp", secret="uuid")
+
+    client = client_from_config()
+    assert client.base == "https://pve.example:8006"
+    assert "PVEAPIToken=root@pam!kp=uuid" == client.headers["Authorization"]
+
+
+def test_client_from_config_raises_when_unconfigured(config_file, data_dir):
+    from app.proxmox_client import client_from_config
+
+    with pytest.raises(RuntimeError, match="not configured"):
+        client_from_config()
+
+
+# ---------------------------------------------------------------------------
 # get_node_kernel
 # ---------------------------------------------------------------------------
 

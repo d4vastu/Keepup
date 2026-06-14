@@ -33,7 +33,7 @@ async def test_run_os_update_disabled(config_file):
     from app.auto_update_log import get_recent
 
     with patch(
-        "app.auto_update_scheduler.run_host_update_buffered", new=AsyncMock()
+        "app.auto_update_scheduler.run_os_update", new=AsyncMock()
     ) as mock_update:
         await _run_os_update("test-host")
 
@@ -58,7 +58,7 @@ async def test_run_os_update_success(config_file):
     config_file.write_text(yaml.dump(raw))
 
     with patch(
-        "app.auto_update_scheduler.run_host_update_buffered",
+        "app.auto_update_scheduler.run_os_update",
         new=AsyncMock(return_value=["Package updated."]),
     ):
         await _run_os_update("test-host")
@@ -85,7 +85,7 @@ async def test_run_os_update_failure_logs_error(config_file):
     config_file.write_text(yaml.dump(raw))
 
     with patch(
-        "app.auto_update_scheduler.run_host_update_buffered",
+        "app.auto_update_scheduler.run_os_update",
         new=AsyncMock(side_effect=Exception("SSH timeout")),
     ):
         await _run_os_update("test-host")
@@ -114,7 +114,7 @@ async def test_run_os_update_sudo_required_but_no_password(config_file):
     with (
         patch("app.auto_update_scheduler._needs_sudo", return_value=True),
         patch(
-            "app.auto_update_scheduler.run_host_update_buffered", new=AsyncMock()
+            "app.auto_update_scheduler.run_os_update", new=AsyncMock()
         ) as mock_update,
     ):
         await _run_os_update("test-host")
@@ -142,15 +142,15 @@ async def test_run_os_update_with_auto_reboot(config_file):
 
     with (
         patch(
-            "app.auto_update_scheduler.run_host_update_buffered",
+            "app.auto_update_scheduler.run_os_update",
             new=AsyncMock(return_value=["Updated."]),
         ),
         patch(
-            "app.auto_update_scheduler.check_host_updates",
-            new=AsyncMock(return_value={"packages": [], "reboot_required": True}),
+            "app.auto_update_scheduler.reboot_required_typed",
+            new=AsyncMock(return_value=True),
         ),
         patch(
-            "app.auto_update_scheduler.reboot_host", new=AsyncMock(return_value=[])
+            "app.auto_update_scheduler.reboot_host_typed", new=AsyncMock(return_value=[])
         ) as mock_reboot,
     ):
         await _run_os_update("test-host")
@@ -158,6 +158,45 @@ async def test_run_os_update_with_auto_reboot(config_file):
     mock_reboot.assert_called_once()
     entries = get_recent(10)
     assert any(e["status"] == "success" for e in entries)
+
+
+@pytest.mark.asyncio
+async def test_run_os_update_node_reboots_gracefully_not_ssh(config_file):
+    """OP#176: a Proxmox node auto-reboot must use the graceful typed path, never SSH."""
+    import yaml
+    from app.auto_update_scheduler import _run_os_update
+
+    raw = yaml.safe_load(config_file.read_text())
+    raw["hosts"][0]["proxmox_node"] = "pve"
+    raw["hosts"][0]["proxmox_vmid"] = None
+    raw["hosts"][0]["user"] = "root"
+    raw["hosts"][0]["auto_update"] = {
+        "os_enabled": True,
+        "os_schedule": "0 3 * * *",
+        "auto_reboot": True,
+    }
+    config_file.write_text(yaml.dump(raw))
+
+    with (
+        patch(
+            "app.auto_update_scheduler.run_os_update",
+            new=AsyncMock(return_value=["Updated."]),
+        ),
+        patch(
+            "app.auto_update_scheduler.reboot_required_typed",
+            new=AsyncMock(return_value=True),
+        ),
+        patch(
+            "app.auto_update_scheduler.reboot_host_typed",
+            new=AsyncMock(return_value=["api reboot"]),
+        ) as mock_typed,
+        # The SSH hard-reboot path must never be reached for a Proxmox node.
+        patch("app.host_ops.reboot_host", new=AsyncMock()) as mock_ssh,
+    ):
+        await _run_os_update("test-host")
+
+    mock_typed.assert_awaited_once()
+    mock_ssh.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
