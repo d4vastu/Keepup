@@ -257,7 +257,7 @@ def test_credential_save_no_secret_in_log(client, data_dir):
 
 def test_host_upgrade_trigger_audit(client, data_dir):
     """Triggering a host upgrade emits host.upgrade.trigger."""
-    with patch("app.main.run_host_update_buffered", new=AsyncMock(return_value=[])):
+    with patch("app.main.run_os_update", new=AsyncMock(return_value=[])):
         client.post("/api/host/test-host/update", data={})
     entries = _entries_with_action(data_dir, "host.upgrade.trigger")
     assert entries, "expected host.upgrade.trigger entry"
@@ -270,7 +270,7 @@ def test_host_upgrade_trigger_audit(client, data_dir):
 
 def test_host_reboot_trigger_audit(client, data_dir):
     """Triggering a host reboot emits host.reboot.trigger."""
-    with patch("app.main.reboot_host", new=AsyncMock(return_value=None)):
+    with patch("app.main.reboot_host_typed", new=AsyncMock(return_value=None)):
         client.post("/api/host/test-host/restart", data={"confirmed": "yes"})
     entries = _entries_with_action(data_dir, "host.reboot.trigger")
     assert entries, "expected host.reboot.trigger entry"

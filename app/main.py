@@ -44,12 +44,8 @@ from .config_manager import (
     save_proxmox_config,
 )
 from .credentials import get_credentials, get_integration_credentials, save_sudo_password
-from .ssh_client import (
-    _needs_sudo,
-    check_host_updates,
-    reboot_host,
-    run_host_update_buffered,
-)
+from .host_ops import reboot_host_typed, run_os_update
+from .ssh_client import _needs_sudo, check_host_updates
 from .__version__ import APP_VERSION
 from .httpx_client import make_client
 from .self_identity import is_self_on_proxmox_node
@@ -513,7 +509,7 @@ def _log_line_items(lines: list[str]) -> list[dict]:
 async def _job_run_host_update(job_id: str, host: dict, creds: dict) -> None:
     name = host.get("name", host.get("host", "unknown"))
     try:
-        lines = await run_host_update_buffered(host, creds)
+        lines = await run_os_update(host, creds)
         _jobs[job_id]["lines"] = lines
         _jobs[job_id]["status"] = "done"
         log.info("OS upgrade complete on %s", name)
@@ -529,7 +525,7 @@ async def _job_run_proxmox_node_upgrade(job_id: str, slug: str) -> None:
     try:
         host = _get_host(slug)
         creds = get_credentials(slug)
-        lines = await run_host_update_buffered(host, creds)
+        lines = await run_os_update(host, creds)
         _jobs[job_id]["lines"] = lines
         _jobs[job_id]["status"] = "done"
         log.info("Proxmox node upgrade complete: %s", slug)
@@ -567,7 +563,7 @@ async def _job_run_lxc_upgrade(
 
 async def _job_run_host_restart(job_id: str, host: dict, creds: dict) -> None:
     try:
-        lines = await reboot_host(host, creds)
+        lines = await reboot_host_typed(host, creds)
         _jobs[job_id]["lines"] = lines
         _jobs[job_id]["status"] = "done"
     except Exception as exc:
@@ -724,24 +720,9 @@ async def pbs_status(request: Request) -> HTMLResponse:
 
 async def _proxmox_client_from_config():
     """Build a ProxmoxClient from the stored integration config."""
-    from .proxmox_client import ProxmoxClient
+    from .proxmox_client import client_from_config
 
-    cfg = get_proxmox_config()
-    creds = get_integration_credentials("proxmox")
-    url = cfg.get("url", "")
-    token_id = creds.get("token_id", "")
-    secret = creds.get("secret", "")
-    if not token_id:
-        api_user = creds.get("api_user", "")
-        api_token = creds.get("api_token", "")
-        token = f"{api_user}!{api_token}" if api_user else api_token
-    else:
-        token = f"{token_id}={secret}"
-    pinned_pem = cfg.get("pinned_cert_pem", "")
-    verify_ssl = cfg.get("verify_ssl", True)
-    if not url or not token:
-        raise RuntimeError("Proxmox integration not configured.")
-    return ProxmoxClient(url=url, api_token=token, pinned_cert_pem=pinned_pem, verify_ssl=verify_ssl)
+    return client_from_config()
 
 
 @app.get("/api/host/{slug}/check", response_class=HTMLResponse)

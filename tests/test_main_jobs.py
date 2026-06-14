@@ -20,7 +20,7 @@ async def test_job_run_host_update_success(config_file, data_dir):
     creds = {}
 
     with patch(
-        "app.main.run_host_update_buffered",
+        "app.main.run_os_update",
         new=AsyncMock(return_value=["line1", "line2"]),
     ):
         await m._job_run_host_update(job_id, host, creds)
@@ -40,7 +40,7 @@ async def test_job_run_host_update_failure(config_file, data_dir):
     creds = {}
 
     with patch(
-        "app.main.run_host_update_buffered",
+        "app.main.run_os_update",
         new=AsyncMock(side_effect=Exception("SSH failed")),
     ):
         await m._job_run_host_update(job_id, host, creds)
@@ -60,7 +60,7 @@ async def test_job_run_host_restart_success(config_file, data_dir):
     creds = {}
 
     with patch(
-        "app.main.reboot_host", new=AsyncMock(return_value=["Reboot initiated"])
+        "app.main.reboot_host_typed", new=AsyncMock(return_value=["Reboot initiated"])
     ):
         await m._job_run_host_restart(job_id, host, creds)
 
@@ -78,7 +78,7 @@ async def test_job_run_host_restart_failure(config_file, data_dir):
     creds = {}
 
     with patch(
-        "app.main.reboot_host",
+        "app.main.reboot_host_typed",
         new=AsyncMock(side_effect=Exception("Connection refused")),
     ):
         await m._job_run_host_restart(job_id, host, creds)
@@ -152,7 +152,7 @@ async def test_job_run_stack_update_unknown_backend(config_file, data_dir, monke
 
 def test_host_update_root_user_no_modal(client):
     """Root user (SSH default) → no sudo modal, job starts immediately."""
-    with patch("app.main.run_host_update_buffered", new=AsyncMock(return_value=[])):
+    with patch("app.main.run_os_update", new=AsyncMock(return_value=[])):
         response = client.post("/api/host/test-host/update")
     assert response.status_code == 200
     # Should get job poll, not a sudo modal
@@ -174,7 +174,7 @@ def test_host_update_nonroot_sudo_provided_once(client, data_dir):
 
     with (
         patch("app.main._needs_sudo", return_value=True),
-        patch("app.main.run_host_update_buffered", new=AsyncMock(return_value=[])),
+        patch("app.main.run_os_update", new=AsyncMock(return_value=[])),
     ):
         response = client.post(
             "/api/host/test-host/update",
@@ -196,7 +196,7 @@ def test_host_update_nonroot_sudo_saved(client, data_dir):
 
     with (
         patch("app.main._needs_sudo", return_value=True),
-        patch("app.main.run_host_update_buffered", new=AsyncMock(return_value=[])),
+        patch("app.main.run_os_update", new=AsyncMock(return_value=[])),
     ):
         response = client.post(
             "/api/host/test-host/update",
@@ -216,7 +216,7 @@ def test_host_update_nonroot_saved_sudo_used_automatically(client, data_dir):
     save_credentials("test-host", sudo_password="presaved")
     with (
         patch("app.main._needs_sudo", return_value=True),
-        patch("app.main.run_host_update_buffered", new=AsyncMock(return_value=[])),
+        patch("app.main.run_os_update", new=AsyncMock(return_value=[])),
     ):
         response = client.post("/api/host/test-host/update")
     assert response.status_code == 200
@@ -235,7 +235,7 @@ def test_host_update_unknown_slug(client):
 
 
 def test_host_restart_root_user_no_modal(client):
-    with patch("app.main.reboot_host", new=AsyncMock(return_value=[])):
+    with patch("app.main.reboot_host_typed", new=AsyncMock(return_value=[])):
         response = client.post("/api/host/test-host/restart")
     assert response.status_code == 200
     assert "sudo" not in response.text.lower()
@@ -260,7 +260,7 @@ def test_host_restart_nonroot_sudo_saved_automatically(client, data_dir):
 
     with (
         patch("app.main._needs_sudo", return_value=True),
-        patch("app.main.reboot_host", new=AsyncMock(return_value=[])),
+        patch("app.main.reboot_host_typed", new=AsyncMock(return_value=[])),
     ):
         response = client.post(
             "/api/host/test-host/restart",
@@ -384,7 +384,7 @@ def test_host_restart_proxmox_node_starts_job(client):
 
 def test_host_restart_non_proxmox_unchanged(client):
     """Non-Proxmox restart still works via existing SSH flow."""
-    with patch("app.main.reboot_host", new=AsyncMock(return_value=[])):
+    with patch("app.main.reboot_host_typed", new=AsyncMock(return_value=[])):
         response = client.post("/api/host/test-host/restart")
     assert response.status_code == 200
     assert "sudo" not in response.text.lower()
@@ -819,7 +819,7 @@ async def test_job_run_proxmox_node_upgrade_success(config_file, data_dir):
     px_host = {"name": "PVE Node", "host": "10.0.0.5", "proxmox_node": "pve"}
     with (
         patch("app.main._get_host", return_value=px_host),
-        patch("app.main.run_host_update_buffered", new=AsyncMock(return_value=["5 upgraded", "done"])),
+        patch("app.main.run_os_update", new=AsyncMock(return_value=["5 upgraded", "done"])),
     ):
         await m._job_run_proxmox_node_upgrade(job_id, "pve-node")
 
@@ -838,7 +838,7 @@ async def test_job_run_proxmox_node_upgrade_failure(config_file, data_dir):
     px_host = {"name": "PVE Node", "host": "10.0.0.5", "proxmox_node": "pve"}
     with (
         patch("app.main._get_host", return_value=px_host),
-        patch("app.main.run_host_update_buffered", new=AsyncMock(side_effect=Exception("SSH connection refused"))),
+        patch("app.main.run_os_update", new=AsyncMock(side_effect=Exception("SSH connection refused"))),
     ):
         await m._job_run_proxmox_node_upgrade(job_id, "pve-node")
 
@@ -875,7 +875,7 @@ def test_host_update_proxmox_node_job_completes(client):
 
     with (
         patch("app.main._get_host", return_value=px_host),
-        patch("app.main.run_host_update_buffered", new=AsyncMock(return_value=["5 upgraded"])),
+        patch("app.main.run_os_update", new=AsyncMock(return_value=["5 upgraded"])),
     ):
         response = client.post("/api/host/pve-node/update")
 

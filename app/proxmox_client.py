@@ -372,6 +372,15 @@ class ProxmoxClient:
             )
             r.raise_for_status()
 
+    async def reboot_lxc(self, node: str, vmid: int) -> None:
+        """Reboot a single LXC container via the Proxmox API."""
+        log.info("Proxmox: issuing reboot for LXC %s/%s", node, vmid)
+        async with self._client() as c:
+            r = await c.post(
+                f"/api2/json/nodes/{node}/lxc/{vmid}/status/reboot",
+            )
+            r.raise_for_status()
+
     async def get_node_kernel(self, node: str) -> str:
         """Return the running kernel release string for a node."""
         async with self._client() as c:
@@ -492,3 +501,35 @@ class ProxmoxClient:
         n_lxcs = sum(1 for r in resources if r["type"] == "lxc")
         log.info("Proxmox: discovered %d VMs and %d LXCs", n_vms, n_lxcs)
         return sorted(resources, key=lambda r: (r["node"], r["vmid"]))
+
+
+def client_from_config() -> "ProxmoxClient":
+    """Build a ProxmoxClient from the stored integration config + credentials.
+
+    Shared by the dashboard routes (``main``), the auto-update path
+    (``host_ops``), and anywhere else that needs a configured client, so the
+    token-assembly logic lives in exactly one place. Raises ``RuntimeError``
+    when the Proxmox integration is not configured.
+    """
+    from .config_manager import get_proxmox_config
+    from .credentials import get_integration_credentials
+
+    cfg = get_proxmox_config()
+    creds = get_integration_credentials("proxmox")
+    url = cfg.get("url", "")
+    token_id = creds.get("token_id", "")
+    secret = creds.get("secret", "")
+    if not token_id:
+        api_user = creds.get("api_user", "")
+        api_token = creds.get("api_token", "")
+        token = f"{api_user}!{api_token}" if api_user else api_token
+    else:
+        token = f"{token_id}={secret}"
+    if not url or not token:
+        raise RuntimeError("Proxmox integration not configured.")
+    return ProxmoxClient(
+        url=url,
+        api_token=token,
+        pinned_cert_pem=cfg.get("pinned_cert_pem", ""),
+        verify_ssl=cfg.get("verify_ssl", True),
+    )

@@ -7,12 +7,8 @@ from .auto_update_log import append_log
 from .config_manager import get_all_stack_auto_updates, get_hosts
 from .notifications import notify
 from .credentials import get_credentials
-from .ssh_client import (
-    _needs_sudo,
-    check_host_updates,
-    reboot_host,
-    run_host_update_buffered,
-)
+from .host_ops import reboot_host_typed, reboot_required_typed, run_os_update
+from .ssh_client import _needs_sudo
 
 logger = logging.getLogger(__name__)
 
@@ -75,13 +71,12 @@ async def _run_os_update(slug: str) -> None:
         return
 
     try:
-        lines = await run_host_update_buffered(host, creds)
+        lines = await run_os_update(host, creds)
         append_log("os", slug, host["name"], "success", lines)
 
         if au.get("auto_reboot"):
-            check = await check_host_updates(host, creds)
-            if check.get("reboot_required"):
-                await reboot_host(host, creds)
+            if await reboot_required_typed(host, creds):
+                await reboot_host_typed(host, creds)
                 append_log(
                     "os",
                     slug,
