@@ -510,16 +510,50 @@ class SSHDockerBackend:
                 log.error("Docker SSH: pull failed for %s on %s", container_name, h)
                 raise RuntimeError(f"docker pull failed:\n{pull.stdout}")
 
-            log.info("Docker SSH: stopping and removing %s", container_name)
-            await conn.run(wrap(f"docker stop {shlex.quote(container_name)}"), check=False)
-            await conn.run(wrap(f"docker rm {shlex.quote(container_name)}"), check=False)
+            # Verify-before-destroy: rename the live container aside as a backup
+            # and stop it (freeing host ports) instead of removing it. The
+            # original is only deleted once the replacement is confirmed running;
+            # on any failure we roll back to the backup. (OP#177)
+            name_q = shlex.quote(container_name)
+            backup = f"{container_name}__keepup_old"
+            backup_q = shlex.quote(backup)
+
+            rename = await conn.run(
+                wrap(f"docker rename {name_q} {backup_q} 2>&1"), check=False
+            )
+            if rename.returncode != 0:
+                log.error("Docker SSH: rename failed for %s on %s", container_name, h)
+                raise RuntimeError(
+                    f"docker rename failed (original left untouched):\n{rename.stdout}"
+                )
+            await conn.run(wrap(f"docker stop {backup_q}"), check=False)
 
             run_cmd = _build_docker_run_cmd(inspect_data)
             log.info("Docker SSH: recreating %s", container_name)
             run = await conn.run(wrap(f"{run_cmd} 2>&1"), check=False)
-            if run.returncode != 0:
-                log.error("Docker SSH: recreate failed for %s on %s", container_name, h)
-                raise RuntimeError(f"docker run failed:\n{run.stdout}")
+
+            running = False
+            if run.returncode == 0:
+                verify = await conn.run(
+                    wrap(f"docker inspect -f '{{{{.State.Running}}}}' {name_q}"),
+                    check=False,
+                )
+                running = verify.returncode == 0 and verify.stdout.strip() == "true"
+
+            if not running:
+                log.error(
+                    "Docker SSH: recreate of %s on %s failed — rolling back", container_name, h
+                )
+                # Clear any partial new container, then restore the backup.
+                await conn.run(wrap(f"docker rm -f {name_q}"), check=False)
+                await conn.run(wrap(f"docker rename {backup_q} {name_q}"), check=False)
+                await conn.run(wrap(f"docker start {name_q}"), check=False)
+                raise RuntimeError(
+                    f"docker run failed; rolled back to previous container:\n{run.stdout}"
+                )
+
+            # Success — the replacement is healthy, drop the backup.
+            await conn.run(wrap(f"docker rm {backup_q}"), check=False)
 
         log.info("Docker SSH: %s on %s — standalone container updated", container_name, h)
 
@@ -680,12 +714,27 @@ def _rollup_status(images: list[dict]) -> str:
     return "unknown"
 
 
+def _ns_to_duration(ns: int) -> str:
+    """Convert a Docker nanosecond duration to a CLI string (e.g. 30s, 500ms)."""
+    seconds = ns / 1_000_000_000
+    if seconds >= 1 and seconds == int(seconds):
+        return f"{int(seconds)}s"
+    ms = ns / 1_000_000
+    if ms == int(ms):
+        return f"{int(ms)}ms"
+    return f"{ns}ns"
+
+
 def _build_docker_run_cmd(inspect: dict) -> str:
     """
     Reconstruct a `docker run` command from `docker inspect` output.
 
     Mirrors Watchtower's GetCreateConfig / GetCreateHostConfig approach:
     reads HostConfig directly and maps fields to CLI flags.
+
+    Known limitations (residual gaps — see OP#177): user-defined network
+    aliases and attachments to more than one custom network are not
+    reproduced; only the primary custom network's static IP is restored.
     """
     parts = ["docker", "run", "-d"]
 
@@ -707,14 +756,27 @@ def _build_docker_run_cmd(inspect: dict) -> str:
         else:
             parts += ["--restart", restart_name]
 
-    # Network mode
+    # Network mode (+ static IP for a single custom network, if pinned).
+    # Multi-network attachments and user-defined network aliases are a known
+    # limitation — only the primary custom network's static IP is reproduced.
+    networks = network_settings.get("Networks") or {}
+    attached_net = ""
     network_mode = host_config.get("NetworkMode", "")
     if network_mode and network_mode not in ("default", "bridge", ""):
         parts += ["--network", network_mode]
+        attached_net = network_mode if network_mode in networks else ""
     else:
-        for net_name in (network_settings.get("Networks") or {}):
+        for net_name in networks:
             if net_name not in ("bridge", "host", "none"):
                 parts += ["--network", net_name]
+                attached_net = net_name
+                break
+    if attached_net:
+        ipam = (networks.get(attached_net) or {}).get("IPAMConfig") or {}
+        if ipam.get("IPv4Address"):
+            parts += ["--ip", ipam["IPv4Address"]]
+        if ipam.get("IPv6Address"):
+            parts += ["--ip6", ipam["IPv6Address"]]
 
     # Hostname
     hostname = config.get("Hostname", "")
@@ -725,6 +787,55 @@ def _build_docker_run_cmd(inspect: dict) -> str:
     # Privileged
     if host_config.get("Privileged"):
         parts.append("--privileged")
+
+    # User / working directory
+    if config.get("User"):
+        parts += ["--user", config["User"]]
+    if config.get("WorkingDir"):
+        parts += ["--workdir", config["WorkingDir"]]
+
+    # Resource limits
+    if host_config.get("Memory"):
+        parts += ["--memory", str(host_config["Memory"])]
+    nano_cpus = host_config.get("NanoCpus") or 0
+    if nano_cpus:
+        cpus = f"{nano_cpus / 1_000_000_000:.9f}".rstrip("0").rstrip(".")
+        parts += ["--cpus", cpus]
+    if host_config.get("CpuShares"):
+        parts += ["--cpu-shares", str(host_config["CpuShares"])]
+
+    # Ulimits / sysctls / security options
+    for ul in host_config.get("Ulimits") or []:
+        parts += ["--ulimit", f"{ul['Name']}={ul['Soft']}:{ul['Hard']}"]
+    for key, val in (host_config.get("Sysctls") or {}).items():
+        parts += ["--sysctl", f"{key}={val}"]
+    for opt in host_config.get("SecurityOpt") or []:
+        parts += ["--security-opt", opt]
+
+    # Stop signal / timeout
+    if config.get("StopSignal"):
+        parts += ["--stop-signal", str(config["StopSignal"])]
+    if config.get("StopTimeout"):
+        parts += ["--stop-timeout", str(config["StopTimeout"])]
+
+    # Healthcheck
+    hc = config.get("Healthcheck") or {}
+    hc_test = hc.get("Test") or []
+    if hc_test[:1] == ["NONE"]:
+        parts.append("--no-healthcheck")
+    elif hc_test and hc_test[0] in ("CMD", "CMD-SHELL"):
+        if hc_test[0] == "CMD-SHELL":
+            parts += ["--health-cmd", hc_test[1] if len(hc_test) > 1 else ""]
+        else:
+            parts += ["--health-cmd", " ".join(hc_test[1:])]
+        if hc.get("Interval"):
+            parts += ["--health-interval", _ns_to_duration(hc["Interval"])]
+        if hc.get("Timeout"):
+            parts += ["--health-timeout", _ns_to_duration(hc["Timeout"])]
+        if hc.get("Retries"):
+            parts += ["--health-retries", str(hc["Retries"])]
+        if hc.get("StartPeriod"):
+            parts += ["--health-start-period", _ns_to_duration(hc["StartPeriod"])]
 
     # Capabilities
     for cap in host_config.get("CapAdd") or []:
