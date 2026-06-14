@@ -54,6 +54,12 @@ from .templates_env import make_templates
 
 log = logging.getLogger(__name__)
 
+# Shown (and logged) when a reboot is refused because Keepup runs on the
+# target Proxmox node — keeps the wording consistent across route and job.
+_SELF_REBOOT_REFUSED = (
+    "Refusing to reboot Proxmox node {node!r}: Keepup is running on it."
+)
+
 # ---------------------------------------------------------------------------
 # GitHub version check (cached 1 hour)
 # ---------------------------------------------------------------------------
@@ -577,6 +583,13 @@ async def _job_run_proxmox_node_restart(
     job_id: str, slug: str, proxmox_node: str
 ) -> None:
     try:
+        if is_self_on_proxmox_node(proxmox_node):
+            msg = _SELF_REBOOT_REFUSED.format(node=proxmox_node)
+            _jobs[job_id]["lines"].append(msg)
+            _jobs[job_id]["status"] = "error"
+            _jobs[job_id]["error"] = msg
+            return
+
         client = await _proxmox_client_from_config()
 
         _jobs[job_id]["lines"].append(f"Issuing reboot to node {proxmox_node}…")
@@ -980,6 +993,20 @@ async def host_restart(
 
         if proxmox_node and proxmox_vmid is None:
             host_name = host.get("name", slug)
+            if is_self_on_proxmox_node(proxmox_node):
+                audit(
+                    request,
+                    "host.reboot.refused_self",
+                    target=slug,
+                    details={"host": host_name, "proxmox_node": proxmox_node},
+                )
+                return templates.TemplateResponse(
+                    "partials/error.html",
+                    {
+                        "request": request,
+                        "message": _SELF_REBOOT_REFUSED.format(node=proxmox_node),
+                    },
+                )
             job_id = uuid.uuid4().hex[:8]
             _jobs[job_id] = {
                 "done": False,

@@ -390,6 +390,28 @@ def test_host_restart_non_proxmox_unchanged(client):
     assert "sudo" not in response.text.lower()
 
 
+def test_host_restart_node_refuses_self(client):
+    """OP#181: the route refuses to reboot the Proxmox node Keepup itself runs on."""
+    node_host = {
+        "name": "PVE Node",
+        "host": "10.0.0.1",
+        "slug": "pve-node",
+        "proxmox_node": "pve",
+    }
+    with (
+        patch("app.main._get_host", return_value=node_host),
+        patch("app.main.is_self_on_proxmox_node", return_value=True),
+        patch("app.main._job_run_proxmox_node_restart", new=AsyncMock()) as mock_job,
+    ):
+        response = client.post(
+            "/api/host/pve-node/restart",
+            data={"confirmed": "true"},
+        )
+    assert response.status_code == 200
+    assert "running on" in response.text.lower() or "refus" in response.text.lower()
+    mock_job.assert_not_called()
+
+
 # ---------------------------------------------------------------------------
 # _job_run_proxmox_node_restart
 # ---------------------------------------------------------------------------
@@ -441,6 +463,31 @@ async def test_job_proxmox_node_restart_node_no_return(config_file, data_dir):
     assert m._jobs[job_id]["done"] is True
     assert m._jobs[job_id]["status"] == "error"
     assert "10 minutes" in m._jobs[job_id]["error"]
+
+
+@pytest.mark.asyncio
+async def test_job_proxmox_node_restart_refuses_self(config_file, data_dir):
+    """OP#181 defense-in-depth: the job refuses to reboot the node Keepup runs on."""
+    import app.main as m
+
+    mock_client = AsyncMock()
+    mock_client.reboot_node = AsyncMock()
+
+    job_id = "testpxrebootself"
+    m._jobs[job_id] = {
+        "done": False, "status": "running", "error": None, "lines": [],
+        "type": "os_restart", "label": "PVE", "sub": "pve", "slug": "pve-node",
+    }
+
+    with (
+        patch("app.main._proxmox_client_from_config", new=AsyncMock(return_value=mock_client)),
+        patch("app.main.is_self_on_proxmox_node", return_value=True),
+    ):
+        await m._job_run_proxmox_node_restart(job_id, "pve-node", "pve")
+
+    assert m._jobs[job_id]["done"] is True
+    assert m._jobs[job_id]["status"] == "error"
+    mock_client.reboot_node.assert_not_called()
 
 
 def test_docker_check_raises_exception(client, monkeypatch):
