@@ -103,6 +103,31 @@ def test_get_package_manager_empty_string():
 
 
 # ---------------------------------------------------------------------------
+# recovery_hint (shown when an upgrade is interrupted mid-transaction)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "name,needle",
+    [
+        ("apt", "dpkg --configure -a"),
+        ("dnf", "dnf history"),
+        ("yum", "yum history"),
+        ("zypper", "zypper verify"),
+        ("pacman", "db.lck"),
+        ("apk", "apk fix"),
+    ],
+)
+def test_recovery_hint_is_pm_specific(name, needle):
+    assert needle in get_package_manager(name).recovery_hint()
+
+
+def test_recovery_hint_unknown_is_generic():
+    hint = get_package_manager("unknown").recovery_hint()
+    assert "package database" in hint
+
+
+# ---------------------------------------------------------------------------
 # APT
 # ---------------------------------------------------------------------------
 

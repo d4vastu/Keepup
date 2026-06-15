@@ -258,8 +258,12 @@ async def test_run_host_update_includes_stderr_on_error():
 
 
 @pytest.mark.asyncio
-async def test_run_host_update_respects_timeout():
+async def test_run_host_update_timeout_raises_upgrade_timeout():
+    """A timed-out upgrade surfaces as UpgradeTimeout with a recovery hint,
+    not a blank asyncio.TimeoutError that the UI would render as an empty error."""
     import asyncio
+
+    from app.ssh_client import UpgradeTimeout
 
     conn = _make_conn()
     conn.run = AsyncMock(side_effect=asyncio.TimeoutError())
@@ -267,8 +271,55 @@ async def test_run_host_update_respects_timeout():
         patch("app.ssh_client.asyncssh.connect", new=AsyncMock(return_value=conn)),
         _DETECT_PM_PATCH,
     ):
-        with pytest.raises(asyncio.TimeoutError):
+        with pytest.raises(UpgradeTimeout) as exc_info:
             await run_host_update_buffered(HOST_KEY)
+
+    msg = str(exc_info.value)
+    assert msg  # never blank — that was the bug
+    assert "timed out" in msg
+    # apt-specific recovery hint, from AptPackageManager.recovery_hint()
+    assert "dpkg --configure -a" in msg
+
+
+def test_upgrade_timeout_default(monkeypatch):
+    from app.ssh_client import _UPGRADE_TIMEOUT_DEFAULT, _upgrade_timeout
+
+    monkeypatch.delenv("KEEPUP_UPGRADE_TIMEOUT", raising=False)
+    assert _upgrade_timeout() == _UPGRADE_TIMEOUT_DEFAULT
+
+
+def test_upgrade_timeout_env_override(monkeypatch):
+    from app.ssh_client import _upgrade_timeout
+
+    monkeypatch.setenv("KEEPUP_UPGRADE_TIMEOUT", "900")
+    assert _upgrade_timeout() == 900
+
+
+@pytest.mark.parametrize("bad", ["not-a-number", "0", "-5"])
+def test_upgrade_timeout_invalid_falls_back(monkeypatch, bad):
+    from app.ssh_client import _UPGRADE_TIMEOUT_DEFAULT, _upgrade_timeout
+
+    monkeypatch.setenv("KEEPUP_UPGRADE_TIMEOUT", bad)
+    assert _upgrade_timeout() == _UPGRADE_TIMEOUT_DEFAULT
+
+
+@pytest.mark.asyncio
+async def test_run_host_update_timeout_uses_env_override(monkeypatch):
+    import asyncio
+
+    from app.ssh_client import UpgradeTimeout
+
+    monkeypatch.setenv("KEEPUP_UPGRADE_TIMEOUT", "42")
+    conn = _make_conn()
+    conn.run = AsyncMock(side_effect=asyncio.TimeoutError())
+    with (
+        patch("app.ssh_client.asyncssh.connect", new=AsyncMock(return_value=conn)),
+        _DETECT_PM_PATCH,
+    ):
+        with pytest.raises(UpgradeTimeout) as exc_info:
+            await run_host_update_buffered(HOST_KEY)
+
+    assert "42s" in str(exc_info.value)
 
 
 # ---------------------------------------------------------------------------

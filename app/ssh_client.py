@@ -1,5 +1,19 @@
+"""
+SSH transport for host checks, upgrades, reboots, and Docker discovery.
+
+Wraps asyncssh with a thin `_run` helper (sudo handling + optional per-command
+timeout) and exposes the higher-level operations the rest of the app calls.
+
+Timeouts are deliberately tiered: connects and routine checks get short
+budgets, but OS upgrades get a much larger one (`_upgrade_timeout`) because a
+hard cancel mid `dpkg`/`rpm` can leave the package database half-configured.
+When an upgrade does exceed its budget we raise `UpgradeTimeout` with a
+package-manager-specific recovery hint rather than a blank `TimeoutError`.
+"""
+
 import asyncio
 import logging
+import os
 
 import asyncssh
 
@@ -10,6 +24,35 @@ log = logging.getLogger(__name__)
 _CONNECT_TIMEOUT = 15
 _COMMAND_TIMEOUT = 600
 _CHECK_TIMEOUT = 60
+
+# Upgrades need far more headroom than a routine command: a large transaction
+# or a slow mirror can easily run past several minutes. Operators can override
+# the default (1 hour) via KEEPUP_UPGRADE_TIMEOUT without any UI.
+_UPGRADE_TIMEOUT_DEFAULT = 3600
+
+
+class UpgradeTimeout(Exception):
+    """Raised when an OS upgrade exceeds its time budget.
+
+    Unlike a bare ``asyncio.TimeoutError`` (whose ``str()`` is empty), this
+    carries a human-readable message — including a package-manager-specific
+    recovery hint — so the UI can tell the user it was a timeout and how to
+    recover a possibly half-applied transaction.
+    """
+
+
+def _upgrade_timeout() -> int:
+    """Return the upgrade command budget in seconds.
+
+    Reads ``KEEPUP_UPGRADE_TIMEOUT`` (default 3600). Non-numeric or
+    non-positive values fall back to the default rather than disabling the
+    guard entirely.
+    """
+    try:
+        val = int(os.environ.get("KEEPUP_UPGRADE_TIMEOUT", _UPGRADE_TIMEOUT_DEFAULT))
+        return val if val > 0 else _UPGRADE_TIMEOUT_DEFAULT
+    except (ValueError, TypeError):
+        return _UPGRADE_TIMEOUT_DEFAULT
 
 
 def _needs_sudo(host: dict) -> bool:
@@ -236,15 +279,24 @@ async def run_host_update_buffered(
     use_sudo = _needs_sudo(host)
     sudo_password = creds.get("sudo_password")
 
+    timeout = _upgrade_timeout()
     async with await _connect(host, creds) as conn:
         pm = await _detect_pm(conn, sudo_password, use_sudo)
-        result = await _run(
-            conn,
-            pm.upgrade_cmd(),
-            sudo_password=sudo_password,
-            needs_sudo=use_sudo,
-            timeout=_COMMAND_TIMEOUT,
-        )
+        try:
+            result = await _run(
+                conn,
+                pm.upgrade_cmd(),
+                sudo_password=sudo_password,
+                needs_sudo=use_sudo,
+                timeout=timeout,
+            )
+        except (asyncio.TimeoutError, TimeoutError) as exc:
+            log.error("SSH: upgrade timed out on %s after %ds", h, timeout)
+            raise UpgradeTimeout(
+                f"Upgrade timed out after {timeout}s. The package transaction "
+                f"may still be running on {h} — do not re-run it blindly. "
+                f"{pm.recovery_hint()}"
+            ) from exc
 
     lines = result.stdout.splitlines()
     if result.returncode != 0:

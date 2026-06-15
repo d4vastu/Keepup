@@ -91,6 +91,17 @@ class PackageManager:
         """
         raise NotImplementedError
 
+    def recovery_hint(self) -> str:
+        """Operator guidance shown when an upgrade is interrupted mid-transaction.
+
+        Surfaced (e.g. on an upgrade timeout) so the user knows how to inspect
+        and repair a package database that may have been left half-configured,
+        instead of blindly re-running the upgrade.
+        """
+        return (
+            "SSH into the host and check the package database before retrying."
+        )
+
 
 # ---------------------------------------------------------------------------
 # APT  (Debian / Ubuntu / Raspberry Pi OS)
@@ -111,6 +122,12 @@ class AptPackageManager(PackageManager):
 
     def upgrade_cmd(self) -> str:
         return "DEBIAN_FRONTEND=noninteractive apt-get upgrade -y 2>&1"
+
+    def recovery_hint(self) -> str:
+        return (
+            "SSH into the host and run `sudo dpkg --configure -a` to finish any "
+            "interrupted package configuration, then re-run the upgrade."
+        )
 
     def parse(self, stdout: str) -> tuple[list[Package], bool]:
         reboot_required = False
@@ -157,6 +174,12 @@ class DnfPackageManager(PackageManager):
 
     def upgrade_cmd(self) -> str:
         return "dnf upgrade -y 2>&1"
+
+    def recovery_hint(self) -> str:
+        return (
+            "SSH into the host and run `dnf history` to inspect the interrupted "
+            "transaction; complete or undo it before re-running the upgrade."
+        )
 
     def parse(self, stdout: str) -> tuple[list[Package], bool]:
         packages: list[Package] = []
@@ -222,6 +245,12 @@ class YumPackageManager(PackageManager):
         # Same format as dnf
         return DnfPackageManager().parse(stdout)
 
+    def recovery_hint(self) -> str:
+        return (
+            "SSH into the host and run `yum history` to inspect the interrupted "
+            "transaction; complete or undo it before re-running the upgrade."
+        )
+
 
 # ---------------------------------------------------------------------------
 # Zypper  (openSUSE / SLES)
@@ -242,6 +271,12 @@ class ZypperPackageManager(PackageManager):
 
     def upgrade_cmd(self) -> str:
         return "zypper --non-interactive up 2>&1"
+
+    def recovery_hint(self) -> str:
+        return (
+            "SSH into the host and run `zypper verify` to check for broken "
+            "dependencies before re-running the upgrade."
+        )
 
     def parse(self, stdout: str) -> tuple[list[Package], bool]:
         packages: list[Package] = []
@@ -290,6 +325,12 @@ class PacmanPackageManager(PackageManager):
     def upgrade_cmd(self) -> str:
         return "pacman -Su --noconfirm 2>&1"
 
+    def recovery_hint(self) -> str:
+        return (
+            "SSH into the host; if `/var/lib/pacman/db.lck` remains, remove it, "
+            "then run `pacman -Su` to complete the partial upgrade."
+        )
+
     def parse(self, stdout: str) -> tuple[list[Package], bool]:
         packages: list[Package] = []
         # Format: "bash 5.2.021-2 -> 5.2.026-1"
@@ -323,6 +364,12 @@ class ApkPackageManager(PackageManager):
 
     def upgrade_cmd(self) -> str:
         return "apk upgrade 2>&1"
+
+    def recovery_hint(self) -> str:
+        return (
+            "SSH into the host and run `apk fix` to repair any partially "
+            "installed packages before re-running the upgrade."
+        )
 
     def parse(self, stdout: str) -> tuple[list[Package], bool]:
         packages: list[Package] = []
