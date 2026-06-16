@@ -120,18 +120,32 @@ class ProxmoxClient:
         if refresh:
             cmd = (
                 f"pct exec {vmid} -- sh -c "
-                f"'apt-get update -qq 2>/dev/null; apt list -qq --upgradable 2>/dev/null'"
+                f"'apt-get update -qq 2>/dev/null; "
+                f"apt list -qq --upgradable 2>/dev/null; "
+                f"echo __APPLY__; apt-get -s upgrade 2>/dev/null'"
             )
         else:
-            cmd = f"pct exec {vmid} -- apt list -qq --upgradable 2>/dev/null"
+            cmd = (
+                f"pct exec {vmid} -- sh -c "
+                f"'apt list -qq --upgradable 2>/dev/null; "
+                f"echo __APPLY__; apt-get -s upgrade 2>/dev/null'"
+            )
 
         async with await _connect(host_entry, ssh_creds) as conn:
             result = await _run(conn, cmd, sudo_password=None, needs_sudo=False, timeout=90)
         if refresh:
             mark_refreshed(cache_key)
 
+        from .package_managers import _apt_applicable_names
+
+        # Mirrors the __APPLY__/held_back handling in AptPackageManager.parse;
+        # keep the two in sync if the apt-get -s upgrade contract changes.
+        # No __APPLY__ separator (older output) => held_back stays False.
+        list_part, sep, apply_part = result.stdout.partition("__APPLY__")
+        applicable = _apt_applicable_names(apply_part) if sep else None
+
         packages = []
-        for line in result.stdout.splitlines():
+        for line in list_part.splitlines():
             line = line.strip()
             if not line or line.startswith("Listing"):
                 continue
@@ -143,7 +157,15 @@ class ProxmoxClient:
                 old_ver = ""
                 if "upgradable from:" in line:
                     old_ver = line.split("upgradable from:")[-1].strip().rstrip("]")
-                packages.append({"name": pkg_name, "current": old_ver, "available": new_ver})
+                packages.append(
+                    {
+                        "name": pkg_name,
+                        "current": old_ver,
+                        "available": new_ver,
+                        "held_back": applicable is not None
+                        and pkg_name not in applicable,
+                    }
+                )
 
         n = len(packages)
         if n:

@@ -282,8 +282,12 @@ async def test_get_lxc_updates_parses_apt_output(mock_client):
         )
 
     assert len(result) == 2
-    assert result[0] == {"name": "curl", "current": "7.81", "available": "7.90"}
-    assert result[1] == {"name": "vim", "current": "9.0", "available": "9.1"}
+    assert result[0] == {
+        "name": "curl", "current": "7.81", "available": "7.90", "held_back": False,
+    }
+    assert result[1] == {
+        "name": "vim", "current": "9.0", "available": "9.1", "held_back": False,
+    }
     # First call with empty cache: apt-get update must run
     sent_cmd = mock_conn.run.call_args[0][0]
     assert "apt-get update" in sent_cmd
@@ -333,6 +337,40 @@ async def test_get_lxc_updates_no_packages(mock_client):
         )
 
     assert result == []
+
+
+@pytest.mark.asyncio
+async def test_get_lxc_updates_marks_held_back(mock_client):
+    apt_output = (
+        "Listing...\n"
+        "curl/stable 8.0.0 amd64 [upgradable from: 7.0.0]\n"
+        "nginx/stable 1.26.0-1 amd64 [upgradable from: 1.24.0-1]\n"
+        "__APPLY__\n"
+        "Inst curl [7.0.0] (8.0.0 Debian:stable [amd64])\n"
+    )
+    mock_conn = MagicMock()
+    mock_conn.__aenter__ = AsyncMock(return_value=mock_conn)
+    mock_conn.__aexit__ = AsyncMock(return_value=False)
+    mock_result = MagicMock()
+    mock_result.stdout = apt_output
+    mock_conn.run = AsyncMock(return_value=mock_result)
+
+    from app.update_check_cache import clear as clear_cache
+    clear_cache()
+    with patch("app.ssh_client._connect", new=AsyncMock(return_value=mock_conn)):
+        result = await mock_client.get_lxc_updates(
+            node="pve", vmid=100,
+            ssh_host="192.168.1.10",
+            ssh_creds={"key_path": "/home/user/.ssh/id_rsa"},
+        )
+
+    sent_cmd = mock_conn.run.call_args[0][0]
+    assert "__APPLY__" in sent_cmd
+    assert "apt-get -s upgrade" in sent_cmd
+
+    by_name = {p["name"]: p for p in result}
+    assert by_name["curl"]["held_back"] is False
+    assert by_name["nginx"]["held_back"] is True
 
 
 # ---------------------------------------------------------------------------
