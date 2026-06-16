@@ -12,6 +12,7 @@ from app.package_managers import (
     get_package_manager,
     _is_kernel_package,
     _kernel_update_in,
+    _apt_applicable_names,
 )
 
 
@@ -618,3 +619,89 @@ def test_base_parse_not_implemented():
     pm = PackageManager()
     with pytest.raises(NotImplementedError):
         pm.parse("")
+
+
+# ---------------------------------------------------------------------------
+# APT held-back / phased detection (OP#179)
+# ---------------------------------------------------------------------------
+
+APT_MIXED_OUTPUT = (
+    "Listing... Done\n"
+    "curl/stable 8.0.0 amd64 [upgradable from: 7.0.0]\n"
+    "nginx/stable 1.26.0-1 amd64 [upgradable from: 1.24.0-1]\n"
+    "libc6/stable 2.39 amd64 [upgradable from: 2.38]\n"
+    "__APPLY__\n"
+    "Inst curl [7.0.0] (8.0.0 Debian:stable [amd64])\n"
+    "Conf curl (8.0.0 Debian:stable [amd64])\n"
+    "__REBOOT__\n"
+    "no\n"
+)
+
+
+def test_apt_applicable_names_parses_inst_lines():
+    out = (
+        "Inst curl [7.0.0] (8.0.0 Debian:stable [amd64])\n"
+        "Conf curl (8.0.0 Debian:stable [amd64])\n"
+        "Inst libc6 [2.38] (2.39 Debian:stable [amd64])\n"
+    )
+    assert _apt_applicable_names(out) == {"curl", "libc6"}
+
+
+def test_apt_marks_held_back_packages():
+    pm = AptPackageManager()
+    packages, _ = pm.parse(APT_MIXED_OUTPUT)
+    by_name = {p["name"]: p for p in packages}
+    assert by_name["curl"]["held_back"] is False
+    assert by_name["nginx"]["held_back"] is True
+    assert by_name["libc6"]["held_back"] is True
+
+
+def test_apt_all_held_back_when_no_inst_lines():
+    pm = AptPackageManager()
+    out = (
+        "curl/stable 8.0.0 amd64 [upgradable from: 7.0.0]\n"
+        "__APPLY__\n"
+        "__REBOOT__\n"
+        "no\n"
+    )
+    packages, _ = pm.parse(out)
+    assert packages[0]["held_back"] is True
+
+
+def test_apt_held_back_defaults_false_without_apply_sentinel():
+    pm = AptPackageManager()
+    packages, _ = pm.parse(APT_OUTPUT)
+    assert all(p["held_back"] is False for p in packages)
+
+
+def test_apt_held_back_kernel_does_not_trigger_reboot():
+    pm = AptPackageManager()
+    out = (
+        "linux-image-6.1.0/stable 6.1.0 amd64 [upgradable from: 6.0.0]\n"
+        "__APPLY__\n"
+        "__REBOOT__\n"
+        "no\n"
+    )
+    packages, reboot = pm.parse(out)
+    assert packages[0]["held_back"] is True
+    assert reboot is False
+
+
+def test_apt_applicable_kernel_still_triggers_reboot():
+    pm = AptPackageManager()
+    out = (
+        "linux-image-6.1.0/stable 6.1.0 amd64 [upgradable from: 6.0.0]\n"
+        "__APPLY__\n"
+        "Inst linux-image-6.1.0 [6.0.0] (6.1.0 Debian:stable [amd64])\n"
+        "__REBOOT__\n"
+        "no\n"
+    )
+    packages, reboot = pm.parse(out)
+    assert packages[0]["held_back"] is False
+    assert reboot is True  # an applicable kernel upgrade still flags a reboot
+
+
+def test_apt_list_cmd_includes_simulate_block():
+    cmd = AptPackageManager().list_cmd()
+    assert "__APPLY__" in cmd
+    assert "apt-get -s upgrade" in cmd

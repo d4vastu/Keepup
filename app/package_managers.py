@@ -21,6 +21,9 @@ import re
 # ---------------------------------------------------------------------------
 
 # {"name": str, "current": str, "available": str}
+# APT additionally sets an optional "held_back": bool flag (OP#179) for packages
+# that `apt-get upgrade` will not apply (phased or kept back). Other package
+# managers omit it, so mixed-PM consumers must read it via .get("held_back").
 Package = dict[str, str]
 
 
@@ -42,6 +45,24 @@ def _is_kernel_package(name: str) -> bool:
 
 def _kernel_update_in(packages: list[Package]) -> bool:
     return any(_is_kernel_package(p["name"]) for p in packages)
+
+
+def _apt_applicable_names(simulate_stdout: str) -> set[str]:
+    """Package names `apt-get upgrade` will actually install.
+
+    Parsed from `apt-get -s upgrade` simulation output, whose lines of the
+    form `Inst <name> [old] (new repo [arch])` enumerate exactly the upgrades
+    that will be applied. Phased and kept-back packages never appear here, so
+    anything upgradable but absent from this set is being held back.
+    """
+    names: set[str] = set()
+    for line in simulate_stdout.splitlines():
+        line = line.strip()
+        if line.startswith("Inst "):
+            parts = line.split()
+            if len(parts) >= 2:
+                names.add(parts[1])
+    return names
 
 
 # ---------------------------------------------------------------------------
@@ -116,6 +137,8 @@ class AptPackageManager(PackageManager):
         return (
             f"{prefix}"
             "apt list --upgradable 2>/dev/null; "
+            "echo __APPLY__; "
+            "apt-get -s upgrade 2>/dev/null; "
             "echo __REBOOT__; "
             "[ -f /var/run/reboot-required ] && echo yes || echo no"
         )
@@ -132,13 +155,22 @@ class AptPackageManager(PackageManager):
     def parse(self, stdout: str) -> tuple[list[Package], bool]:
         reboot_required = False
         if "__REBOOT__" in stdout:
-            apt_part, reboot_part = stdout.split("__REBOOT__", 1)
+            body, reboot_part = stdout.split("__REBOOT__", 1)
             reboot_required = reboot_part.strip().startswith("yes")
         else:
-            apt_part = stdout
+            body = stdout
+
+        if "__APPLY__" in body:
+            list_part, apply_part = body.split("__APPLY__", 1)
+            applicable = _apt_applicable_names(apply_part)
+            have_apply = True
+        else:
+            list_part = body
+            applicable = set()
+            have_apply = False
 
         packages: list[Package] = []
-        for line in apt_part.splitlines():
+        for line in list_part.splitlines():
             if "[upgradable from:" not in line:
                 continue
             try:
@@ -147,12 +179,18 @@ class AptPackageManager(PackageManager):
                 available = parts[1] if len(parts) > 1 else "?"
                 current = parts[-1].rstrip("]") if len(parts) > 3 else "?"
                 packages.append(
-                    {"name": name, "current": current, "available": available}
+                    {
+                        "name": name,
+                        "current": current,
+                        "available": available,
+                        "held_back": have_apply and name not in applicable,
+                    }
                 )
             except Exception:
                 continue
 
-        return packages, reboot_required or _kernel_update_in(packages)
+        applicable_packages = [p for p in packages if not p["held_back"]]
+        return packages, reboot_required or _kernel_update_in(applicable_packages)
 
 
 # ---------------------------------------------------------------------------
