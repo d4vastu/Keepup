@@ -18,6 +18,27 @@ _DATA_DIR = Path(os.getenv("DATA_PATH", "/app/data"))
 _SECRET_FILE = _DATA_DIR / ".secret"
 _CREDS_FILE = _DATA_DIR / "credentials.json"
 
+# SSH private keys live as bare filenames under this directory; callers store
+# only the filename and resolve it to an absolute path via resolve_key_path.
+_KEYS_DIR = Path(os.getenv("KEYS_PATH", "/app/keys"))
+
+
+def resolve_key_path(name: str) -> str:
+    """Resolve an SSH key filename to an absolute path inside the keys dir.
+
+    The stored SSH/Proxmox key is a bare filename under the keys directory;
+    this maps it to the absolute path asyncssh needs while rejecting path
+    traversal — absolute paths, ``..``, or anything resolving outside the dir.
+    Single source of truth shared by the dashboard routes, the Proxmox LXC
+    upgrade paths, and the Docker backend so the guard cannot drift.
+    """
+    if ".." in name or Path(name).is_absolute():
+        raise ValueError(f"SSH key path escapes keys directory: {name!r}")
+    resolved = (_KEYS_DIR / name).resolve()
+    if not resolved.is_relative_to(_KEYS_DIR.resolve()):
+        raise ValueError(f"SSH key path escapes keys directory: {name!r}")
+    return str(resolved)
+
 
 def _ensure_data_dir() -> None:
     _DATA_DIR.mkdir(parents=True, exist_ok=True)

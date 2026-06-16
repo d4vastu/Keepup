@@ -946,7 +946,7 @@ async def test_job_run_lxc_upgrade_success(config_file, data_dir):
 
     with (
         patch("app.main._proxmox_client_from_config", new=AsyncMock(return_value=mock_client)),
-        patch("app.main.get_integration_credentials", return_value={"ssh_key_path": "/root/.ssh/id_rsa"}),
+        patch("app.main.get_integration_credentials", return_value={"ssh_user": "root", "ssh_key": "id_ed25519"}),
         patch("app.main.get_proxmox_config", return_value={"url": "https://192.168.1.10:8006"}),
     ):
         await m._job_run_lxc_upgrade(job_id, "pve", 101, "192.168.1.10")
@@ -954,6 +954,10 @@ async def test_job_run_lxc_upgrade_success(config_file, data_dir):
     assert m._jobs[job_id]["done"] is True
     assert m._jobs[job_id]["status"] == "done"
     assert "5 upgraded" in m._jobs[job_id]["lines"]
+    # Key-based Proxmox SSH: the stored `ssh_key` filename is resolved into a
+    # file-based key_path the SSH layer honours (OP#182).
+    ssh_creds = mock_client.upgrade_lxc.await_args.args[3]
+    assert ssh_creds["key_path"].endswith("/app/keys/id_ed25519")
 
 
 @pytest.mark.asyncio
@@ -1007,7 +1011,7 @@ def test_host_update_lxc_job_completes(client):
     with (
         patch("app.main._get_host", return_value=lxc_host),
         patch("app.main._proxmox_client_from_config", new=AsyncMock(return_value=mock_client)),
-        patch("app.main.get_integration_credentials", return_value={"ssh_key_path": "/root/.ssh/id_rsa"}),
+        patch("app.main.get_integration_credentials", return_value={"ssh_user": "root", "ssh_key": "id_ed25519"}),
         patch("app.main.get_proxmox_config", return_value={"url": "https://192.168.1.10:8006"}),
     ):
         response = client.post("/api/host/my-lxc/update")
