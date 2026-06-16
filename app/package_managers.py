@@ -241,7 +241,17 @@ class ZypperPackageManager(PackageManager):
         )
 
     def upgrade_cmd(self) -> str:
-        return "zypper --non-interactive up 2>&1"
+        # openSUSE rolling releases (Tumbleweed, Slowroll) must use `zypper dup`
+        # (distribution upgrade); `zypper up` skips the vendor/arch changes a
+        # rolling release relies on and risks a partial upgrade. Fixed releases
+        # (Leap/SLES) keep `zypper up`. The variant is detected from
+        # /etc/os-release at run time so one command works for both without any
+        # per-host configuration.
+        return (
+            "if grep -qiE 'tumbleweed|slowroll' /etc/os-release 2>/dev/null; "
+            "then zypper --non-interactive dup 2>&1; "
+            "else zypper --non-interactive up 2>&1; fi"
+        )
 
     def parse(self, stdout: str) -> tuple[list[Package], bool]:
         packages: list[Package] = []
@@ -288,7 +298,12 @@ class PacmanPackageManager(PackageManager):
         return f"{prefix}pacman -Qu 2>/dev/null"
 
     def upgrade_cmd(self) -> str:
-        return "pacman -Su --noconfirm 2>&1"
+        # Atomic refresh+upgrade (-Syu). The check runs `pacman -Sy` in a
+        # separate session, so a bare `-Su` here would upgrade against a
+        # possibly-stale view of the sync DB — the partial-upgrade hazard the
+        # Arch wiki warns against. `-Syu` re-syncs and upgrades in one
+        # transaction.
+        return "pacman -Syu --noconfirm 2>&1"
 
     def parse(self, stdout: str) -> tuple[list[Package], bool]:
         packages: list[Package] = []

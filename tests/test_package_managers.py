@@ -333,6 +333,21 @@ def test_zypper_upgrade_cmd():
     assert "zypper" in ZypperPackageManager().upgrade_cmd()
 
 
+def test_zypper_upgrade_cmd_uses_dup_for_rolling():
+    # openSUSE rolling releases (Tumbleweed) must use `zypper dup`; the command
+    # detects the variant from /etc/os-release at run time.
+    cmd = ZypperPackageManager().upgrade_cmd()
+    assert "os-release" in cmd
+    assert "tumbleweed" in cmd.lower()
+    assert "zypper --non-interactive dup" in cmd
+
+
+def test_zypper_upgrade_cmd_keeps_up_for_fixed_release():
+    # Fixed releases (Leap/SLES) keep `zypper up`.
+    cmd = ZypperPackageManager().upgrade_cmd()
+    assert "zypper --non-interactive up" in cmd
+
+
 # ---------------------------------------------------------------------------
 # Pacman
 # ---------------------------------------------------------------------------
@@ -383,6 +398,14 @@ def test_pacman_skips_informational_lines():
 
 def test_pacman_upgrade_cmd():
     assert "pacman" in PacmanPackageManager().upgrade_cmd()
+
+
+def test_pacman_upgrade_cmd_is_atomic():
+    # Atomic refresh+upgrade (-Syu) avoids the partial-upgrade hazard of a bare
+    # -Su run against a database refreshed in a separate session.
+    cmd = PacmanPackageManager().upgrade_cmd()
+    assert "pacman -Syu" in cmd
+    assert "--noconfirm" in cmd
 
 
 # ---------------------------------------------------------------------------
