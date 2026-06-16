@@ -103,7 +103,7 @@ async def test_run_os_update_lxc_uses_pct_not_ssh():
          patch("app.host_ops.get_proxmox_config",
                return_value={"url": "https://pve.example:8006"}), \
          patch("app.host_ops.get_integration_credentials",
-               return_value={"ssh_user": "root", "ssh_key_path": "/k", "ssh_port": 22}):
+               return_value={"ssh_user": "root", "ssh_key": "id_ed25519", "ssh_port": 22}):
         lines = await run_os_update(host, {})
 
     assert lines == ["lxc upgraded"]
@@ -111,6 +111,10 @@ async def test_run_os_update_lxc_uses_pct_not_ssh():
     # node, vmid, ssh_host derived from the proxmox URL hostname
     args = client.upgrade_lxc.await_args.args
     assert args[0] == "pve" and args[1] == 101 and args[2] == "pve.example"
+    # The stored `ssh_key` filename is resolved into a file-based key_path that
+    # ssh_client._connect honours (key-based Proxmox SSH — OP#182).
+    ssh_creds = args[3]
+    assert ssh_creds["key_path"].endswith("/app/keys/id_ed25519")
 
 
 # ---------------------------------------------------------------------------

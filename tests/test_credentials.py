@@ -251,3 +251,23 @@ def test_wipe_credential_store_then_get_returns_empty(data_dir):
     wipe_credential_store()
     assert get_credentials("host-a") == {}
     assert get_credentials("host-b") == {}
+
+
+# ---------------------------------------------------------------------------
+# resolve_key_path — shared SSH key path resolver + traversal guard (OP#182)
+# ---------------------------------------------------------------------------
+
+
+def test_resolve_key_path_maps_filename_into_keys_dir(monkeypatch, tmp_path):
+    from app import credentials
+
+    monkeypatch.setattr(credentials, "_KEYS_DIR", tmp_path)
+    assert credentials.resolve_key_path("id_ed25519") == str(tmp_path / "id_ed25519")
+
+
+def test_resolve_key_path_rejects_traversal(monkeypatch, tmp_path):
+    from app import credentials
+
+    monkeypatch.setattr(credentials, "_KEYS_DIR", tmp_path)
+    with pytest.raises(ValueError, match="escapes keys directory"):
+        credentials.resolve_key_path("../../etc/passwd")

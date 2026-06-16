@@ -93,6 +93,20 @@ async def test_connection_uses_key_when_no_password():
 
 
 @pytest.mark.asyncio
+async def test_connection_uses_key_path_credential():
+    # A file-based key supplied via creds["key_path"] must be offered to
+    # asyncssh — this is how Proxmox LXC pct-exec upgrades pass key auth.
+    conn = _make_conn(stdout="ok\n")
+    with patch(
+        "app.ssh_client.asyncssh.connect", new=AsyncMock(return_value=conn)
+    ) as mock_connect:
+        await verify_connection(HOST, {"key_path": "/app/keys/id_ed25519"})
+    call_kwargs = mock_connect.call_args.kwargs
+    assert call_kwargs.get("client_keys") == ["/app/keys/id_ed25519"]
+    assert "password" not in call_kwargs
+
+
+@pytest.mark.asyncio
 async def test_connect_raises_on_empty_user():
     from app.ssh_client import _connect
     host_no_user = {"name": "NoUserHost", "host": "10.0.0.2"}

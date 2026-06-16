@@ -98,7 +98,7 @@ def test_admin_post_rate_limit(client):
 def test_resolve_ssh_key_path_valid(tmp_path, monkeypatch):
     import app.main as main
 
-    monkeypatch.setattr(main, "_KEYS_DIR", tmp_path)
+    monkeypatch.setattr("app.credentials._KEYS_DIR", tmp_path)
     (tmp_path / "id_ed25519").touch()
     result = main._resolve_ssh_key_path("id_ed25519")
     assert result == str(tmp_path / "id_ed25519")
@@ -107,7 +107,7 @@ def test_resolve_ssh_key_path_valid(tmp_path, monkeypatch):
 def test_resolve_ssh_key_path_dotdot(tmp_path, monkeypatch):
     import app.main as main
 
-    monkeypatch.setattr(main, "_KEYS_DIR", tmp_path)
+    monkeypatch.setattr("app.credentials._KEYS_DIR", tmp_path)
     import pytest
     with pytest.raises(ValueError, match="escapes keys directory"):
         main._resolve_ssh_key_path("../../etc/passwd")
@@ -116,7 +116,7 @@ def test_resolve_ssh_key_path_dotdot(tmp_path, monkeypatch):
 def test_resolve_ssh_key_path_absolute(tmp_path, monkeypatch):
     import app.main as main
 
-    monkeypatch.setattr(main, "_KEYS_DIR", tmp_path)
+    monkeypatch.setattr("app.credentials._KEYS_DIR", tmp_path)
     import pytest
     with pytest.raises(ValueError, match="escapes keys directory"):
         main._resolve_ssh_key_path("/etc/passwd")
@@ -125,7 +125,7 @@ def test_resolve_ssh_key_path_absolute(tmp_path, monkeypatch):
 def test_resolve_ssh_key_path_traversal_via_subdirectory(tmp_path, monkeypatch):
     import app.main as main
 
-    monkeypatch.setattr(main, "_KEYS_DIR", tmp_path)
+    monkeypatch.setattr("app.credentials._KEYS_DIR", tmp_path)
     import pytest
     with pytest.raises(ValueError, match="escapes keys directory"):
         main._resolve_ssh_key_path("keys/../etc/passwd")
@@ -135,7 +135,7 @@ def test_resolve_ssh_key_path_special_chars(tmp_path, monkeypatch):
     """CSS-safe-IDs requirement: key names with parens are still validated safely."""
     import app.main as main
 
-    monkeypatch.setattr(main, "_KEYS_DIR", tmp_path)
+    monkeypatch.setattr("app.credentials._KEYS_DIR", tmp_path)
     (tmp_path / "(special).key").touch()
     result = main._resolve_ssh_key_path("(special).key")
     assert result == str(tmp_path / "(special).key")

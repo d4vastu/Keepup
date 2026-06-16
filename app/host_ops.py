@@ -24,7 +24,7 @@ import logging
 from urllib.parse import urlparse
 
 from .config_manager import get_proxmox_config
-from .credentials import get_integration_credentials
+from .credentials import get_integration_credentials, resolve_key_path
 from .proxmox_client import client_from_config
 from .self_identity import is_self_on_proxmox_node
 from .ssh_client import check_host_updates, reboot_host, run_host_update_buffered
@@ -57,12 +57,16 @@ def _lxc_ssh_context(host: dict) -> tuple[str, dict]:
     px_cfg = get_proxmox_config()
     px_creds = get_integration_credentials("proxmox")
     ssh_host = urlparse(px_cfg.get("url", "")).hostname or host.get("host", "")
+    ssh_key = px_creds.get("ssh_key", "")
     ssh_creds = {
         "user": px_creds.get("ssh_user", "root"),
         "port": px_creds.get("ssh_port", 22),
-        "key_path": px_creds.get("ssh_key_path", ""),
         "ssh_password": px_creds.get("ssh_password", ""),
     }
+    # Resolve the stored key filename into a file-based key_path that
+    # ssh_client._connect honours for key-based Proxmox SSH (OP#182).
+    if ssh_key:
+        ssh_creds["key_path"] = resolve_key_path(ssh_key)
     return ssh_host, ssh_creds
 
 

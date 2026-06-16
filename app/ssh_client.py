@@ -39,6 +39,10 @@ async def _connect(
     elif creds.get("ssh_key"):
         key = asyncssh.import_private_key(creds["ssh_key"])
         kwargs["client_keys"] = [key]
+    elif creds.get("key_path"):
+        # File-based key supplied via credentials (e.g. Proxmox LXC pct-exec
+        # upgrades). Treated the same as host["key"] below.
+        kwargs["client_keys"] = [creds["key_path"]]
     else:
         key_path = host.get("key")
         if key_path:

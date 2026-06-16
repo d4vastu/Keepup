@@ -114,21 +114,15 @@ def _newer_version(latest: str | None) -> bool:
 # Auth middleware
 # ---------------------------------------------------------------------------
 
-_KEYS_DIR = Path("/app/keys")
-
-
 def _resolve_ssh_key_path(ssh_key: str) -> str:
-    """Return the absolute path for ssh_key inside _KEYS_DIR.
+    """Resolve an SSH key filename to an absolute path inside the keys dir.
 
-    Raises ValueError for absolute paths, paths containing '..', or any path
-    that resolves outside _KEYS_DIR.
+    Thin wrapper over ``credentials.resolve_key_path`` (the single source of
+    truth for the path-traversal guard); kept for the existing call sites.
     """
-    if ".." in ssh_key or Path(ssh_key).is_absolute():
-        raise ValueError(f"SSH key path escapes keys directory: {ssh_key!r}")
-    resolved = (_KEYS_DIR / ssh_key).resolve()
-    if not resolved.is_relative_to(_KEYS_DIR.resolve()):
-        raise ValueError(f"SSH key path escapes keys directory: {ssh_key!r}")
-    return str(resolved)
+    from .credentials import resolve_key_path
+
+    return resolve_key_path(ssh_key)
 
 
 _PUBLIC_PATHS = {
@@ -549,12 +543,16 @@ async def _job_run_lxc_upgrade(
     try:
         client = await _proxmox_client_from_config()
         px_creds = get_integration_credentials("proxmox")
+        ssh_key = px_creds.get("ssh_key", "")
         ssh_creds = {
             "user": px_creds.get("ssh_user", "root"),
             "port": px_creds.get("ssh_port", 22),
-            "key_path": px_creds.get("ssh_key_path", ""),
             "ssh_password": px_creds.get("ssh_password", ""),
         }
+        # Resolve the stored key filename into a file-based key_path the SSH
+        # layer honours for key-based Proxmox SSH (OP#182).
+        if ssh_key:
+            ssh_creds["key_path"] = _resolve_ssh_key_path(ssh_key)
         lines = await client.upgrade_lxc(node, vmid, ssh_host, ssh_creds)
         _jobs[job_id]["lines"] = lines
         _jobs[job_id]["status"] = "done"
