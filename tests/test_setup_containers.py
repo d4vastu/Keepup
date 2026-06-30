@@ -39,7 +39,7 @@ def test_setup_containers_no_hosts_shows_empty_state(
     with patch("app.auth_router.discover_containers", new=AsyncMock(return_value=[])):
         response = client.get("/setup/containers")
     assert response.status_code == 200
-    assert "Step 7 of 8" in response.text
+    assert "Step 7 of 9" in response.text
     assert "Container monitoring" in response.text
 
 

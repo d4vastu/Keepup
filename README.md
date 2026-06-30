@@ -27,6 +27,9 @@ Built with FastAPI + HTMX. No JavaScript frameworks, no database, no agents to i
 - **Infrastructure integrations** — connect Proxmox VE, Proxmox Backup Server, OPNsense, pfSense, and Home Assistant via their APIs
 - **Encrypted credential store** — SSH keys, passwords, sudo passwords, API keys, and tokens stored encrypted on disk; nothing sensitive ever touches `config.yml`
 - **Two-factor authentication** — optional TOTP 2FA with any standard authenticator app
+- **Audit logging** — sensitive operations (logins, credential changes, upgrades, reboots) are recorded to an append-only audit log under `./data`
+- **Integration TLS trust** — first-use certificate pinning (TOFU) for Proxmox, OPNsense, and other API integrations, with an optional skip-verify toggle for self-signed endpoints
+- **Rate limiting** — login and other sensitive endpoints are rate-limited to slow brute-force attempts
 - **Sudo support** — non-root users are prompted for their sudo password inline, with an option to save it for future runs
 - **HTTPS/TLS** — generate a self-signed cert or upload your own from **Admin → HTTPS**; the app restarts automatically
 - **Timezone support** — set your local timezone in **Admin → Account**; all timestamps are displayed in local time
@@ -71,20 +74,17 @@ Open **http://localhost:8765** — the setup wizard will guide you through the r
 
 ## First-Run Setup Wizard
 
-The setup wizard runs automatically the first time (when no admin account exists). It has 8 steps:
+The setup wizard runs automatically the first time (when no admin account exists). It has 9 steps:
 
-1. **Create account** — set a username and password; optionally enroll TOTP 2FA
-2. **Save your backup key** — a one-time recovery key is displayed; **copy it and store it somewhere safe** — this is the only way to reset your password if you lose access
-3. **Connect infrastructure** — configure Proxmox VE, Proxmox Backup Server, OPNsense, pfSense, Home Assistant, Portainer, and Docker Hub
-4. **Discover Proxmox hosts** — if Proxmox is connected, a guided multi-step flow walks through:
-   - Selecting LXC containers to monitor (updates run via `pct exec` — no SSH agent required inside the container)
-   - Generating an SSH key pair for Keepup (`keepup_proxmox_ed25519`) with a one-click copy command to authorise it on your nodes
-   - Selecting VMs to monitor via SSH
-   - The dashboard groups discovered resources by Proxmox node with type badges (Node, LXC, VM)
-5. **SSH hosts** — add the Linux hosts you want to monitor; each gets a connection test
-6. **SSH hosts (pre-populated)** — if Proxmox discovery was used, queued hosts appear here pre-filled
+1. **Welcome** — a short intro to what the wizard will set up
+2. **Account** — set a username and password
+3. **Security** — optionally enroll TOTP 2FA (a dedicated step, not part of account creation)
+4. **Recovery code** — a one-time recovery key is displayed; **copy it and store it somewhere safe** — this is the only way to reset your password if you lose access
+5. **Connect infrastructure** — configure Proxmox VE, Proxmox Backup Server, OPNsense, pfSense, Home Assistant, Portainer, and Docker Hub. If Proxmox is connected, a guided sub-flow walks through selecting LXC containers (updated via `pct exec` — no in-container agent), generating an SSH key pair for Keepup (`keepup_proxmox_ed25519`), and selecting VMs; discovered resources are grouped by node with type badges (Node, LXC, VM)
+6. **SSH hosts** — add the Linux hosts you want to monitor (hosts queued from Proxmox discovery appear here pre-filled); each gets a connection test
 7. **Container monitoring** — choose which Docker containers to monitor for image updates on each host
 8. **Notifications** — configure Pushover and/or Email for auto-update alerts
+9. **Summary** — review what was configured before finishing
 
 After finishing, you are redirected to the login page. All settings can be updated from the admin panel at any time.
 
@@ -116,22 +116,9 @@ ssh-keygen -t ed25519 -f ~/.ssh/dashboard_key -N ""
 ssh-copy-id -i ~/.ssh/dashboard_key.pub user@your-host
 ```
 
-Paste the private key contents into the **Credentials** form in the admin panel.
+SSH credentials are configured **per host**: open the host's **Credentials** form in the admin panel and paste the private key contents there. (Keepup no longer has a global default-key setting — that was removed when credentials became host-specific.)
 
-Alternatively, mount a keys directory and use the SSH default key setting:
-
-```bash
-mkdir keys
-ssh-keygen -t ed25519 -f keys/id_ed25519 -N ""
-ssh-copy-id -i keys/id_ed25519.pub root@your-host
-```
-
-```yaml
-volumes:
-  - ./keys:/app/keys:ro
-```
-
-Then set the key path in **Admin → SSH → Default key** to `/app/keys/id_ed25519`.
+The Proxmox integration is the exception: it generates its own key pair (`keepup_proxmox_ed25519`) in the mounted `./keys` directory during setup and references it automatically.
 
 ### SSH Password
 
@@ -369,7 +356,6 @@ Auto-update job output is stored in `./data/auto_update_log.json` and viewable f
 
 ```yaml
 ssh:
-  default_key: /app/keys/id_ed25519   # path inside the container
   default_user: root
   default_port: 22
   connect_timeout: 15
@@ -426,9 +412,13 @@ is managed through the UI.
 | `DATA_PATH` | `/app/data` | Directory for credentials, session secret, and auto-update log |
 | `KEEPUP_SECRET_KEY` | _(unset)_ | Credential-encryption (Fernet) key supplied directly, to keep it out of the `./data` volume. See [SECURITY.md](SECURITY.md#credential-storage--secret-management). |
 | `KEEPUP_SECRET_KEY_FILE` | _(unset)_ | Path to a file holding the encryption key — e.g. a Docker/Kubernetes secret at `/run/secrets/keepup_secret_key`. Takes effect only if `KEEPUP_SECRET_KEY` is unset. |
+| `KEEPUP_SESSION_SECRET` | _(unset)_ | Session-cookie signing secret. If unset, one is auto-generated at `./data/.session_secret`. Set it to keep sessions valid across redeploys or to source it from outside the data volume. |
+| `KEEPUP_UPGRADE_TIMEOUT` | `3600` | Seconds before a remote upgrade command is timed out (raised in OP#178 so long transactions aren't interrupted). |
+| `KEEPUP_CONTAINER_NAME` | _(auto)_ | Overrides Keepup's self-detected container name, used by the self-update safety net to avoid upgrading its own container. |
+| `KEEPUP_PROXMOX_NODE` | _(unset)_ | Identifies the Proxmox node Keepup itself runs on, so node self-reboot is guarded (OP#181). |
 
-When neither key variable is set, Keepup auto-generates and stores the key at
-`./data/.secret` (the default).
+When neither `KEEPUP_SECRET_KEY` nor `KEEPUP_SECRET_KEY_FILE` is set, Keepup
+auto-generates and stores the encryption key at `./data/.secret` (the default).
 
 ---
 
