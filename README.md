@@ -341,7 +341,9 @@ tar -czf keepup-backup-$(date +%Y%m%d).tar.gz data/ config/
 docker compose start
 ```
 
-> **`./data/.secret` is critical.** This file is the Fernet encryption key for all stored credentials. Without it, the credential store cannot be decrypted. Store the backup in a separate location from the running container.
+> **`./data/.secret` is critical.** By default this file is the Fernet encryption key for all stored credentials. Without it, the credential store cannot be decrypted. Store the backup in a separate location from the running container.
+>
+> **Heads-up on backups:** because the key lives in `./data` alongside the encrypted credentials, a backup of `./data` contains *both* — anyone who can restore it can decrypt every credential. To keep the key out of your volume backups, supply it via `KEEPUP_SECRET_KEY` / `KEEPUP_SECRET_KEY_FILE` and back the key up separately. See [SECURITY.md](SECURITY.md#credential-storage--secret-management).
 
 The `./config` directory (`config.yml`) contains no secrets and can be backed up separately or committed to version control.
 
@@ -415,14 +417,18 @@ hosts:
 
 ## Environment Variables
 
-Only two environment variables are recognised:
+Keepup recognises a small set of environment variables; all other configuration
+is managed through the UI.
 
 | Variable | Default | Description |
 |---|---|---|
 | `CONFIG_PATH` | `/app/config/config.yml` | Path to `config.yml` inside the container |
 | `DATA_PATH` | `/app/data` | Directory for credentials, session secret, and auto-update log |
+| `KEEPUP_SECRET_KEY` | _(unset)_ | Credential-encryption (Fernet) key supplied directly, to keep it out of the `./data` volume. See [SECURITY.md](SECURITY.md#credential-storage--secret-management). |
+| `KEEPUP_SECRET_KEY_FILE` | _(unset)_ | Path to a file holding the encryption key — e.g. a Docker/Kubernetes secret at `/run/secrets/keepup_secret_key`. Takes effect only if `KEEPUP_SECRET_KEY` is unset. |
 
-All other configuration is managed through the UI.
+When neither key variable is set, Keepup auto-generates and stores the key at
+`./data/.secret` (the default).
 
 ---
 
