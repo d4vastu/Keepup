@@ -2991,3 +2991,163 @@ async def test_portainer_agent_containers_skipped_with_integration(config_file, 
 
     names = [s["name"] for s in stacks]
     assert "actualbudget_1" not in names
+
+
+# ---------------------------------------------------------------------------
+# SSHDockerBackend — compose redeploy of Portainer-owned stacks (OP#132)
+# ---------------------------------------------------------------------------
+
+
+def _make_dispatch_conn(handler):
+    """SSH conn whose `.run(cmd)` result is selected by `handler(cmd)`.
+
+    `handler` returns `(stdout, returncode)`. Used to drive the multi-command
+    `_update_compose_project` flow (compose probe, docker ps, test -f, pull, up).
+    """
+    conn = MagicMock()
+    conn.__aenter__ = AsyncMock(return_value=conn)
+    conn.__aexit__ = AsyncMock(return_value=False)
+
+    async def _run(cmd, **kwargs):
+        stdout, rc = handler(cmd)
+        return MagicMock(stdout=stdout, returncode=rc)
+
+    conn.run = AsyncMock(side_effect=_run)
+    return conn
+
+
+def _portainer_owned_ps(project="mystack", config="/data/compose/5/docker-compose.yml"):
+    return json.dumps([{
+        "ID": "abc123def456",
+        "Names": "/app",
+        "Image": "nginx:latest",
+        "Labels": (
+            f"com.docker.compose.project={project},"
+            f"com.docker.compose.project.config_files={config}"
+        ),
+    }])
+
+
+def _ran_commands(conn):
+    return [c.args[0] for c in conn.run.call_args_list]
+
+
+@pytest.mark.asyncio
+async def test_compose_redeploy_portainer_owned_stack_without_integration_raises(data_dir):
+    """A Portainer-owned stack (config under /data/compose, absent on host) with
+    no Portainer integration raises a clear, actionable error instead of the
+    doomed `-p` compose fallback."""
+    def handler(cmd):
+        if "docker ps -a" in cmd:
+            return (_portainer_owned_ps(), 0)
+        if "compose version" in cmd:
+            return ("v2", 0)
+        if "test -f" in cmd:
+            return ("", 0)  # file not present on host
+        return ("", 0)
+
+    conn = _make_dispatch_conn(handler)
+    host = {"slug": "h", "host": "1.2.3.4"}
+    with patch(
+        "app.backends.ssh_docker_backend._connect", new=AsyncMock(return_value=conn)
+    ), patch(
+        "app.backends.ssh_docker_backend.get_self_container_id", return_value=None
+    ):
+        backend = SSHDockerBackend()
+        with pytest.raises(RuntimeError) as exc:
+            await backend._update_compose_project(host, "mystack")
+
+    msg = str(exc.value)
+    assert "Portainer" in msg
+    assert "Connect the Portainer integration" in msg
+    # The doomed compose pull/up must never run.
+    assert not any(" pull" in c or " up -d" in c for c in _ran_commands(conn))
+
+
+@pytest.mark.asyncio
+async def test_compose_redeploy_portainer_owned_stack_with_integration_points_to_portainer(data_dir):
+    """With Portainer integration active, the error tells the user to redeploy
+    from the Portainer entry rather than via SSH."""
+    def handler(cmd):
+        if "docker ps -a" in cmd:
+            return (_portainer_owned_ps(), 0)
+        if "compose version" in cmd:
+            return ("v2", 0)
+        if "test -f" in cmd:
+            return ("", 0)
+        return ("", 0)
+
+    conn = _make_dispatch_conn(handler)
+    host = {"slug": "h", "host": "1.2.3.4"}
+    with patch(
+        "app.backends.ssh_docker_backend._connect", new=AsyncMock(return_value=conn)
+    ), patch(
+        "app.backends.ssh_docker_backend.get_self_container_id", return_value=None
+    ), patch(
+        "app.backends.ssh_docker_backend._portainer_integration_active",
+        return_value=True,
+    ):
+        backend = SSHDockerBackend()
+        with pytest.raises(RuntimeError) as exc:
+            await backend._update_compose_project(host, "mystack")
+
+    msg = str(exc.value)
+    assert "Portainer" in msg
+    assert "Portainer entry" in msg
+    assert not any(" pull" in c or " up -d" in c for c in _ran_commands(conn))
+
+
+@pytest.mark.asyncio
+async def test_compose_redeploy_with_present_config_file_pulls_and_ups(data_dir):
+    """Happy path is unchanged: a present compose file is used with `-f`."""
+    cfg = "/opt/stacks/mystack/docker-compose.yml"
+
+    def handler(cmd):
+        if "docker ps -a" in cmd:
+            return (_portainer_owned_ps(config=cfg), 0)
+        if "compose version" in cmd:
+            return ("v2", 0)
+        if "test -f" in cmd:
+            return ("exists", 0)
+        return ("", 0)  # pull / up succeed
+
+    conn = _make_dispatch_conn(handler)
+    host = {"slug": "h", "host": "1.2.3.4"}
+    with patch(
+        "app.backends.ssh_docker_backend._connect", new=AsyncMock(return_value=conn)
+    ), patch(
+        "app.backends.ssh_docker_backend.get_self_container_id", return_value=None
+    ):
+        backend = SSHDockerBackend()
+        await backend._update_compose_project(host, "mystack")
+
+    ran = _ran_commands(conn)
+    assert any(f"-f {cfg}" in c and " pull" in c for c in ran)
+    assert any(f"-f {cfg}" in c and " up -d" in c for c in ran)
+
+
+@pytest.mark.asyncio
+async def test_compose_redeploy_non_portainer_missing_file_falls_back_to_p(data_dir):
+    """A missing config file that is NOT a Portainer path keeps the existing
+    `-p <project>` fallback (out of scope for OP#132)."""
+    def handler(cmd):
+        if "docker ps -a" in cmd:
+            return (_portainer_owned_ps(config="/opt/stacks/mystack/dc.yml"), 0)
+        if "compose version" in cmd:
+            return ("v2", 0)
+        if "test -f" in cmd:
+            return ("", 0)  # absent on host, but not a /data/compose path
+        return ("", 0)
+
+    conn = _make_dispatch_conn(handler)
+    host = {"slug": "h", "host": "1.2.3.4"}
+    with patch(
+        "app.backends.ssh_docker_backend._connect", new=AsyncMock(return_value=conn)
+    ), patch(
+        "app.backends.ssh_docker_backend.get_self_container_id", return_value=None
+    ):
+        backend = SSHDockerBackend()
+        await backend._update_compose_project(host, "mystack")
+
+    ran = _ran_commands(conn)
+    assert any("-p mystack" in c and " pull" in c for c in ran)
