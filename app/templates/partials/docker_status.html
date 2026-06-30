@@ -38,7 +38,7 @@
     </div>
 
     {% for stack in group_list %}
-    {% set action_id = stack.update_path | replace('/', '-') | replace(':', '-') %}
+    {% set action_id = stack.update_path | css_id %}
     <div class="ct-row">
       <div class="ct-indent">
         <span class="ct-line"></span>

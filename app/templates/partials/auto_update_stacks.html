@@ -9,7 +9,7 @@
   {% set ns = namespace(last_endpoint='') %}
   {% for stack in stacks %}
     {% set update_path = stack.update_path %}
-    {% set row_id = update_path | replace('/', '-') | replace(':', '-') %}
+    {% set row_id = update_path | css_id %}
     {% set ep = stack.endpoint_name or stack.host_name or '' %}
     {% if ep and ep != ns.last_endpoint %}
     {% set ns.last_endpoint = ep %}
