@@ -183,6 +183,29 @@ def test_job_modal_failed_upgrade_labels_failure(client):
         m._jobs.pop(job_id, None)
 
 
+def test_job_modal_failed_redeploy_labels_failure(client):
+    """A failed container redeploy must not be labelled 'Redeploy complete'."""
+    import app.main as m
+
+    job_id = "failredeploy1"
+    m._jobs[job_id] = {
+        "done": True,
+        "status": "error",
+        "error": "Stack 'watchtower' was deployed via Portainer.",
+        "lines": [],
+        "type": "container_redeploy",
+        "label": "watchtower",
+        "sub": "ssh",
+    }
+    try:
+        response = client.get(f"/api/jobs/{job_id}/modal")
+        assert response.status_code == 200
+        assert "Redeploy complete" not in response.text
+        assert "Redeploy failed" in response.text
+    finally:
+        m._jobs.pop(job_id, None)
+
+
 def test_job_modal_successful_upgrade_labels_complete(client):
     """A successful upgrade job still reads 'Upgrade complete'."""
     import app.main as m
