@@ -478,6 +478,50 @@ def test_docker_check_shows_connection_badge_in_group_header(client, config_file
     assert "Node · Proxmox API" in response.text
 
 
+def test_docker_check_standalone_redeploy_target_is_css_safe(client, config_file, monkeypatch):
+    """Standalone containers ('~' prefix) must produce a CSS-safe action id.
+
+    '~' is a CSS sibling combinator; if it survives into the wrapper id, the
+    Redeploy button's hx-target selector fails to match it -> htmx:targetError.
+    The id attribute and the hx-target must be identical and CSS-safe.
+    """
+    import re
+    import yaml
+    import app.backend_loader as bl
+
+    cfg = yaml.safe_load(config_file.read_text())
+    cfg["hosts"][0]["docker_mode"] = "all"
+    config_file.write_text(yaml.dump(cfg))
+
+    ssh_b = MagicMock()
+    ssh_b.BACKEND_KEY = "ssh"
+    ssh_b.get_stacks_with_update_status = AsyncMock(return_value=[
+        {
+            "id": "my-lxc/~portainer",
+            "name": "portainer",
+            "endpoint_id": "my-lxc",
+            "endpoint_name": "Portainer",
+            "connection_badge": "LXC 101 · pct exec",
+            "update_status": "update_available",
+            "images": [{"name": "portainer:latest", "status": "update_available"}],
+            "update_path": "ssh/my-lxc/~portainer",
+            "_compose_project": "",
+        }
+    ])
+    monkeypatch.setattr(bl, "_backends", [ssh_b])
+
+    response = client.get("/api/docker/check")
+    assert response.status_code == 200
+    html = response.text
+
+    ids = re.findall(r'id="(stack-[^"]+-action)"', html)
+    targets = re.findall(r'hx-target="#(stack-[^"]+-action)"', html)
+    assert ids, "no redeploy action wrapper rendered"
+    assert ids == targets, "div id and hx-target diverge"
+    for ident in ids:
+        assert re.fullmatch(r"[A-Za-z0-9_-]+", ident), f"non-CSS-safe id: {ident}"
+
+
 def test_docker_check_shows_lxc_connection_badge(client, config_file, monkeypatch):
     import yaml
     import app.backend_loader as bl
