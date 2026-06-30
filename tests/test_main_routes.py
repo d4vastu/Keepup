@@ -160,6 +160,52 @@ def test_job_status_unknown_id(client):
     assert "not found" in response.text.lower()
 
 
+def test_job_modal_failed_upgrade_labels_failure(client):
+    """A failed upgrade job must not be labelled 'Upgrade complete'."""
+    import app.main as m
+
+    job_id = "failjob1"
+    m._jobs[job_id] = {
+        "done": True,
+        "status": "error",
+        "error": "Host 'Proxmox VE (pve)' has no SSH user configured.",
+        "lines": [],
+        "type": "os_upgrade",
+        "label": "Proxmox VE (pve)",
+        "sub": "pve",
+    }
+    try:
+        response = client.get(f"/api/jobs/{job_id}/modal")
+        assert response.status_code == 200
+        assert "Upgrade complete" not in response.text
+        assert "Upgrade failed" in response.text
+    finally:
+        m._jobs.pop(job_id, None)
+
+
+def test_job_modal_successful_upgrade_labels_complete(client):
+    """A successful upgrade job still reads 'Upgrade complete'."""
+    import app.main as m
+
+    job_id = "okjob1"
+    m._jobs[job_id] = {
+        "done": True,
+        "status": "done",
+        "error": None,
+        "lines": [],
+        "type": "os_upgrade",
+        "label": "NGINX",
+        "sub": "100",
+    }
+    try:
+        response = client.get(f"/api/jobs/{job_id}/modal")
+        assert response.status_code == 200
+        assert "Upgrade complete" in response.text
+        assert "Upgrade failed" not in response.text
+    finally:
+        m._jobs.pop(job_id, None)
+
+
 # ---------------------------------------------------------------------------
 # Sign out button
 # ---------------------------------------------------------------------------
