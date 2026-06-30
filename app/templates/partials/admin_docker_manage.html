@@ -35,7 +35,7 @@
     </svg>
     <div class="flex-1">
       <p class="text-xs font-medium text-amber-300">
-        {{ portainer_managed_count }} of these container{{ 's were' if portainer_managed_count != 1 else ' was' }} deployed via Portainer
+        {{ portainer_managed_count }} of these containers {{ 'were' if portainer_managed_count != 1 else 'was' }} deployed via Portainer
       </p>
       <p class="text-xs text-slate-400 mt-0.5">
         Keepup can't update Portainer-deployed containers over SSH — their compose files live in Portainer's data volume. Connect the Portainer integration to manage them.

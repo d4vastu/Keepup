@@ -847,6 +847,7 @@ def test_docker_discover_shows_portainer_notice_when_managed_and_integration_off
     assert response.status_code == 200
     assert "Connect Portainer" in response.text
     assert "/admin#config-portainer" in response.text
+    assert "1 of these containers was deployed via Portainer" in response.text
 
 
 def test_docker_discover_hides_portainer_notice_when_integration_active(client):
@@ -896,6 +897,7 @@ def test_docker_manage_shows_portainer_notice_when_managed_and_integration_off(c
     assert response.status_code == 200
     assert "Connect Portainer" in response.text
     assert "/admin#config-portainer" in response.text
+    assert "1 of these containers was deployed via Portainer" in response.text
 
 
 def test_docker_manage_hides_portainer_notice_when_integration_active(client):
