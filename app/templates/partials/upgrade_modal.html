@@ -1,14 +1,15 @@
 {% from "macros/log.html" import render_log %}
 {% set close_js %}document.getElementById('modal-container').style.display='none'{% endset %}
 
+{% set failed = job.done and job.status == "error" %}
 {% if job.type == "os_upgrade" %}
-  {% set action_label = "Upgrade complete" if job.done else "Upgrading OS packages" %}
+  {% set action_label = ("Upgrade failed" if failed else "Upgrade complete") if job.done else "Upgrading OS packages" %}
   {% set running_label = "Upgrade in progress" %}
 {% elif job.type == "os_restart" %}
-  {% set action_label = "Reboot complete" if job.done else "Rebooting host" %}
+  {% set action_label = ("Reboot failed" if failed else "Reboot complete") if job.done else "Rebooting host" %}
   {% set running_label = "Reboot in progress" %}
 {% else %}
-  {% set action_label = "Redeploy complete" if job.done else "Redeploying container" %}
+  {% set action_label = ("Redeploy failed" if failed else "Redeploy complete") if job.done else "Redeploying container" %}
   {% set running_label = "Redeploy in progress" %}
 {% endif %}
 
