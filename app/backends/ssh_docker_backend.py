@@ -30,6 +30,11 @@ log = logging.getLogger(__name__)
 #   Standalone:         "~{container_name}"             (tilde prefix)
 _STANDALONE_PREFIX = "~"
 
+# Seconds to wait after recreating a container before confirming it is still
+# running (not crash-looping) — so a container that starts then immediately
+# dies triggers rollback instead of slipping through. Patched to 0 in tests.
+_RECREATE_SETTLE_SECONDS = 3
+
 
 class SSHDockerBackend:
     BACKEND_KEY = "ssh"
@@ -554,11 +559,24 @@ class SSHDockerBackend:
 
             running = False
             if run.returncode == 0:
+                # Let the container settle, then confirm it is STILL running and
+                # has not entered a crash/restart loop. A bad entrypoint or flag
+                # can pass an instantaneous check and then die — that previously
+                # slipped past rollback and took the container down for good.
+                await asyncio.sleep(_RECREATE_SETTLE_SECONDS)
                 verify = await conn.run(
-                    wrap(f"docker inspect -f '{{{{.State.Running}}}}' {name_q}"),
+                    wrap(
+                        f"docker inspect -f '{{{{.State.Running}}}} {{{{.RestartCount}}}}' {name_q}"
+                    ),
                     check=False,
                 )
-                running = verify.returncode == 0 and verify.stdout.strip() == "true"
+                fields = verify.stdout.strip().split()
+                running = (
+                    verify.returncode == 0
+                    and len(fields) == 2
+                    and fields[0] == "true"
+                    and fields[1] == "0"
+                )
 
             if not running:
                 log.error(
@@ -926,15 +944,20 @@ def _build_docker_run_cmd(inspect: dict) -> str:
         for lk, lv in (log_config.get("Config") or {}).items():
             parts += ["--log-opt", f"{lk}={lv}"]
 
-    # Image
-    parts.append(config.get("Image", ""))
-
-    # Entrypoint + command overrides
+    # Entrypoint override. `--entrypoint` is a `docker run` flag and MUST come
+    # before the image — only the first element can be set this way. Emitting it
+    # after the image turns it into a container argument (which crash-looped
+    # Portainer: it received `--entrypoint /portainer` as its own flag).
     entrypoint = config.get("Entrypoint") or []
     cmd = config.get("Cmd") or []
     if entrypoint:
         parts += ["--entrypoint", entrypoint[0]]
-        parts.extend(entrypoint[1:])
+
+    # Image
+    parts.append(config.get("Image", ""))
+
+    # Args after the image: any extra entrypoint elements, then the command.
+    parts.extend(entrypoint[1:])
     parts.extend(cmd)
 
     return " ".join(shlex.quote(p) for p in parts)

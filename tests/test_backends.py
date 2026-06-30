@@ -17,6 +17,14 @@ from app.backends.ssh_docker_backend import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _no_recreate_settle(monkeypatch):
+    """Skip the post-recreate settle delay so the suite stays fast."""
+    monkeypatch.setattr(
+        "app.backends.ssh_docker_backend._RECREATE_SETTLE_SECONDS", 0
+    )
+
+
 # ---------------------------------------------------------------------------
 # Protocol conformance
 # ---------------------------------------------------------------------------
@@ -1276,6 +1284,38 @@ def test_build_docker_run_cmd_env():
     assert "-e BAZ=qux" in cmd
 
 
+def test_build_docker_run_cmd_entrypoint_precedes_image():
+    """`--entrypoint` is a docker flag — it MUST come before the image.
+
+    Regression: emitting it after the image made it a container argument, so
+    Portainer received `--entrypoint /portainer` as its own flag and crash-looped.
+    """
+    data = _minimal_inspect(image="portainer/portainer-ce:lts")
+    data["Config"]["Entrypoint"] = ["/portainer"]
+    data["Config"]["Cmd"] = None
+    cmd = _build_docker_run_cmd(data)
+    tokens = cmd.split()
+    assert "--entrypoint" in tokens
+    ep_idx = tokens.index("--entrypoint")
+    img_idx = tokens.index("portainer/portainer-ce:lts")
+    assert ep_idx < img_idx, f"--entrypoint must precede the image: {cmd}"
+    # No stray args after the image that the entrypoint would reject.
+    assert img_idx == len(tokens) - 1, f"unexpected trailing args after image: {cmd}"
+
+
+def test_build_docker_run_cmd_cmd_args_follow_image():
+    """Command args (and extra entrypoint parts) come after the image."""
+    data = _minimal_inspect(image="alpine:latest")
+    data["Config"]["Entrypoint"] = ["/bin/myentry"]
+    data["Config"]["Cmd"] = ["--flag", "value"]
+    cmd = _build_docker_run_cmd(data)
+    tokens = cmd.split()
+    img_idx = tokens.index("alpine:latest")
+    assert tokens.index("--entrypoint") < img_idx
+    assert tokens.index("--flag") > img_idx
+    assert tokens.index("value") > img_idx
+
+
 def test_build_docker_run_cmd_privileged():
     data = _minimal_inspect()
     data["HostConfig"]["Privileged"] = True
@@ -1599,7 +1639,7 @@ async def test_update_standalone_ref_triggers_recreate(config_file, data_dir):
 
     def handler(cmd):
         if "docker inspect" in cmd and "State.Running" in cmd:
-            return MagicMock(stdout="true", returncode=0)
+            return MagicMock(stdout="true 0", returncode=0)
         if "docker inspect" in cmd:
             return MagicMock(stdout=inspect_data, returncode=0)
         return MagicMock(stdout="ok", returncode=0)
@@ -1701,7 +1741,7 @@ async def test_update_standalone_removes_backup_only_after_verify(config_file, d
 
     def handler(cmd):
         if "docker inspect" in cmd and "State.Running" in cmd:
-            return MagicMock(stdout="true", returncode=0)
+            return MagicMock(stdout="true 0", returncode=0)
         if "docker inspect" in cmd:
             return MagicMock(stdout=_STANDALONE_INSPECT, returncode=0)
         return MagicMock(stdout="ok", returncode=0)
@@ -1770,6 +1810,38 @@ async def test_update_standalone_rolls_back_when_not_running(config_file, data_d
             await SSHDockerBackend().update_stack("test-host/~myapp")
 
     assert any("docker rename" in c and "myapp__keepup_old myapp" in c.replace("'", "") for c in conn.commands)
+
+
+@pytest.mark.asyncio
+async def test_update_standalone_rolls_back_when_crash_looping(config_file, data_dir):
+    """A container that starts but immediately crash-loops (RestartCount>0) rolls back.
+
+    Regression for the Portainer outage: a bad `--entrypoint` let the container
+    pass an instantaneous running check, then crash-loop. RestartCount>0 after
+    the settle delay must now trigger rollback instead of dropping the backup.
+    """
+    import yaml
+    raw = yaml.safe_load(config_file.read_text())
+    raw["hosts"][0]["docker_mode"] = "all"
+    config_file.write_text(yaml.dump(raw))
+
+    def handler(cmd):
+        if "docker inspect" in cmd and "State.Running" in cmd:
+            # Running right now, but it has already restarted 3 times.
+            return MagicMock(stdout="true 3", returncode=0)
+        if "docker inspect" in cmd:
+            return MagicMock(stdout=_STANDALONE_INSPECT, returncode=0)
+        return MagicMock(stdout="ok", returncode=0)
+
+    conn = _cmd_conn(handler)
+    with patch("app.backends.ssh_docker_backend._connect", new=AsyncMock(return_value=conn)):
+        with pytest.raises(RuntimeError):
+            await SSHDockerBackend().update_stack("test-host/~myapp")
+
+    cmds = conn.commands
+    # Rolled back: backup renamed back to the original and started; backup not dropped.
+    assert any("docker rename" in c and "myapp__keepup_old myapp" in c.replace("'", "") for c in cmds)
+    assert not any("docker rm" in c and "myapp__keepup_old" in c for c in cmds)
 
 
 @pytest.mark.asyncio
@@ -2302,7 +2374,7 @@ async def test_update_standalone_pct_wraps_commands(config_file, data_dir):
     }])
     def handler(cmd):
         if "State.Running" in cmd:
-            return MagicMock(stdout="true", returncode=0)
+            return MagicMock(stdout="true 0", returncode=0)
         if "docker inspect" in cmd:
             return MagicMock(stdout=inspect_data, returncode=0)
         return MagicMock(stdout="ok", returncode=0)
