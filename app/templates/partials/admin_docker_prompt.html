@@ -14,6 +14,27 @@
     </div>
   </div>
 
+  {% if portainer_required %}
+  <div class="rounded-lg border border-amber-700/60 bg-amber-900/20 p-3 flex items-start gap-2">
+    <svg class="w-4 h-4 text-amber-400 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+        d="M12 9v2m0 4h.01M5.07 19h13.86a2 2 0 001.74-3l-6.93-12a2 2 0 00-3.48 0l-6.93 12a2 2 0 001.74 3z"/>
+    </svg>
+    <div class="flex-1">
+      <p class="text-xs font-medium text-amber-300">
+        {{ portainer_managed_count }} of these container{{ 's were' if portainer_managed_count != 1 else ' was' }} deployed via Portainer
+      </p>
+      <p class="text-xs text-slate-400 mt-0.5">
+        Keepup can't update Portainer-deployed containers over SSH — their compose files live in Portainer's data volume. Connect the Portainer integration to manage them.
+      </p>
+      <a href="/admin#config-portainer"
+        class="inline-block mt-2 px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 text-xs font-medium text-white transition-colors">
+        Connect Portainer
+      </a>
+    </div>
+  </div>
+  {% endif %}
+
   <!-- Step 1: Yes / No -->
   <div id="docker-prompt-step1-{{ slug }}" class="flex gap-2">
     <button
