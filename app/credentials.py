@@ -2,8 +2,11 @@
 Encrypted credential store.
 
 Credentials (SSH password, SSH private key, sudo password) are stored in a
-Fernet-encrypted JSON file at /app/data/credentials.json. The encryption key
-is auto-generated on first run and stored at /app/data/.secret.
+Fernet-encrypted JSON file at /app/data/credentials.json. The encryption key is
+resolved in order: the KEEPUP_SECRET_KEY env var, then the file named by
+KEEPUP_SECRET_KEY_FILE (e.g. a Docker/k8s secret), then an auto-generated
+/app/data/.secret. The first two keep the key out of the data volume so it does
+not travel in volume backups; only the .secret fallback is auto-generated.
 
 Nothing sensitive is ever written to config.yml.
 """
@@ -44,12 +47,55 @@ def _ensure_data_dir() -> None:
     _DATA_DIR.mkdir(parents=True, exist_ok=True)
 
 
-def _get_fernet() -> Fernet:
+def _validate_key(key: bytes, source: str) -> bytes:
+    """Return ``key`` if it is a valid Fernet key, else raise a clear error.
+
+    Naming the offending ``source`` turns a config typo into an actionable
+    startup error instead of a silent fall-through to a freshly generated key,
+    which would orphan the existing credential store.
+    """
+    try:
+        Fernet(key)
+    except (ValueError, TypeError) as exc:
+        raise ValueError(
+            f"{source} is not a valid Fernet key (expected 32 url-safe "
+            f"base64-encoded bytes): {exc}"
+        ) from exc
+    return key
+
+
+def _resolve_key_bytes() -> bytes:
+    """Resolve the Fernet key, preferring sources outside the data volume.
+
+    Order: ``KEEPUP_SECRET_KEY`` env var, then ``KEEPUP_SECRET_KEY_FILE`` path
+    (e.g. a Docker/Podman/k8s secret under ``/run/secrets/...``), then the
+    auto-generated ``.secret`` in the data dir. Only the on-disk fallback is
+    ever generated, so an operator-supplied key is never written into the data
+    volume (and therefore never lands in a backup of it).
+    """
+    env_key = os.getenv("KEEPUP_SECRET_KEY")
+    if env_key:
+        return _validate_key(env_key.encode(), "KEEPUP_SECRET_KEY")
+
+    key_file = os.getenv("KEEPUP_SECRET_KEY_FILE")
+    if key_file:
+        try:
+            raw = Path(key_file).read_bytes()
+        except OSError as exc:
+            raise ValueError(
+                f"KEEPUP_SECRET_KEY_FILE={key_file!r} could not be read: {exc}"
+            ) from exc
+        return _validate_key(raw.strip(), "KEEPUP_SECRET_KEY_FILE")
+
     _ensure_data_dir()
     if not _SECRET_FILE.exists():
         _SECRET_FILE.write_bytes(Fernet.generate_key())
         _SECRET_FILE.chmod(0o600)
-    return Fernet(_SECRET_FILE.read_bytes())
+    return _SECRET_FILE.read_bytes()
+
+
+def _get_fernet() -> Fernet:
+    return Fernet(_resolve_key_bytes())
 
 
 def _load_store() -> dict:
