@@ -34,7 +34,7 @@ def test_setup_summary_returns_200(setup_client, data_dir):
     _create_admin()
     response = setup_client.get("/setup/summary")
     assert response.status_code == 200
-    assert "Step 8" in response.text
+    assert "Step 9 of 9" in response.text
     assert "Admin account created" in response.text
 
 
