@@ -459,6 +459,25 @@ class SSHDockerBackend:
                     wrap(f"test -f {shlex.quote(config_file)} && echo exists"), check=False
                 )
                 if "exists" not in (check.stdout or ""):
+                    if config_file.startswith("/data/compose/"):
+                        # Portainer-owned stack: the compose file lives inside
+                        # Portainer's data volume, not on this host, so the
+                        # compose CLI can never redeploy it. Fail with an
+                        # actionable message instead of the doomed `-p` fallback
+                        # (which errors "can't find a suitable configuration
+                        # file" and only confuses the user). (OP#132)
+                        if _portainer_integration_active():
+                            raise RuntimeError(
+                                f"Stack {project_name!r} was deployed via "
+                                f"Portainer; redeploy it from its Portainer entry "
+                                f"in the dashboard, not over SSH."
+                            )
+                        raise RuntimeError(
+                            f"Stack {project_name!r} was deployed via Portainer "
+                            f"(its compose file lives in Portainer's data volume, "
+                            f"not on {h}). Connect the Portainer integration to "
+                            f"redeploy it."
+                        )
                     log.warning(
                         "Docker SSH: compose config %r not found on %s, falling back to -p",
                         config_file, h,
