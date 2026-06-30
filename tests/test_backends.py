@@ -376,6 +376,35 @@ async def test_discover_containers_returns_containers(config_file, data_dir):
 
 
 @pytest.mark.asyncio
+async def test_discover_containers_tags_portainer_managed(config_file, data_dir):
+    """Containers in Portainer-agent-managed compose projects are tagged."""
+    ps_output = "\n".join([
+        json.dumps({"Names": "/portainer_agent", "Image": "portainer/agent:latest",
+                    "Status": "Up 1 day", "Labels": ""}),
+        json.dumps({"Names": "/watchtower", "Image": "watchtower:latest",
+                    "Status": "Up 2 hours",
+                    "Labels": "com.docker.compose.project=watchtower,"
+                              "com.docker.compose.project.config_files=/data/compose/3/docker-compose.yml"}),
+        json.dumps({"Names": "/plex", "Image": "plex:latest",
+                    "Status": "Up 1 hour",
+                    "Labels": "com.docker.compose.project=media,"
+                              "com.docker.compose.project.config_files=/srv/media/docker-compose.yml"}),
+    ])
+    conn = _make_ssh_conn_with_status(stdout=ps_output)
+    host = {"name": "Test Host", "host": "192.168.1.10", "slug": "test-host"}
+    with patch(
+        "app.backends.ssh_docker_backend._connect", new=AsyncMock(return_value=conn)
+    ):
+        backend = SSHDockerBackend()
+        containers = await backend.discover_containers(host)
+
+    watchtower = next(c for c in containers if c["name"] == "watchtower")
+    plex = next(c for c in containers if c["name"] == "plex")
+    assert watchtower["portainer_managed"] is True
+    assert plex["portainer_managed"] is False
+
+
+@pytest.mark.asyncio
 async def test_discover_containers_css_safe_id_strips_special_chars(config_file, data_dir):
     """Container names with special chars (e.g. parens) are sanitized for CSS ids."""
     from app.backends.ssh_docker_backend import _css_safe_id
@@ -802,6 +831,93 @@ def test_docker_manage_returns_panel(client):
     assert response.status_code == 200
     assert "plex" in response.text
     assert "monitor" in response.text.lower()
+
+
+def test_docker_discover_shows_portainer_notice_when_managed_and_integration_off(client):
+    """Portainer-managed containers + integration off → 'Connect Portainer' notice."""
+    containers = [
+        {"name": "watchtower", "image": "watchtower:latest", "status": "Up", "running": True,
+         "compose_project": "watchtower", "css_id": "watchtower", "portainer_managed": True},
+    ]
+    with patch(
+        "app.backends.ssh_docker_backend.SSHDockerBackend.discover_containers",
+        new=AsyncMock(return_value=containers),
+    ):
+        response = client.get("/admin/hosts/test-host/docker-discover")
+    assert response.status_code == 200
+    assert "Connect Portainer" in response.text
+    assert "/admin#config-portainer" in response.text
+    assert "1 of these containers was deployed via Portainer" in response.text
+
+
+def test_docker_discover_hides_portainer_notice_when_integration_active(client):
+    containers = [
+        {"name": "watchtower", "image": "watchtower:latest", "status": "Up", "running": True,
+         "compose_project": "watchtower", "css_id": "watchtower", "portainer_managed": True},
+    ]
+    with (
+        patch(
+            "app.backends.ssh_docker_backend.SSHDockerBackend.discover_containers",
+            new=AsyncMock(return_value=containers),
+        ),
+        patch(
+            "app.backends.ssh_docker_backend._portainer_integration_active",
+            return_value=True,
+        ),
+    ):
+        response = client.get("/admin/hosts/test-host/docker-discover")
+    assert response.status_code == 200
+    assert "Connect Portainer" not in response.text
+
+
+def test_docker_discover_no_portainer_notice_when_none_managed(client):
+    containers = [
+        {"name": "plex", "image": "plex:latest", "status": "Up", "running": True,
+         "compose_project": None, "css_id": "plex", "portainer_managed": False},
+    ]
+    with patch(
+        "app.backends.ssh_docker_backend.SSHDockerBackend.discover_containers",
+        new=AsyncMock(return_value=containers),
+    ):
+        response = client.get("/admin/hosts/test-host/docker-discover")
+    assert response.status_code == 200
+    assert "Connect Portainer" not in response.text
+
+
+def test_docker_manage_shows_portainer_notice_when_managed_and_integration_off(client):
+    containers = [
+        {"name": "watchtower", "image": "watchtower:latest", "status": "Up", "running": True,
+         "compose_project": "watchtower", "css_id": "watchtower", "portainer_managed": True},
+    ]
+    with patch(
+        "app.backends.ssh_docker_backend.SSHDockerBackend.discover_containers",
+        new=AsyncMock(return_value=containers),
+    ):
+        response = client.get("/admin/hosts/test-host/docker-manage")
+    assert response.status_code == 200
+    assert "Connect Portainer" in response.text
+    assert "/admin#config-portainer" in response.text
+    assert "1 of these containers was deployed via Portainer" in response.text
+
+
+def test_docker_manage_hides_portainer_notice_when_integration_active(client):
+    containers = [
+        {"name": "watchtower", "image": "watchtower:latest", "status": "Up", "running": True,
+         "compose_project": "watchtower", "css_id": "watchtower", "portainer_managed": True},
+    ]
+    with (
+        patch(
+            "app.backends.ssh_docker_backend.SSHDockerBackend.discover_containers",
+            new=AsyncMock(return_value=containers),
+        ),
+        patch(
+            "app.backends.ssh_docker_backend._portainer_integration_active",
+            return_value=True,
+        ),
+    ):
+        response = client.get("/admin/hosts/test-host/docker-manage")
+    assert response.status_code == 200
+    assert "Connect Portainer" not in response.text
 
 
 def test_docker_manage_unknown_host_returns_empty(client):

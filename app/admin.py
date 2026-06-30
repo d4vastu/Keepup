@@ -723,6 +723,21 @@ def _group_containers(
     return dict(sorted(compose_groups.items())), standalone
 
 
+def _portainer_dependency(containers: list[dict]) -> tuple[int, bool]:
+    """Return (managed_count, portainer_required) for discovered containers.
+
+    ``portainer_required`` is True when one or more containers were deployed via
+    Portainer (their compose file lives in Portainer's volume, so Keepup cannot
+    update them over SSH) AND the Portainer integration is not connected. In
+    that case the UI prompts the user to connect the integration.
+    """
+    from .backends.ssh_docker_backend import _portainer_integration_active
+
+    managed_count = sum(1 for c in containers if c.get("portainer_managed"))
+    portainer_required = managed_count > 0 and not _portainer_integration_active()
+    return managed_count, portainer_required
+
+
 @router.delete("/hosts/{slug}/docker-prompt", response_class=HTMLResponse)
 async def admin_dismiss_docker_prompt(request: Request, slug: str) -> HTMLResponse:
     """Dismiss the Docker discovery prompt without saving anything."""
@@ -746,6 +761,7 @@ async def admin_docker_discover(request: Request, slug: str) -> HTMLResponse:
     if not containers:
         return HTMLResponse("")
     compose_groups, standalone = _group_containers(containers)
+    managed_count, portainer_required = _portainer_dependency(containers)
     return templates.TemplateResponse(
         "partials/admin_docker_prompt.html",
         {
@@ -755,6 +771,8 @@ async def admin_docker_discover(request: Request, slug: str) -> HTMLResponse:
             "compose_groups": compose_groups,
             "standalone": standalone,
             "container_count": len(containers),
+            "portainer_required": portainer_required,
+            "portainer_managed_count": managed_count,
         },
     )
 
@@ -776,6 +794,7 @@ async def admin_docker_manage(request: Request, slug: str) -> HTMLResponse:
     except Exception as exc:
         error = str(exc)
     compose_groups, standalone = _group_containers(containers)
+    managed_count, portainer_required = _portainer_dependency(containers)
     return templates.TemplateResponse(
         "partials/admin_docker_manage.html",
         {
@@ -785,6 +804,8 @@ async def admin_docker_manage(request: Request, slug: str) -> HTMLResponse:
             "compose_groups": compose_groups,
             "standalone": standalone,
             "error": error,
+            "portainer_required": portainer_required,
+            "portainer_managed_count": managed_count,
         },
     )
 

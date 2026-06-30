@@ -131,7 +131,8 @@ class SSHDockerBackend:
         """Return all containers on the host for admin container selection.
 
         Returns list of dicts: name, image, status, running (bool),
-        compose_project (str | None), css_id (CSS-safe id string).
+        compose_project (str | None), css_id (CSS-safe id string),
+        portainer_managed (bool — compose file lives in Portainer's volume).
         Raises on connection failure — caller decides how to handle.
         Also routes through _ssh_params_for so Proxmox LXC hosts are
         reached via pct exec.
@@ -144,7 +145,14 @@ class SSHDockerBackend:
             if result.returncode != 0:
                 return []
             raw = _parse_json_output(result.stdout)
-            return _containers_for_display(raw)
+            display = _containers_for_display(raw)
+            # Tag containers whose compose project is managed by a Portainer
+            # agent (compose file lives in Portainer's /data volume). These
+            # can't be updated over SSH — only via the Portainer integration.
+            managed = _portainer_managed_projects(raw)
+            for c in display:
+                c["portainer_managed"] = c["compose_project"] in managed
+            return display
 
     # ------------------------------------------------------------------
     # ContainerBackend protocol
