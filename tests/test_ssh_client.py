@@ -9,7 +9,10 @@ from app.ssh_client import (
     check_host_updates,
     detect_docker_stacks,
     discover_containers,
+    node_reboot_required,
+    parse_kernel_probe,
     reboot_host,
+    resolve_next_boot_kernel,
     run_host_update_buffered,
     verify_connection,
 )
@@ -448,3 +451,96 @@ async def test_detect_docker_stacks_no_sudo_for_root():
         await detect_docker_stacks(HOST_ROOT)
     sent_cmd = conn.run.call_args[0][0]
     assert not sent_cmd.startswith("sudo")
+
+
+# ---------------------------------------------------------------------------
+# Proxmox node reboot detection (next-boot kernel vs running)
+# ---------------------------------------------------------------------------
+
+# Real capture from a node whose newer kernels are installed but whose GRUB
+# saved default is pinned to the running kernel — the false positive this fixes.
+_PROBE_PINNED_SAVED = (
+    "RUNNING 6.17.13-3-pve\n"
+    "GRUBDEFAULT saved\n"
+    "SAVEDENTRY gnulinux-advanced-UUID>gnulinux-6.17.13-3-pve-advanced-UUID\n"
+    "PIN \n"
+    "KERNEL 6.17.13-3-pve\n"
+    "KERNEL 6.17.13-13-pve\n"
+    "KERNEL 7.0.12-1-pve\n"
+)
+
+
+def test_parse_kernel_probe_full():
+    facts = parse_kernel_probe(_PROBE_PINNED_SAVED)
+    assert facts["running"] == "6.17.13-3-pve"
+    assert facts["grub_default"] == "saved"
+    assert "6.17.13-3-pve" in facts["saved_entry"]
+    assert facts["pin"] == ""
+    assert facts["kernels"] == [
+        "6.17.13-3-pve", "6.17.13-13-pve", "7.0.12-1-pve",
+    ]
+
+
+def test_parse_kernel_probe_ignores_malformed_lines():
+    facts = parse_kernel_probe("RUNNING 6.1.0-pve\nGARBAGE\n\nKERNEL \n")
+    assert facts["running"] == "6.1.0-pve"
+    assert facts["kernels"] == []
+
+
+def test_resolve_next_boot_pin_wins():
+    facts = parse_kernel_probe(
+        "RUNNING 7.0.12-1-pve\nGRUBDEFAULT 0\nSAVEDENTRY \n"
+        "PIN 6.17.13-13-pve\nKERNEL 6.17.13-13-pve\nKERNEL 7.0.12-1-pve\n"
+    )
+    assert resolve_next_boot_kernel(facts) == "6.17.13-13-pve"
+
+
+def test_resolve_next_boot_saved_entry():
+    facts = parse_kernel_probe(_PROBE_PINNED_SAVED)
+    assert resolve_next_boot_kernel(facts) == "6.17.13-3-pve"
+
+
+def test_resolve_next_boot_newest_when_unpinned():
+    facts = parse_kernel_probe(
+        "RUNNING 6.17.13-3-pve\nGRUBDEFAULT 0\nSAVEDENTRY \nPIN \n"
+        "KERNEL 6.17.13-3-pve\nKERNEL 6.17.13-13-pve\n"
+    )
+    assert resolve_next_boot_kernel(facts) == "6.17.13-13-pve"
+
+
+def test_resolve_next_boot_saved_but_no_version_falls_through():
+    facts = parse_kernel_probe(
+        "RUNNING 6.17.13-3-pve\nGRUBDEFAULT saved\nSAVEDENTRY gnulinux-junk\n"
+        "PIN \nKERNEL 6.17.13-3-pve\nKERNEL 6.17.13-13-pve\n"
+    )
+    assert resolve_next_boot_kernel(facts) == "6.17.13-13-pve"
+
+
+def test_resolve_next_boot_no_kernels():
+    assert resolve_next_boot_kernel(parse_kernel_probe("RUNNING 6.1.0-pve\n")) == ""
+
+
+@pytest.mark.asyncio
+async def test_node_reboot_required_false_when_pinned_to_running():
+    conn = _make_conn(stdout=_PROBE_PINNED_SAVED)
+    with patch("app.ssh_client.asyncssh.connect", new=AsyncMock(return_value=conn)):
+        assert await node_reboot_required(HOST, CREDS_EMPTY) is False
+
+
+@pytest.mark.asyncio
+async def test_node_reboot_required_true_when_newer_boots():
+    stdout = (
+        "RUNNING 6.17.13-3-pve\nGRUBDEFAULT 0\nSAVEDENTRY \nPIN \n"
+        "KERNEL 6.17.13-3-pve\nKERNEL 6.17.13-13-pve\n"
+    )
+    conn = _make_conn(stdout=stdout)
+    with patch("app.ssh_client.asyncssh.connect", new=AsyncMock(return_value=conn)):
+        assert await node_reboot_required(HOST, CREDS_EMPTY) is True
+
+
+@pytest.mark.asyncio
+async def test_node_reboot_required_raises_without_running_kernel():
+    conn = _make_conn(stdout="GRUBDEFAULT 0\n")
+    with patch("app.ssh_client.asyncssh.connect", new=AsyncMock(return_value=conn)):
+        with pytest.raises(RuntimeError):
+            await node_reboot_required(HOST, CREDS_EMPTY)

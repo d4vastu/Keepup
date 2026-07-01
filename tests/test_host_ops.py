@@ -194,15 +194,61 @@ async def test_reboot_typed_node_refuses_self():
 
 
 @pytest.mark.asyncio
-async def test_reboot_required_typed_node_uses_api():
+async def test_reboot_required_typed_node_uses_ssh_next_boot():
+    """A node's reboot check is authoritative over SSH (next-boot vs running)."""
+    from app.host_ops import reboot_required_typed
+
+    host = {"slug": "pve", "name": "pve", "host": "1.2.3.4",
+            "proxmox_node": "pve", "proxmox_vmid": None}
+    with patch(
+        "app.host_ops._node_ssh_context",
+        return_value=({"host": "1.2.3.4", "user": "root"}, {"key_path": "/k"}),
+    ), patch(
+        "app.host_ops.node_reboot_required", new=AsyncMock(return_value=True)
+    ) as ssh_check:
+        assert await reboot_required_typed(host, {}) is True
+    ssh_check.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_reboot_required_typed_node_falls_back_to_api_on_ssh_error():
+    """If the SSH probe fails, fall back to the coarse API heuristic."""
+    from app.host_ops import reboot_required_typed
+
+    host = {"slug": "pve", "name": "pve", "host": "1.2.3.4",
+            "proxmox_node": "pve", "proxmox_vmid": None}
+    client = MagicMock()
+    client.get_node_reboot_required = AsyncMock(return_value=True)
+
+    with patch(
+        "app.host_ops._node_ssh_context",
+        return_value=({"host": "1.2.3.4", "user": "root"}, {"key_path": "/k"}),
+    ), patch(
+        "app.host_ops.node_reboot_required",
+        new=AsyncMock(side_effect=OSError("connection refused")),
+    ), patch(
+        "app.host_ops.build_proxmox_client", new=AsyncMock(return_value=client)
+    ):
+        assert await reboot_required_typed(host, {}) is True
+    client.get_node_reboot_required.assert_awaited_once_with("pve")
+
+
+@pytest.mark.asyncio
+async def test_reboot_required_typed_node_no_host_uses_api():
+    """A node with no resolvable SSH address uses the API heuristic directly."""
     from app.host_ops import reboot_required_typed
 
     host = {"slug": "pve", "proxmox_node": "pve", "proxmox_vmid": None}
     client = MagicMock()
-    client.get_node_reboot_required = AsyncMock(return_value=True)
+    client.get_node_reboot_required = AsyncMock(return_value=False)
 
-    with patch("app.host_ops.build_proxmox_client", new=AsyncMock(return_value=client)):
-        assert await reboot_required_typed(host, {}) is True
+    with patch(
+        "app.host_ops._node_ssh_context",
+        return_value=({"host": "", "user": "root"}, {}),
+    ), patch(
+        "app.host_ops.build_proxmox_client", new=AsyncMock(return_value=client)
+    ):
+        assert await reboot_required_typed(host, {}) is False
     client.get_node_reboot_required.assert_awaited_once_with("pve")
 
 

@@ -27,7 +27,12 @@ from .config_manager import get_proxmox_config
 from .credentials import get_integration_credentials, resolve_key_path
 from .proxmox_client import client_from_config
 from .self_identity import is_self_on_proxmox_node
-from .ssh_client import check_host_updates, reboot_host, run_host_update_buffered
+from .ssh_client import (
+    check_host_updates,
+    node_reboot_required,
+    reboot_host,
+    run_host_update_buffered,
+)
 
 log = logging.getLogger(__name__)
 
@@ -70,6 +75,30 @@ def _lxc_ssh_context(host: dict) -> tuple[str, dict]:
     return ssh_host, ssh_creds
 
 
+def _node_ssh_context(host: dict) -> tuple[dict, dict]:
+    """Resolve ``(host_entry, ssh_creds)`` for SSHing to a Proxmox node itself.
+
+    Unlike :func:`_lxc_ssh_context` (which reaches the node that *runs* an LXC
+    via the integration URL), a node's own reboot check must target that node's
+    own address. Credentials come from the stored Proxmox integration creds.
+    """
+    px_creds = get_integration_credentials("proxmox")
+    host_entry = {
+        "name": host.get("name", host.get("host", "")),
+        "host": host.get("host", ""),
+        "user": px_creds.get("ssh_user", "root"),
+        "port": px_creds.get("ssh_port", 22),
+    }
+    ssh_creds = {
+        "user": host_entry["user"],
+        "ssh_password": px_creds.get("ssh_password", ""),
+    }
+    ssh_key = px_creds.get("ssh_key", "")
+    if ssh_key:
+        ssh_creds["key_path"] = resolve_key_path(ssh_key)
+    return host_entry, ssh_creds
+
+
 async def run_os_update(host: dict, creds: dict) -> list[str]:
     """Run the OS upgrade for ``host`` using the right mechanism for its kind."""
     if classify_host(host) == "lxc":
@@ -85,6 +114,20 @@ async def reboot_required_typed(host: dict, creds: dict) -> bool:
     """Return whether ``host`` needs a reboot, queried the right way per kind."""
     kind = classify_host(host)
     if kind == "node":
+        # Authoritative: SSH to the node and compare the next-boot kernel to the
+        # running one. Fall back to the coarse API heuristic only if that fails
+        # (e.g. SSH unavailable), so a pinned/rolled-back kernel no longer shows
+        # a phantom "reboot required".
+        host_entry, ssh_creds = _node_ssh_context(host)
+        if host_entry["host"]:
+            try:
+                return await node_reboot_required(host_entry, ssh_creds)
+            except Exception as exc:
+                log.warning(
+                    "Node reboot SSH check failed for %s (%s); "
+                    "falling back to API heuristic",
+                    host.get("proxmox_node"), exc,
+                )
         client = await build_proxmox_client()
         return await client.get_node_reboot_required(host["proxmox_node"])
     if kind == "lxc":

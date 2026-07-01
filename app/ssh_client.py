@@ -255,6 +255,131 @@ async def check_host_updates(
     }
 
 
+# ---------------------------------------------------------------------------
+# Proxmox node reboot detection (kernel next-boot vs. running)
+# ---------------------------------------------------------------------------
+
+# A Proxmox node needs a reboot only when the kernel the bootloader will select
+# on the NEXT boot is newer than the kernel currently running. Merely having a
+# newer kernel installed is not enough: an operator can pin or roll back to an
+# older kernel (via proxmox-boot-tool or a GRUB saved default), in which case a
+# reboot changes nothing. The Proxmox HTTP API exposes neither the next-boot
+# kernel nor pin state, so we gather the raw facts over SSH and decide in Python
+# (which keeps the decision logic unit-testable). See node_reboot_required.
+_NODE_KERNEL_PROBE = (
+    'echo "RUNNING $(uname -r)"; '
+    "echo \"GRUBDEFAULT $(sed -n 's/^[[:space:]]*GRUB_DEFAULT=//p' "
+    "/etc/default/grub 2>/dev/null | head -1 | tr -d '\\\"')\"; "
+    # grubenv is a plain text file — read it directly rather than via
+    # grub-editenv so we don't depend on that binary.
+    "echo \"SAVEDENTRY $(sed -n 's/^saved_entry=//p' "
+    "/boot/grub/grubenv 2>/dev/null)\"; "
+    # proxmox-boot-tool re-execs into a private mount namespace and can hang in
+    # a non-interactive session; cap it hard so the probe can never block.
+    'echo "PIN $(timeout -k 2 10 proxmox-boot-tool kernel list 2>/dev/null | '
+    "awk '/Manually selected kernels:/{m=1;next} "
+    '/Automatically selected/{m=0} '
+    "m && $1 && $1!=\\\"None.\\\"{print $1; exit}')\"; "
+    'for k in /boot/vmlinuz-*; do [ -e "$k" ] && '
+    'echo "KERNEL ${k#/boot/vmlinuz-}"; done'
+)
+
+
+def parse_kernel_probe(stdout: str) -> dict:
+    """Turn `_NODE_KERNEL_PROBE` output into a facts dict.
+
+    Keys: ``running`` (str), ``grub_default`` (str), ``saved_entry`` (str),
+    ``pin`` (str), ``kernels`` (list[str] of installed kernel releases).
+    """
+    facts: dict = {
+        "running": "",
+        "grub_default": "",
+        "saved_entry": "",
+        "pin": "",
+        "kernels": [],
+    }
+    for line in stdout.splitlines():
+        parts = line.split(None, 1)
+        if len(parts) != 2:
+            continue
+        key, value = parts[0], parts[1].strip()
+        if key == "RUNNING":
+            facts["running"] = value
+        elif key == "GRUBDEFAULT":
+            facts["grub_default"] = value
+        elif key == "SAVEDENTRY":
+            facts["saved_entry"] = value
+        elif key == "PIN":
+            facts["pin"] = value
+        elif key == "KERNEL" and value:
+            facts["kernels"].append(value)
+    return facts
+
+
+def resolve_next_boot_kernel(facts: dict) -> str:
+    """Return the kernel release the bootloader will select on next boot.
+
+    Precedence mirrors how Proxmox actually boots:
+      1. an explicit ``proxmox-boot-tool`` manual pin, else
+      2. a GRUB saved default entry (``GRUB_DEFAULT=saved``), else
+      3. the newest installed kernel (the default on unpinned systems).
+    """
+    import re
+
+    from .proxmox_client import kernel_version_tuple
+
+    if facts.get("pin"):
+        return facts["pin"]
+
+    if facts.get("grub_default") == "saved" and facts.get("saved_entry"):
+        # saved_entry looks like
+        # 'gnulinux-advanced-UUID>gnulinux-6.17.13-3-pve-advanced-UUID';
+        # the trailing match is the actual kernel release.
+        matches = re.findall(r"\d+\.\d+\.\d+-\d+-pve", facts["saved_entry"])
+        if matches:
+            return matches[-1]
+
+    kernels = facts.get("kernels") or []
+    if kernels:
+        return max(kernels, key=kernel_version_tuple)
+    return ""
+
+
+async def node_reboot_required(
+    host: dict, creds: dict | None = None
+) -> bool:
+    """Return whether a Proxmox node needs a reboot to run a newer kernel.
+
+    Authoritative check: SSH to the node, resolve the kernel that will boot next,
+    and compare it to the running kernel. Raises on connection/probe failure so
+    the caller can fall back to the coarser API heuristic.
+    """
+    from .proxmox_client import kernel_version_tuple
+
+    creds = creds or {}
+    use_sudo = _needs_sudo(host)
+    sudo_password = creds.get("sudo_password")
+
+    async with await _connect(host, creds) as conn:
+        result = await _run(
+            conn,
+            _NODE_KERNEL_PROBE,
+            sudo_password=sudo_password,
+            needs_sudo=use_sudo,
+            timeout=_CHECK_TIMEOUT,
+        )
+
+    facts = parse_kernel_probe(result.stdout)
+    running = facts["running"]
+    if not running:
+        raise RuntimeError("Node kernel probe returned no running kernel")
+
+    next_boot = resolve_next_boot_kernel(facts)
+    if not next_boot:
+        return False
+    return kernel_version_tuple(next_boot) > kernel_version_tuple(running)
+
+
 async def reboot_host(
     host: dict, creds: dict | None = None
 ) -> list[str]:
