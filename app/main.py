@@ -792,10 +792,12 @@ async def host_check(request: Request, slug: str) -> HTMLResponse:
                 host_name, slug, proxmox_node,
             )
             import asyncio as _asyncio
+
+            from .host_ops import reboot_required_typed
             client = await _proxmox_client_from_config()
             packages, reboot_required = await _asyncio.gather(
                 client.get_node_updates(proxmox_node),
-                client.get_node_reboot_required(proxmox_node),
+                reboot_required_typed(host, {}),
             )
             proxmox_url = get_proxmox_config().get("url", "")
             log.info(

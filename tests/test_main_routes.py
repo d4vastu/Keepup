@@ -99,10 +99,10 @@ def test_proxmox_node_check_shows_reboot_button_when_required(client):
     }
     mock_client = AsyncMock()
     mock_client.get_node_updates = AsyncMock(return_value=[])
-    mock_client.get_node_reboot_required = AsyncMock(return_value=True)
     with (
         patch("app.main._get_host", return_value=node_host),
         patch("app.main._proxmox_client_from_config", new=AsyncMock(return_value=mock_client)),
+        patch("app.host_ops.reboot_required_typed", new=AsyncMock(return_value=True)),
         patch("app.main.get_proxmox_config", return_value={"url": ""}),
     ):
         response = client.get("/api/host/pve-node/check")
@@ -118,10 +118,10 @@ def test_proxmox_node_check_hides_reboot_button_when_not_required(client):
     }
     mock_client = AsyncMock()
     mock_client.get_node_updates = AsyncMock(return_value=[])
-    mock_client.get_node_reboot_required = AsyncMock(return_value=False)
     with (
         patch("app.main._get_host", return_value=node_host),
         patch("app.main._proxmox_client_from_config", new=AsyncMock(return_value=mock_client)),
+        patch("app.host_ops.reboot_required_typed", new=AsyncMock(return_value=False)),
         patch("app.main.get_proxmox_config", return_value={"url": ""}),
     ):
         response = client.get("/api/host/pve-node/check")

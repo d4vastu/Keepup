@@ -14,6 +14,32 @@ from .httpx_client import make_breaker_client
 log = logging.getLogger(__name__)
 
 
+def parse_kversion(kversion: str) -> str:
+    """Extract the kernel release from a node/status ``kversion`` string.
+
+    ``'Linux 6.17.13-3-pve #1 SMP ...'`` → ``'6.17.13-3-pve'``.
+    """
+    try:
+        return kversion.split()[1]
+    except IndexError:
+        return ""
+
+
+def kernel_version_tuple(release: str) -> tuple:
+    """Turn a Proxmox kernel release into a comparable tuple.
+
+    ``'6.17.13-3-pve'`` → ``(6, 17, 13, 3)``. Unparseable input sorts lowest.
+    """
+    try:
+        release = release.replace("-pve", "")
+        main, *rest = release.split("-", 1)
+        nums = tuple(int(x) for x in main.split("."))
+        build = (int(rest[0]),) if rest else (0,)
+        return nums + build
+    except (ValueError, AttributeError):
+        return (0,)
+
+
 class ProxmoxClient:
     def __init__(self, url: str, api_token: str, pinned_cert_pem: str = "", verify_ssl: bool = True):
         self.base = url.rstrip("/")
@@ -318,31 +344,17 @@ class ProxmoxClient:
             )
             r.raise_for_status()
 
-    @staticmethod
-    def _parse_kversion(kversion: str) -> str:
-        """Extract kernel release from kversion string.
-
-        kversion: 'Linux 6.17.13-3-pve #1 SMP ...' → '6.17.13-3-pve'
-        """
-        try:
-            return kversion.split()[1]
-        except IndexError:
-            return ""
-
-    @staticmethod
-    def _kernel_ver_tuple(release: str) -> tuple:
-        """'6.17.13-3-pve' → (6, 17, 13, 3)"""
-        try:
-            release = release.replace("-pve", "")
-            main, *rest = release.split("-", 1)
-            nums = tuple(int(x) for x in main.split("."))
-            build = (int(rest[0]),) if rest else (0,)
-            return nums + build
-        except (ValueError, AttributeError):
-            return (0,)
+    _parse_kversion = staticmethod(parse_kversion)
+    _kernel_ver_tuple = staticmethod(kernel_version_tuple)
 
     async def get_node_reboot_required(self, node: str) -> bool:
-        """Return True if a newer Proxmox kernel is installed than what's running.
+        """Return True if a newer Proxmox kernel is *installed* than what's running.
+
+        This is a coarse heuristic — it cannot tell whether the newer kernel is
+        actually scheduled to boot (an operator may pin or roll back to an older
+        kernel, in which case a reboot changes nothing). It is only used as a
+        fallback when the authoritative SSH check
+        (:func:`app.ssh_client.node_reboot_required`) is unavailable.
 
         Uses kversion from node/status and proxmox-kernel-*-pve-signed packages
         from apt/versions (PVE 9+ naming).
