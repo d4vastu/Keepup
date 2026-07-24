@@ -5,6 +5,16 @@ on:
     branches: [main]
     tags: ["v*"]
 
+# Serialize builds that share a mutable tag so the newest commit wins.
+# Without this, two near-simultaneous main pushes (e.g. a merge immediately
+# followed by a version-bump commit) both push :latest, and whichever build
+# finishes last wins the race — which can leave :latest pointing at the older
+# image. Grouping by ref means the two main pushes serialize (newer cancels the
+# still-running older one), while tag pushes stay in their own groups.
+concurrency:
+  group: publish-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build-and-push:
     name: Build & push to ghcr.io
