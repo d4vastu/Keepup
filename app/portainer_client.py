@@ -13,7 +13,11 @@ import logging
 
 
 from .httpx_client import make_breaker_client
-from .registry_client import extract_local_digest, check_image_update
+from .registry_client import (
+    check_image_update,
+    extract_local_digest,
+    resolve_image_ref,
+)
 from .self_identity import get_self_container_id, get_self_container_name
 
 log = logging.getLogger(__name__)
@@ -219,9 +223,11 @@ class PortainerClient:
                 try:
                     img_info = await self._get_image_info(endpoint_id, img_id)
                     repo_digests = img_info.get("RepoDigests", [])
+                    repo_tags = img_info.get("RepoTags", [])
                     local_digest = extract_local_digest(repo_digests, img_name)
+                    resolved = resolve_image_ref(img_name, repo_tags, repo_digests)
                     status = await check_image_update(
-                        img_name, local_digest, dockerhub_creds
+                        resolved, local_digest, dockerhub_creds
                     )
                 except Exception as exc:
                     log.warning(
