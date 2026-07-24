@@ -1068,6 +1068,10 @@ async def host_restart(
 # Routes — Docker stacks
 # ---------------------------------------------------------------------------
 
+# Human-friendly labels for container backends, used when surfacing a backend
+# whose update check failed (OP#216). Falls back to a title-cased key.
+_BACKEND_LABELS = {"portainer": "Portainer", "ssh": "SSH"}
+
 
 @app.get("/api/docker/check", response_class=HTMLResponse)
 @limiter.limit("60/minute")
@@ -1090,8 +1094,17 @@ async def docker_check(request: Request) -> HTMLResponse:
             return_exceptions=True,
         )
         stacks = []
-        for r in results:
-            if isinstance(r, list):
+        failed_backends = []
+        for backend, r in zip(active, results):
+            if isinstance(r, Exception):
+                log.warning(
+                    "Container backend '%s' failed during check: %r",
+                    backend.BACKEND_KEY, r,
+                )
+                failed_backends.append(_BACKEND_LABELS.get(
+                    backend.BACKEND_KEY, backend.BACKEND_KEY.title()
+                ))
+            elif isinstance(r, list):
                 stacks.extend(r)
         updates_available = sum(
             1 for s in stacks if s.get("update_status") in ("update_available", "mixed")
@@ -1109,7 +1122,7 @@ async def docker_check(request: Request) -> HTMLResponse:
             pass
         return templates.TemplateResponse(
             "partials/docker_status.html",
-            {"request": request, "stacks": stacks},
+            {"request": request, "stacks": stacks, "failed_backends": failed_backends},
         )
     except Exception as exc:
         return templates.TemplateResponse(

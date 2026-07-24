@@ -562,6 +562,43 @@ def test_docker_check_backend_error(client, monkeypatch):
     assert response.status_code == 200
 
 
+def test_docker_check_surfaces_failed_backend(client, monkeypatch, caplog):
+    """OP#216: a backend that raises must not silently vanish — the other
+    backend's stacks still render, a warning banner names the failed backend,
+    and the failure is logged."""
+    import logging
+
+    import app.backend_loader as bl
+
+    ok_stack = {
+        "id": "s/1",
+        "name": "nextcloud",
+        "endpoint_id": "1",
+        "endpoint_name": "primary",
+        "update_status": "up_to_date",
+        "images": [],
+        "update_path": "portainer/1:1",
+    }
+    failing = _make_mock_backend("portainer", error=Exception("ConnectTimeout"))
+    working = _make_mock_backend("portainer", stacks=[ok_stack])
+    monkeypatch.setattr(bl, "_backends", [failing, working])
+
+    with caplog.at_level(logging.WARNING):
+        response = client.get("/api/docker/check")
+
+    assert response.status_code == 200
+    # the working backend's containers still render
+    assert "nextcloud" in response.text
+    # the failed backend is surfaced, not silently dropped
+    assert "could not be checked" in response.text
+    assert "Portainer" in response.text
+    # and the failure is logged, no longer silent
+    assert any(
+        "portainer" in r.getMessage().lower() and "failed" in r.getMessage().lower()
+        for r in caplog.records
+    )
+
+
 # ---------------------------------------------------------------------------
 # POST /api/docker/stack/{backend}/{ref}/update
 # ---------------------------------------------------------------------------
