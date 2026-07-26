@@ -6,7 +6,9 @@ the image's RepoDigests field.
 
 import logging
 import re
+from typing import NamedTuple
 
+import httpx
 
 from .httpx_client import make_client
 
@@ -18,6 +20,47 @@ MANIFEST_ACCEPT = (
     "application/vnd.oci.image.index.v1+json,"
     "application/vnd.oci.image.manifest.v1+json"
 )
+
+# Coarse reasons a container's update status is "unknown" (OP#217). The label
+# map is the single source of display text — templates never branch on these.
+REASON_UNRESOLVABLE_IMAGE = "unresolvable_image"
+REASON_NO_LOCAL_DIGEST = "no_local_digest"
+REASON_RATE_LIMITED = "rate_limited"
+REASON_AUTH_FAILED = "auth_failed"
+REASON_NOT_FOUND = "not_found"
+REASON_UNSUPPORTED_REGISTRY = "unsupported_registry"
+REASON_REGISTRY_ERROR = "registry_error"
+REASON_UNREACHABLE = "unreachable"
+
+REASON_LABELS = {
+    REASON_UNRESOLVABLE_IMAGE: "Image not resolvable",
+    REASON_NO_LOCAL_DIGEST: "Nothing to compare",
+    REASON_RATE_LIMITED: "Rate limited",
+    REASON_AUTH_FAILED: "Auth failed",
+    REASON_NOT_FOUND: "Tag not found",
+    REASON_UNSUPPORTED_REGISTRY: "Unsupported registry",
+    REASON_REGISTRY_ERROR: "Registry error",
+    REASON_UNREACHABLE: "Registry unreachable",
+}
+
+
+def reason_label(reason: str | None) -> str:
+    """Display text for an unknown-status reason; "Unknown" when unrecognised."""
+    return REASON_LABELS.get(reason or "", "Unknown")
+
+
+class DigestResult(NamedTuple):
+    """Remote digest lookup outcome. ``reason`` is set only when digest is None."""
+
+    digest: str | None
+    reason: str | None = None
+
+
+class ImageCheck(NamedTuple):
+    """Update check outcome. ``reason`` is set only when status is "unknown"."""
+
+    status: str
+    reason: str | None = None
 
 
 def parse_image_ref(image: str) -> tuple[str, str, str]:
@@ -130,26 +173,45 @@ async def _get_bearer_token_from_challenge(www_authenticate: str) -> str | None:
     return None
 
 
+def _reason_for_status(status: int) -> str:
+    """Map an HTTP status from a registry to a coarse unknown-status reason."""
+    if status == 429:
+        return REASON_RATE_LIMITED
+    if status in (401, 403):
+        return REASON_AUTH_FAILED
+    if status == 404:
+        return REASON_NOT_FOUND
+    return REASON_REGISTRY_ERROR
+
+
 async def get_remote_digest(
     image: str, dockerhub_creds: dict | None = None
-) -> str | None:
+) -> DigestResult:
     """
-    Returns the current remote manifest digest for an image tag, or None on failure.
-    Handles DockerHub, ghcr.io, lscr.io, and any registry that uses Bearer auth challenges.
+    Returns the current remote manifest digest for an image tag, plus the reason
+    when the lookup failed. Handles DockerHub, ghcr.io, lscr.io, and any
+    registry that uses Bearer auth challenges.
     """
     try:
         registry, repo, tag = parse_image_ref(image)
         headers = {"Accept": MANIFEST_ACCEPT}
 
         if registry == "registry-1.docker.io":
-            token = await _get_dockerhub_token(repo, dockerhub_creds)
+            try:
+                token = await _get_dockerhub_token(repo, dockerhub_creds)
+            except httpx.HTTPStatusError as exc:
+                status = exc.response.status_code
+                log.warning(
+                    "Docker Hub token fetch for %s returned HTTP %s", image, status
+                )
+                return DigestResult(None, _reason_for_status(status))
             headers["Authorization"] = f"Bearer {token}"
             url = f"https://registry-1.docker.io/v2/{repo}/manifests/{tag}"
         elif "." in registry:
             # Any other registry (ghcr.io, lscr.io, quay.io, cr.hotio.dev, etc.)
             url = f"https://{registry}/v2/{repo}/manifests/{tag}"
         else:
-            return None
+            return DigestResult(None, REASON_UNSUPPORTED_REGISTRY)
 
         async with make_client(follow_redirects=True) as client:
             resp = await client.head(url, headers=headers)
@@ -167,37 +229,42 @@ async def get_remote_digest(
                         image,
                         www_auth,
                     )
-                    return None
+                    return DigestResult(None, REASON_AUTH_FAILED)
 
             if resp.status_code == 200:
-                return resp.headers.get("Docker-Content-Digest")
+                digest = resp.headers.get("Docker-Content-Digest")
+                if digest:
+                    return DigestResult(digest, None)
+                return DigestResult(None, REASON_REGISTRY_ERROR)
 
             log.debug("Registry check for %s returned HTTP %s", image, resp.status_code)
+            return DigestResult(None, _reason_for_status(resp.status_code))
 
     except Exception as e:
         log.debug("Registry check failed for %s: %s", image, e)
-
-    return None
+        return DigestResult(None, REASON_UNREACHABLE)
 
 
 async def check_image_update(
     image: str,
     local_digest: str | None,
     dockerhub_creds: dict | None = None,
-) -> str:
+) -> ImageCheck:
     """
-    Returns one of: "update_available", "up_to_date", "unknown"
+    Returns an ImageCheck whose status is one of "update_available",
+    "up_to_date", "unknown"; reason is set only for "unknown".
     """
     if not image:
         log.debug("No resolvable image reference — skipping registry check")
-        return "unknown"
+        return ImageCheck("unknown", REASON_UNRESOLVABLE_IMAGE)
 
     if not local_digest:
         log.debug("No local digest for %s — skipping registry check", image)
-        return "unknown"
+        return ImageCheck("unknown", REASON_NO_LOCAL_DIGEST)
 
-    remote_digest = await get_remote_digest(image, dockerhub_creds)
-    if remote_digest is None:
-        return "unknown"
+    remote = await get_remote_digest(image, dockerhub_creds)
+    if remote.digest is None:
+        return ImageCheck("unknown", remote.reason or REASON_REGISTRY_ERROR)
 
-    return "update_available" if remote_digest != local_digest else "up_to_date"
+    status = "update_available" if remote.digest != local_digest else "up_to_date"
+    return ImageCheck(status, None)
