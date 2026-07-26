@@ -182,6 +182,43 @@ async def test_stacks_with_update_status_update_available(client):
 
 
 @pytest.mark.asyncio
+async def test_stacks_resolves_bare_sha256_image_via_repo_tags(client):
+    """OP#215: a container whose Image is a bare sha256 is resolved to its real
+    repo:tag (from RepoTags) before the registry check."""
+    bare_container = {
+        "Id": "c9",
+        "Image": "sha256:a4cf2c928f",
+        "ImageID": "sha256:a4cf2c928f",
+        "Labels": {"com.docker.compose.project": "sonarr"},
+    }
+    image_info = {
+        "RepoDigests": ["linuxserver/sonarr@sha256:currentdigest"],
+        "RepoTags": ["linuxserver/sonarr:latest"],
+    }
+    captured = {}
+
+    async def fake_check(image, local_digest, creds=None):
+        captured["image"] = image
+        return "update_available"
+
+    with (
+        patch.object(
+            client, "get_endpoints", new=AsyncMock(return_value=ENDPOINTS[:1])
+        ),
+        patch.object(client, "get_stacks", new=AsyncMock(return_value=[STACKS[0]])),
+        patch.object(
+            client, "_get_containers", new=AsyncMock(return_value=[bare_container])
+        ),
+        patch.object(client, "_get_image_info", new=AsyncMock(return_value=image_info)),
+        patch("app.portainer_client.check_image_update", new=fake_check),
+    ):
+        results = await client.get_stacks_with_update_status()
+
+    assert captured["image"] == "linuxserver/sonarr:latest"
+    assert results[0]["update_status"] == "update_available"
+
+
+@pytest.mark.asyncio
 async def test_stacks_with_mixed_status(client):
     containers = [
         {**CONTAINERS[0], "Id": "c1"},

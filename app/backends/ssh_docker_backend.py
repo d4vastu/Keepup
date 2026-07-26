@@ -18,7 +18,11 @@ from typing import Callable
 from urllib.parse import quote, unquote, urlparse
 
 from ..ssh_client import _connect
-from ..registry_client import check_image_update, extract_local_digest
+from ..registry_client import (
+    check_image_update,
+    extract_local_digest,
+    resolve_image_ref,
+)
 from ..credentials import get_credentials, get_integration_credentials, resolve_key_path
 from ..config_manager import get_hosts, get_proxmox_config, get_portainer_config, set_docker_monitoring
 from ..self_identity import get_self_container_id
@@ -366,15 +370,20 @@ class SSHDockerBackend:
         try:
             inspect = await conn.run(
                 wrap(
-                    f"docker image inspect {shlex.quote(image_name)} --format '{{{{json .RepoDigests}}}}'"
+                    f"docker image inspect {shlex.quote(image_name)} "
+                    f"--format '{{{{json .RepoDigests}}}}\t{{{{json .RepoTags}}}}'"
                 ),
                 check=False,
             )
             repo_digests: list[str] = []
+            repo_tags: list[str] = []
             if inspect.returncode == 0:
-                repo_digests = json.loads(inspect.stdout.strip())
+                digest_part, _, tag_part = inspect.stdout.strip().partition("\t")
+                repo_digests = json.loads(digest_part) if digest_part else []
+                repo_tags = json.loads(tag_part) if tag_part else []
             local_digest = extract_local_digest(repo_digests, image_name)
-            return await check_image_update(image_name, local_digest, dockerhub_creds)
+            resolved = resolve_image_ref(image_name, repo_tags, repo_digests)
+            return await check_image_update(resolved, local_digest, dockerhub_creds)
         except Exception as exc:
             log.warning("Docker SSH: image check failed for %s — %s", image_name, exc)
             return "unknown"

@@ -1079,6 +1079,51 @@ async def test_get_stacks_with_update_status_all_mode(config_file, data_dir):
 
 
 @pytest.mark.asyncio
+async def test_get_stacks_resolves_bare_sha256_image(config_file, data_dir):
+    """OP#215: a container whose Image is a bare sha256 is resolved to its real
+    repo:tag via the RepoTags now emitted by image inspect."""
+    import yaml
+
+    raw = yaml.safe_load(config_file.read_text())
+    raw["hosts"][0]["docker_mode"] = "all"
+    config_file.write_text(yaml.dump(raw))
+
+    docker_ps_output = json.dumps(
+        {"Names": "/calibre", "Image": "sha256:a4cf2c928f",
+         "Labels": "com.docker.compose.project=calibre"}
+    )
+    # New inspect format: RepoDigests<TAB>RepoTags
+    inspect_output = '[]\t["linuxserver/calibre:latest"]'
+
+    conn = _make_multi_conn(
+        [
+            MagicMock(stdout=docker_ps_output, returncode=0),  # docker ps -a
+            MagicMock(stdout=inspect_output, returncode=0),    # image inspect
+        ]
+    )
+
+    captured = {}
+
+    async def fake_check(image, local_digest, creds=None):
+        captured["image"] = image
+        return "update_available"
+
+    with (
+        patch(
+            "app.backends.ssh_docker_backend._connect", new=AsyncMock(return_value=conn)
+        ),
+        patch(
+            "app.backends.ssh_docker_backend.check_image_update", new=fake_check
+        ),
+    ):
+        backend = SSHDockerBackend()
+        stacks = await backend.get_stacks_with_update_status()
+
+    assert captured["image"] == "linuxserver/calibre:latest"
+    assert stacks[0]["update_status"] == "update_available"
+
+
+@pytest.mark.asyncio
 async def test_get_stacks_filters_by_selected_mode(config_file, data_dir):
     import yaml
 

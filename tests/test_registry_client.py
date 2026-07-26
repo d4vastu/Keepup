@@ -10,6 +10,7 @@ from app.registry_client import (
     extract_local_digest,
     get_remote_digest,
     parse_image_ref,
+    resolve_image_ref,
 )
 
 
@@ -91,6 +92,52 @@ def test_extract_local_digest_empty_list():
 
 def test_extract_local_digest_no_sha():
     assert extract_local_digest(["nginx:latest"], "nginx") is None
+
+
+# ---------------------------------------------------------------------------
+# resolve_image_ref
+# ---------------------------------------------------------------------------
+
+
+def test_resolve_normal_ref_returned_unchanged():
+    assert resolve_image_ref("linuxserver/calibre:latest", [], []) == (
+        "linuxserver/calibre:latest"
+    )
+
+
+def test_resolve_bare_sha256_uses_first_repo_tag():
+    resolved = resolve_image_ref(
+        "sha256:a4cf2c928f",
+        ["linuxserver/calibre:7.16", "linuxserver/calibre:latest"],
+        [],
+    )
+    assert resolved == "linuxserver/calibre:7.16"
+
+
+def test_resolve_bare_sha256_skips_none_repo_tag():
+    resolved = resolve_image_ref(
+        "sha256:a4cf2c928f",
+        ["<none>:<none>", "linuxserver/calibre:latest"],
+        [],
+    )
+    assert resolved == "linuxserver/calibre:latest"
+
+
+def test_resolve_bare_sha256_falls_back_to_repo_digest_as_latest():
+    resolved = resolve_image_ref(
+        "sha256:a4cf2c928f",
+        ["<none>:<none>"],
+        ["linuxserver/calibre@sha256:deadbeef"],
+    )
+    assert resolved == "linuxserver/calibre:latest"
+
+
+def test_resolve_bare_sha256_dangling_returns_none():
+    assert resolve_image_ref("sha256:a4cf2c928f", [], []) is None
+
+
+def test_resolve_bare_sha256_none_metadata_returns_none():
+    assert resolve_image_ref("sha256:a4cf2c928f", None, None) is None
 
 
 # ---------------------------------------------------------------------------
@@ -328,3 +375,9 @@ async def test_check_image_update_available():
     ):
         result = await check_image_update("nginx:latest", local_digest="sha256:old")
     assert result == "update_available"
+
+
+@pytest.mark.asyncio
+async def test_check_image_update_none_image_is_unknown():
+    result = await check_image_update(None, local_digest="sha256:abc")
+    assert result == "unknown"

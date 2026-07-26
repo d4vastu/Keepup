@@ -60,6 +60,42 @@ def extract_local_digest(repo_digests: list[str], image_name: str) -> str | None
     return None
 
 
+def resolve_image_ref(
+    image: str,
+    repo_tags: list[str] | None = None,
+    repo_digests: list[str] | None = None,
+) -> str | None:
+    """
+    Resolves a container's Image value to a real repo:tag suitable for a
+    registry lookup, using image-inspect metadata.
+
+    Docker / Portainer report a container's Image as a bare "sha256:<id>" once
+    the tag it was started from is reassigned to a newer pull. Handing that bare
+    digest to parse_image_ref yields a bogus registry-1.docker.io/library/sha256
+    lookup that 401s, so the update is never surfaced (OP#215).
+
+    A normal reference is returned unchanged. For a bare digest we recover the
+    reference from, in order:
+      1. the first real RepoTags entry (skipping "<none>:<none>"), else
+      2. the repository from RepoDigests ("repo@sha256:..." -> "repo:latest").
+    Returns None when nothing usable is available (a truly dangling image).
+    """
+    if not image.startswith("sha256:"):
+        return image
+
+    for entry in repo_tags or []:
+        if entry and "<none>" not in entry:
+            return entry
+
+    for entry in repo_digests or []:
+        if "@sha256:" in entry:
+            repo = entry.split("@sha256:")[0]
+            if repo and "<none>" not in repo:
+                return f"{repo}:latest"
+
+    return None
+
+
 async def _get_dockerhub_token(repo: str, creds: dict | None) -> str:
     params = {"service": "registry.docker.io", "scope": f"repository:{repo}:pull"}
     auth = (creds["username"], creds["token"]) if creds else None
@@ -152,6 +188,10 @@ async def check_image_update(
     """
     Returns one of: "update_available", "up_to_date", "unknown"
     """
+    if not image:
+        log.debug("No resolvable image reference — skipping registry check")
+        return "unknown"
+
     if not local_digest:
         log.debug("No local digest for %s — skipping registry check", image)
         return "unknown"
