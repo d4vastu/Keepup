@@ -1097,7 +1097,6 @@ def _one_container_conn():
 async def test_ssh_backend_carries_unknown_reason(config_file, data_dir):
     """An unknown image check surfaces its reason on the stack dict (OP#217)."""
     import yaml
-    from app.registry_client import ImageCheck
 
     raw = yaml.safe_load(config_file.read_text())
     raw["hosts"][0]["docker_mode"] = "all"
@@ -1123,7 +1122,6 @@ async def test_ssh_backend_carries_unknown_reason(config_file, data_dir):
 @pytest.mark.asyncio
 async def test_ssh_backend_clears_reason_when_known(config_file, data_dir):
     import yaml
-    from app.registry_client import ImageCheck
 
     raw = yaml.safe_load(config_file.read_text())
     raw["hosts"][0]["docker_mode"] = "all"
@@ -1143,6 +1141,7 @@ async def test_ssh_backend_clears_reason_when_known(config_file, data_dir):
 
     assert stacks[0]["update_status"] == "up_to_date"
     assert stacks[0]["unknown_reason"] is None
+    assert stacks[0]["images"][0]["reason"] is None
 
 
 @pytest.mark.asyncio

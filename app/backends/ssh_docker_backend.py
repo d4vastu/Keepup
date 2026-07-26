@@ -341,7 +341,7 @@ class SSHDockerBackend:
                     image, ImageCheck("unknown", REASON_REGISTRY_ERROR)
                 )
                 status = check.status
-                reason = check.reason if status == "unknown" else None
+                reason = check.reason
                 if project:
                     ref = self._make_compose_ref(slug, project, container_name)
                 else:
@@ -400,27 +400,6 @@ class SSHDockerBackend:
         except Exception as exc:
             log.warning("Docker SSH: image check failed for %s — %s", image_name, exc)
             return ImageCheck("unknown", REASON_REGISTRY_ERROR)
-
-    # Kept for backward compatibility (used by discover_stacks path)
-    async def _check_images(
-        self,
-        conn,
-        project_name: str,
-        dockerhub_creds: dict | None,
-    ) -> list[dict]:
-        ps_result = await conn.run(
-            f"docker compose -p {shlex.quote(project_name)} ps --format json", check=False
-        )
-        containers = _parse_json_output(ps_result.stdout)
-        seen: set[str] = set()
-        tasks = []
-        for c in containers:
-            img = c.get("Image", "")
-            if img and img not in seen:
-                seen.add(img)
-                tasks.append(self._check_image_status(conn, img, dockerhub_creds))
-        checked = await asyncio.gather(*tasks, return_exceptions=True)
-        return [{"name": img, "status": r} for img, r in zip(seen, checked) if isinstance(r, str)]
 
     async def _get_config_file(
         self,
