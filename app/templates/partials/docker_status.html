@@ -11,6 +11,19 @@
 <span id="docker-meta" hx-swap-oob="true"></span>
 {% endif %}
 
+{# A backend whose update check raised is surfaced here rather than silently
+   dropped, so its containers aren't mistaken for "no updates" (OP#216). #}
+{% if failed_backends %}
+<div class="mb-3 flex items-start gap-2 px-4 py-3 rounded-lg bg-amber-900/40 border border-amber-800/50 text-amber-400 text-[12px]">
+  <span class="w-1.5 h-1.5 rounded-full bg-current flex-shrink-0 mt-1.5"></span>
+  <span>
+    {{ failed_backends | join(", ") }} backend{{ 's' if failed_backends | length != 1 }}
+    could not be checked — {{ 'their' if failed_backends | length != 1 else 'its' }}
+    containers are not shown.
+  </span>
+</div>
+{% endif %}
+
 {% if needs_update %}
 <div class="bg-[#161b22] border border-[#21262d] rounded-lg overflow-hidden">
   <div class="hidden sm:grid sm:grid-cols-[1fr_160px_120px] gap-3 px-4 py-2 bg-[#0d1117] border-b border-[#21262d]">
