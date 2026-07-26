@@ -22,6 +22,8 @@ from ..registry_client import (
     check_image_update,
     extract_local_digest,
     resolve_image_ref,
+    ImageCheck,
+    REASON_REGISTRY_ERROR,
 )
 from ..credentials import get_credentials, get_integration_credentials, resolve_key_path
 from ..config_manager import get_hosts, get_proxmox_config, get_portainer_config, set_docker_monitoring
@@ -325,13 +327,21 @@ class SSHDockerBackend:
                 *[self._check_image_status(conn, img, dockerhub_creds, wrap) for img in unique_images],
                 return_exceptions=True,
             )
-            image_status: dict[str, str] = {
-                img: (s if isinstance(s, str) else "unknown")
+            image_status: dict[str, ImageCheck] = {
+                img: (
+                    s
+                    if isinstance(s, ImageCheck)
+                    else ImageCheck("unknown", REASON_REGISTRY_ERROR)
+                )
                 for img, s in zip(unique_images, statuses)
             }
 
             for container_name, image, project in raw:
-                status = image_status.get(image, "unknown")
+                check = image_status.get(
+                    image, ImageCheck("unknown", REASON_REGISTRY_ERROR)
+                )
+                status = check.status
+                reason = check.reason if status == "unknown" else None
                 if project:
                     ref = self._make_compose_ref(slug, project, container_name)
                 else:
@@ -345,7 +355,10 @@ class SSHDockerBackend:
                         "endpoint_name": host["name"],
                         "connection_badge": self._connection_badge(host),
                         "update_status": status,
-                        "images": [{"name": image, "status": status}],
+                        "unknown_reason": reason,
+                        "images": [
+                            {"name": image, "status": status, "reason": reason}
+                        ],
                         "update_path": f"{self.BACKEND_KEY}/{ref}",
                         "_compose_project": project,
                     }
@@ -365,7 +378,7 @@ class SSHDockerBackend:
         image_name: str,
         dockerhub_creds: dict | None,
         wrap: Callable[[str], str] | None = None,
-    ) -> str:
+    ) -> ImageCheck:
         wrap = wrap or (lambda c: c)
         try:
             inspect = await conn.run(
@@ -386,7 +399,7 @@ class SSHDockerBackend:
             return await check_image_update(resolved, local_digest, dockerhub_creds)
         except Exception as exc:
             log.warning("Docker SSH: image check failed for %s — %s", image_name, exc)
-            return "unknown"
+            return ImageCheck("unknown", REASON_REGISTRY_ERROR)
 
     # Kept for backward compatibility (used by discover_stacks path)
     async def _check_images(

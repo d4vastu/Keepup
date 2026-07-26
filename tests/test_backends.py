@@ -15,6 +15,7 @@ from app.backends.ssh_docker_backend import (
     _portainer_managed_projects,
     _rollup_status,
 )
+from app.registry_client import ImageCheck
 
 
 @pytest.fixture(autouse=True)
@@ -506,7 +507,7 @@ async def test_selected_mode_migrates_docker_stacks_to_containers(config_file, d
     with (
         patch("app.backends.ssh_docker_backend._connect", new=AsyncMock(return_value=conn)),
         patch("app.backends.ssh_docker_backend.check_image_update",
-              new=AsyncMock(return_value="up_to_date")),
+              new=AsyncMock(return_value=ImageCheck("up_to_date", None))),
     ):
         backend = SSHDockerBackend()
         stacks = await backend.get_stacks_with_update_status()
@@ -572,7 +573,7 @@ async def test_mode_all_includes_every_container(config_file, data_dir):
     with (
         patch("app.backends.ssh_docker_backend._connect", new=AsyncMock(return_value=conn)),
         patch("app.backends.ssh_docker_backend.check_image_update",
-              new=AsyncMock(return_value="up_to_date")),
+              new=AsyncMock(return_value=ImageCheck("up_to_date", None))),
     ):
         result = await SSHDockerBackend().get_stacks_with_update_status()
     assert {s["name"] for s in result} == {"a", "b"}
@@ -594,7 +595,7 @@ async def test_mode_all_and_new_includes_every_container(config_file, data_dir):
     with (
         patch("app.backends.ssh_docker_backend._connect", new=AsyncMock(return_value=conn)),
         patch("app.backends.ssh_docker_backend.check_image_update",
-              new=AsyncMock(return_value="up_to_date")),
+              new=AsyncMock(return_value=ImageCheck("up_to_date", None))),
     ):
         result = await SSHDockerBackend().get_stacks_with_update_status()
     assert len(result) == 1
@@ -621,7 +622,7 @@ async def test_mode_selected_with_docker_containers_filters(config_file, data_di
     with (
         patch("app.backends.ssh_docker_backend._connect", new=AsyncMock(return_value=conn)),
         patch("app.backends.ssh_docker_backend.check_image_update",
-              new=AsyncMock(return_value="up_to_date")),
+              new=AsyncMock(return_value=ImageCheck("up_to_date", None))),
     ):
         result = await SSHDockerBackend().get_stacks_with_update_status()
     assert len(result) == 1
@@ -672,7 +673,7 @@ async def test_proxmox_lxc_all_mode(config_file, data_dir):
     with (
         patch("app.backends.ssh_docker_backend._connect", new=AsyncMock(return_value=conn)),
         patch("app.backends.ssh_docker_backend.check_image_update",
-              new=AsyncMock(return_value="up_to_date")),
+              new=AsyncMock(return_value=ImageCheck("up_to_date", None))),
     ):
         result = await SSHDockerBackend().get_stacks_with_update_status()
 
@@ -710,7 +711,7 @@ async def test_proxmox_lxc_selected_mode(config_file, data_dir):
     with (
         patch("app.backends.ssh_docker_backend._connect", new=AsyncMock(return_value=conn)),
         patch("app.backends.ssh_docker_backend.check_image_update",
-              new=AsyncMock(return_value="up_to_date")),
+              new=AsyncMock(return_value=ImageCheck("up_to_date", None))),
     ):
         result = await SSHDockerBackend().get_stacks_with_update_status()
 
@@ -1066,7 +1067,7 @@ async def test_get_stacks_with_update_status_all_mode(config_file, data_dir):
         ),
         patch(
             "app.backends.ssh_docker_backend.check_image_update",
-            new=AsyncMock(return_value="up_to_date"),
+            new=AsyncMock(return_value=ImageCheck("up_to_date", None)),
         ),
     ):
         backend = SSHDockerBackend()
@@ -1076,6 +1077,72 @@ async def test_get_stacks_with_update_status_all_mode(config_file, data_dir):
     assert stacks[0]["name"] == "sonarr"
     assert stacks[0]["update_status"] == "up_to_date"
     assert stacks[0]["update_path"].startswith("ssh/test-host/")
+
+
+def _one_container_conn():
+    """docker ps -a with a single container, then its image inspect."""
+    docker_ps_output = json.dumps(
+        {"Names": "/sonarr", "Image": "sonarr:latest",
+         "Labels": "com.docker.compose.project=sonarr"}
+    )
+    return _make_multi_conn(
+        [
+            MagicMock(stdout=docker_ps_output, returncode=0),
+            MagicMock(stdout='["sonarr@sha256:abc123"]\t["sonarr:latest"]', returncode=0),
+        ]
+    )
+
+
+@pytest.mark.asyncio
+async def test_ssh_backend_carries_unknown_reason(config_file, data_dir):
+    """An unknown image check surfaces its reason on the stack dict (OP#217)."""
+    import yaml
+    from app.registry_client import ImageCheck
+
+    raw = yaml.safe_load(config_file.read_text())
+    raw["hosts"][0]["docker_mode"] = "all"
+    config_file.write_text(yaml.dump(raw))
+
+    with (
+        patch(
+            "app.backends.ssh_docker_backend._connect",
+            new=AsyncMock(return_value=_one_container_conn()),
+        ),
+        patch(
+            "app.backends.ssh_docker_backend.check_image_update",
+            new=AsyncMock(return_value=ImageCheck("unknown", "rate_limited")),
+        ),
+    ):
+        stacks = await SSHDockerBackend().get_stacks_with_update_status()
+
+    assert stacks[0]["update_status"] == "unknown"
+    assert stacks[0]["unknown_reason"] == "rate_limited"
+    assert stacks[0]["images"][0]["reason"] == "rate_limited"
+
+
+@pytest.mark.asyncio
+async def test_ssh_backend_clears_reason_when_known(config_file, data_dir):
+    import yaml
+    from app.registry_client import ImageCheck
+
+    raw = yaml.safe_load(config_file.read_text())
+    raw["hosts"][0]["docker_mode"] = "all"
+    config_file.write_text(yaml.dump(raw))
+
+    with (
+        patch(
+            "app.backends.ssh_docker_backend._connect",
+            new=AsyncMock(return_value=_one_container_conn()),
+        ),
+        patch(
+            "app.backends.ssh_docker_backend.check_image_update",
+            new=AsyncMock(return_value=ImageCheck("up_to_date", None)),
+        ),
+    ):
+        stacks = await SSHDockerBackend().get_stacks_with_update_status()
+
+    assert stacks[0]["update_status"] == "up_to_date"
+    assert stacks[0]["unknown_reason"] is None
 
 
 @pytest.mark.asyncio
@@ -1106,7 +1173,7 @@ async def test_get_stacks_resolves_bare_sha256_image(config_file, data_dir):
 
     async def fake_check(image, local_digest, creds=None):
         captured["image"] = image
-        return "update_available"
+        return ImageCheck("update_available", None)
 
     with (
         patch(
@@ -1154,7 +1221,7 @@ async def test_get_stacks_filters_by_selected_mode(config_file, data_dir):
         ),
         patch(
             "app.backends.ssh_docker_backend.check_image_update",
-            new=AsyncMock(return_value="up_to_date"),
+            new=AsyncMock(return_value=ImageCheck("up_to_date", None)),
         ),
     ):
         backend = SSHDockerBackend()
@@ -1558,7 +1625,7 @@ async def test_standalone_containers_appear_in_all_mode(config_file, data_dir):
     with (
         patch("app.backends.ssh_docker_backend._connect", new=AsyncMock(return_value=conn)),
         patch("app.backends.ssh_docker_backend.check_image_update",
-              new=AsyncMock(return_value="up_to_date")),
+              new=AsyncMock(return_value=ImageCheck("up_to_date", None))),
     ):
         backend = SSHDockerBackend()
         stacks = await backend.get_stacks_with_update_status()
@@ -1605,7 +1672,7 @@ async def test_selected_mode_filters_by_container_name(config_file, data_dir):
     with (
         patch("app.backends.ssh_docker_backend._connect", new=AsyncMock(return_value=conn)),
         patch("app.backends.ssh_docker_backend.check_image_update",
-              new=AsyncMock(return_value="up_to_date")),
+              new=AsyncMock(return_value=ImageCheck("up_to_date", None))),
     ):
         backend = SSHDockerBackend()
         stacks = await backend.get_stacks_with_update_status()
@@ -2056,7 +2123,7 @@ async def test_containers_for_host_skips_entries_with_no_image(config_file, data
     with (
         patch("app.backends.ssh_docker_backend._connect", new=AsyncMock(return_value=conn)),
         patch("app.backends.ssh_docker_backend.check_image_update",
-              new=AsyncMock(return_value="up_to_date")),
+              new=AsyncMock(return_value=ImageCheck("up_to_date", None))),
     ):
         backend = SSHDockerBackend()
         stacks = await backend.get_stacks_with_update_status()
@@ -2212,7 +2279,7 @@ async def test_get_stacks_includes_connection_badge(config_file, data_dir):
     with (
         patch("app.backends.ssh_docker_backend._connect", new=AsyncMock(return_value=conn)),
         patch("app.backends.ssh_docker_backend.check_image_update",
-              new=AsyncMock(return_value="up_to_date")),
+              new=AsyncMock(return_value=ImageCheck("up_to_date", None))),
     ):
         backend = SSHDockerBackend()
         stacks = await backend.get_stacks_with_update_status()
@@ -2327,7 +2394,7 @@ async def test_containers_for_host_pct_wraps_docker_ps(config_file, data_dir):
     with (
         patch("app.backends.ssh_docker_backend._connect", new=AsyncMock(return_value=conn)),
         patch("app.backends.ssh_docker_backend.check_image_update",
-              new=AsyncMock(return_value="up_to_date")),
+              new=AsyncMock(return_value=ImageCheck("up_to_date", None))),
     ):
         backend = SSHDockerBackend()
         stacks = await backend.get_stacks_with_update_status()
@@ -2492,7 +2559,7 @@ async def test_get_stacks_proxmox_node_connection_badge(config_file, data_dir):
     with (
         patch("app.backends.ssh_docker_backend._connect", new=AsyncMock(return_value=conn)),
         patch("app.backends.ssh_docker_backend.check_image_update",
-              new=AsyncMock(return_value="up_to_date")),
+              new=AsyncMock(return_value=ImageCheck("up_to_date", None))),
     ):
         backend = SSHDockerBackend()
         stacks = await backend.get_stacks_with_update_status()
@@ -2878,7 +2945,7 @@ async def test_self_container_excluded_from_discovery(config_file, data_dir, mon
     with (
         patch("app.backends.ssh_docker_backend._connect", new=AsyncMock(return_value=conn)),
         patch("app.backends.ssh_docker_backend.check_image_update",
-              new=AsyncMock(return_value="up_to_date")),
+              new=AsyncMock(return_value=ImageCheck("up_to_date", None))),
     ):
         backend = SSHDockerBackend()
         stacks = await backend.get_stacks_with_update_status()
@@ -2920,7 +2987,7 @@ async def test_self_compose_project_excluded_from_discovery(config_file, data_di
     with (
         patch("app.backends.ssh_docker_backend._connect", new=AsyncMock(return_value=conn)),
         patch("app.backends.ssh_docker_backend.check_image_update",
-              new=AsyncMock(return_value="up_to_date")),
+              new=AsyncMock(return_value=ImageCheck("up_to_date", None))),
     ):
         backend = SSHDockerBackend()
         stacks = await backend.get_stacks_with_update_status()
@@ -2955,7 +3022,7 @@ async def test_no_self_exclusion_when_not_in_docker(config_file, data_dir, monke
     with (
         patch("app.backends.ssh_docker_backend._connect", new=AsyncMock(return_value=conn)),
         patch("app.backends.ssh_docker_backend.check_image_update",
-              new=AsyncMock(return_value="up_to_date")),
+              new=AsyncMock(return_value=ImageCheck("up_to_date", None))),
     ):
         backend = SSHDockerBackend()
         stacks = await backend.get_stacks_with_update_status()
@@ -3171,7 +3238,7 @@ async def test_portainer_agent_containers_included_without_integration(config_fi
     with (
         patch("app.backends.ssh_docker_backend._connect", new=AsyncMock(return_value=conn)),
         patch("app.backends.ssh_docker_backend.check_image_update",
-              new=AsyncMock(return_value="up_to_date")),
+              new=AsyncMock(return_value=ImageCheck("up_to_date", None))),
         patch("app.backends.ssh_docker_backend.get_portainer_config", return_value={}),
         patch("app.backends.ssh_docker_backend.get_integration_credentials", return_value={}),
     ):
@@ -3213,7 +3280,7 @@ async def test_portainer_agent_containers_skipped_with_integration(config_file, 
     with (
         patch("app.backends.ssh_docker_backend._connect", new=AsyncMock(return_value=conn)),
         patch("app.backends.ssh_docker_backend.check_image_update",
-              new=AsyncMock(return_value="up_to_date")),
+              new=AsyncMock(return_value=ImageCheck("up_to_date", None))),
         patch("app.backends.ssh_docker_backend.get_portainer_config",
               return_value={"url": "https://portainer.test:9443"}),
         patch("app.backends.ssh_docker_backend.get_integration_credentials",
