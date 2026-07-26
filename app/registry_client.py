@@ -1,7 +1,10 @@
 """
 Checks whether a Docker image has a newer version available on its registry
 by comparing the remote manifest digest against the local digest stored in
-the image's RepoDigests field.
+the image's RepoDigests field. Also owns the coarse failure-reason taxonomy
+(REASON_* constants, REASON_LABELS, reason_label()) used to explain why a
+check came back "unknown" instead of a definitive up-to-date/update-available
+answer (OP#217).
 """
 
 import logging
@@ -184,6 +187,13 @@ def _reason_for_status(status: int) -> str:
     return REASON_REGISTRY_ERROR
 
 
+def _log_check_failure(image: str, reason: str, message: str, *args) -> None:
+    """Log a failed registry check — warning for actionable reasons someone
+    would want to notice while filtering by level, debug otherwise."""
+    level = log.warning if reason in (REASON_RATE_LIMITED, REASON_AUTH_FAILED) else log.debug
+    level(message, *args)
+
+
 async def get_remote_digest(
     image: str, dockerhub_creds: dict | None = None
 ) -> DigestResult:
@@ -201,10 +211,15 @@ async def get_remote_digest(
                 token = await _get_dockerhub_token(repo, dockerhub_creds)
             except httpx.HTTPStatusError as exc:
                 status = exc.response.status_code
-                log.warning(
-                    "Docker Hub token fetch for %s returned HTTP %s", image, status
+                reason = _reason_for_status(status)
+                _log_check_failure(
+                    image,
+                    reason,
+                    "Docker Hub token fetch for %s returned HTTP %s",
+                    image,
+                    status,
                 )
-                return DigestResult(None, _reason_for_status(status))
+                return DigestResult(None, reason)
             headers["Authorization"] = f"Bearer {token}"
             url = f"https://registry-1.docker.io/v2/{repo}/manifests/{tag}"
         elif "." in registry:
@@ -224,7 +239,9 @@ async def get_remote_digest(
                     headers["Authorization"] = f"Bearer {token}"
                     resp = await client.head(url, headers=headers, timeout=15)
                 else:
-                    log.debug(
+                    _log_check_failure(
+                        image,
+                        REASON_AUTH_FAILED,
                         "No bearer token for %s (401, no challenge): %s",
                         image,
                         www_auth,
@@ -237,12 +254,26 @@ async def get_remote_digest(
                     return DigestResult(digest, None)
                 return DigestResult(None, REASON_REGISTRY_ERROR)
 
-            log.debug("Registry check for %s returned HTTP %s", image, resp.status_code)
-            return DigestResult(None, _reason_for_status(resp.status_code))
+            reason = _reason_for_status(resp.status_code)
+            _log_check_failure(
+                image,
+                reason,
+                "Registry check for %s returned HTTP %s",
+                image,
+                resp.status_code,
+            )
+            return DigestResult(None, reason)
 
-    except Exception as e:
+    except (httpx.HTTPError, OSError) as e:
+        # The registry didn't answer at all — a real connectivity failure.
         log.debug("Registry check failed for %s: %s", image, e)
         return DigestResult(None, REASON_UNREACHABLE)
+    except Exception as e:
+        # The registry answered but something in our handling of that answer
+        # broke (e.g. an unexpected token-response shape) — that's a registry
+        # error, not a network fault, so don't mislabel it as "unreachable".
+        log.debug("Registry check failed for %s: %s", image, e)
+        return DigestResult(None, REASON_REGISTRY_ERROR)
 
 
 async def check_image_update(
@@ -264,6 +295,8 @@ async def check_image_update(
 
     remote = await get_remote_digest(image, dockerhub_creds)
     if remote.digest is None:
+        # get_remote_digest always sets a reason when digest is None; the
+        # fallback is defensive belt-and-braces, not an expected path.
         return ImageCheck("unknown", remote.reason or REASON_REGISTRY_ERROR)
 
     status = "update_available" if remote.digest != local_digest else "up_to_date"

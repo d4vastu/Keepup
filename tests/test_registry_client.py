@@ -2,6 +2,7 @@
 
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import httpx
 import pytest
 
 from app.registry_client import (
@@ -400,8 +401,6 @@ async def test_check_image_update_no_image_ref():
 @pytest.mark.asyncio
 async def test_get_remote_digest_dockerhub_rate_limited():
     """A 429 on the Docker Hub token fetch is reported as rate_limited."""
-    import httpx
-
     response = MagicMock()
     response.status_code = 429
     error = httpx.HTTPStatusError("429", request=MagicMock(), response=response)
@@ -496,3 +495,40 @@ def test_reason_label_falls_back():
     assert reason_label("rate_limited") == "Rate limited"
     assert reason_label(None) == "Unknown"
     assert reason_label("something_new") == "Unknown"
+
+
+@pytest.mark.asyncio
+async def test_get_remote_digest_200_missing_digest_header_is_registry_error():
+    """A 200 with no Docker-Content-Digest header is a malformed answer, not a
+    match — the registry replied, so this is registry_error, not unreachable."""
+    resp = MagicMock()
+    resp.status_code = 200
+    resp.headers = {}
+
+    mock_client = _make_mock_client([resp])
+    with patch("app.registry_client.make_client", return_value=mock_client):
+        result = await get_remote_digest("ghcr.io/owner/app:latest")
+
+    assert result.digest is None
+    assert result.reason == "registry_error"
+
+
+@pytest.mark.asyncio
+async def test_get_remote_digest_dockerhub_token_shape_error_is_registry_error():
+    """The Docker Hub token endpoint answered but the response shape is
+    unexpected (e.g. no "token" key) — this is a registry_error, not a
+    network fault, so it must not be mislabelled unreachable."""
+    token_resp = MagicMock()
+    token_resp.raise_for_status = MagicMock()
+    token_resp.json.return_value = {}  # no "token" key -> KeyError
+
+    mock_client = AsyncMock()
+    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_client.__aexit__ = AsyncMock(return_value=False)
+    mock_client.get = AsyncMock(return_value=token_resp)
+
+    with patch("app.registry_client.make_client", return_value=mock_client):
+        result = await get_remote_digest("nginx:latest")
+
+    assert result.digest is None
+    assert result.reason == "registry_error"
