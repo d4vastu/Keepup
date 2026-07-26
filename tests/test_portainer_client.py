@@ -297,6 +297,8 @@ async def test_stacks_image_check_exception_gives_unknown(client):
         results = await client.get_stacks_with_update_status()
 
     assert results[0]["images"][0]["status"] == "unknown"
+    assert results[0]["images"][0]["reason"] == "registry_error"
+    assert results[0]["unknown_reason"] == "registry_error"
 
 
 @pytest.mark.asyncio
@@ -589,10 +591,17 @@ def test_rollup_unknown_reason_disagrees():
 
 
 def test_rollup_unknown_reason_ignores_known_images():
+    """A known-status image with a truthy reason must not pollute the rollup.
+
+    The known-status entry carries a bogus but truthy reason so this test
+    actually exercises the status == "unknown" filter — a reason of None
+    would pass even without that filter, since the falsy-reason check alone
+    would exclude it (OP#217 review).
+    """
     from app.portainer_client import _rollup_unknown_reason
 
     images = [
-        {"name": "a", "status": "up_to_date", "reason": None},
+        {"name": "a", "status": "up_to_date", "reason": "not_found"},
         {"name": "b", "status": "unknown", "reason": "auth_failed"},
     ]
     assert _rollup_unknown_reason(images) == "auth_failed"
