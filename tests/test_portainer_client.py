@@ -260,6 +260,7 @@ async def test_stacks_unknown_when_no_containers(client):
         results = await client.get_stacks_with_update_status()
 
     assert results[0]["update_status"] == "unknown"
+    assert results[0]["unknown_reason"] == "no_containers"
 
 
 @pytest.mark.asyncio
@@ -277,6 +278,9 @@ async def test_stacks_endpoint_container_fetch_failure(client):
         results = await client.get_stacks_with_update_status()
 
     assert results[0]["update_status"] == "unknown"
+    # An endpoint we couldn't reach is not the same as a stack with no
+    # containers — the two must not share a reason.
+    assert results[0]["unknown_reason"] == "endpoint_unreachable"
 
 
 @pytest.mark.asyncio

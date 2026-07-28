@@ -15,6 +15,8 @@ import logging
 from .httpx_client import make_breaker_client
 from .registry_client import (
     ImageCheck,
+    REASON_ENDPOINT_UNREACHABLE,
+    REASON_NO_CONTAINERS,
     REASON_REGISTRY_ERROR,
     check_image_update,
     extract_local_digest,
@@ -182,11 +184,13 @@ class PortainerClient:
 
         # Build endpoint -> containers mapping (one API call per endpoint)
         endpoint_containers: dict[int, list[dict]] = {}
+        unreachable_endpoints: set[int] = set()
         for ep in endpoints:
             try:
                 endpoint_containers[ep["Id"]] = await self._get_containers(ep["Id"])
             except Exception:
                 endpoint_containers[ep["Id"]] = []
+                unreachable_endpoints.add(ep["Id"])
 
         self_id = get_self_container_id()
         self_name = get_self_container_name()
@@ -264,18 +268,30 @@ class PortainerClient:
 
             # Roll up to a single status for the stack
             statuses = {r["status"] for r in image_statuses}
-            if "update_available" in statuses and len(statuses) == 1:
-                rollup = "update_available"
-            elif "update_available" in statuses:
-                rollup = "mixed"
-            elif statuses == {"up_to_date"}:
-                rollup = "up_to_date"
-            else:
+            if not image_statuses:
+                # Nothing was checked at all. Say which of the two very
+                # different causes it was rather than showing a bare "Unknown".
                 rollup = "unknown"
+                unknown_reason = (
+                    REASON_ENDPOINT_UNREACHABLE
+                    if endpoint_id in unreachable_endpoints
+                    else REASON_NO_CONTAINERS
+                )
+            else:
+                if "update_available" in statuses and len(statuses) == 1:
+                    rollup = "update_available"
+                elif "update_available" in statuses:
+                    rollup = "mixed"
+                elif statuses == {"up_to_date"}:
+                    rollup = "up_to_date"
+                else:
+                    rollup = "unknown"
 
-            unknown_reason = (
-                _rollup_unknown_reason(image_statuses) if rollup == "unknown" else None
-            )
+                unknown_reason = (
+                    _rollup_unknown_reason(image_statuses)
+                    if rollup == "unknown"
+                    else None
+                )
 
             if rollup in ("update_available", "mixed"):
                 endpoint_name = endpoint_map.get(endpoint_id, f"env-{endpoint_id}")

@@ -35,6 +35,12 @@ REASON_UNSUPPORTED_REGISTRY = "unsupported_registry"
 REASON_REGISTRY_ERROR = "registry_error"
 REASON_UNREACHABLE = "unreachable"
 
+# Reasons that arise before any registry lookup happens — the backend had
+# nothing to check. They live here so reason_label() stays the one place
+# display text is defined.
+REASON_NO_CONTAINERS = "no_containers"
+REASON_ENDPOINT_UNREACHABLE = "endpoint_unreachable"
+
 REASON_LABELS = {
     REASON_UNRESOLVABLE_IMAGE: "Image not resolvable",
     REASON_NO_LOCAL_DIGEST: "Nothing to compare",
@@ -44,6 +50,8 @@ REASON_LABELS = {
     REASON_UNSUPPORTED_REGISTRY: "Unsupported registry",
     REASON_REGISTRY_ERROR: "Registry error",
     REASON_UNREACHABLE: "Registry unreachable",
+    REASON_NO_CONTAINERS: "No containers running",
+    REASON_ENDPOINT_UNREACHABLE: "Docker host unreachable",
 }
 
 
@@ -106,6 +114,19 @@ def extract_local_digest(repo_digests: list[str], image_name: str) -> str | None
     return None
 
 
+def _is_bare_image_id(image: str) -> bool:
+    """True when Image is an image id rather than a repository reference.
+
+    Docker reports the id either prefixed ("sha256:<hex>") or bare ("<hex>").
+    A bare id is 12 hex chars (short form) up to 64 (full digest) with no
+    registry, repository or tag punctuation — long enough that a real
+    repository name made only of hex characters won't be mistaken for one.
+    """
+    if image.startswith("sha256:"):
+        return True
+    return re.fullmatch(r"[0-9a-f]{12,64}", image) is not None
+
+
 def resolve_image_ref(
     image: str,
     repo_tags: list[str] | None = None,
@@ -115,18 +136,19 @@ def resolve_image_ref(
     Resolves a container's Image value to a real repo:tag suitable for a
     registry lookup, using image-inspect metadata.
 
-    Docker / Portainer report a container's Image as a bare "sha256:<id>" once
-    the tag it was started from is reassigned to a newer pull. Handing that bare
-    digest to parse_image_ref yields a bogus registry-1.docker.io/library/sha256
-    lookup that 401s, so the update is never surfaced (OP#215).
+    Docker / Portainer report a container's Image as a bare image id once the
+    tag it was started from is reassigned to a newer pull. Handing that id to
+    parse_image_ref yields a bogus registry-1.docker.io/library/<id> lookup
+    that 401s, so the container is reported as "Auth failed" and its update is
+    never surfaced (OP#215, OP#217).
 
-    A normal reference is returned unchanged. For a bare digest we recover the
+    A normal reference is returned unchanged. For a bare id we recover the
     reference from, in order:
       1. the first real RepoTags entry (skipping "<none>:<none>"), else
       2. the repository from RepoDigests ("repo@sha256:..." -> "repo:latest").
     Returns None when nothing usable is available (a truly dangling image).
     """
-    if not image.startswith("sha256:"):
+    if not _is_bare_image_id(image):
         return image
 
     for entry in repo_tags or []:

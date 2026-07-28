@@ -143,6 +143,40 @@ def test_resolve_bare_sha256_none_metadata_returns_none():
     assert resolve_image_ref("sha256:a4cf2c928f", None, None) is None
 
 
+def test_resolve_bare_hex_image_id_uses_first_repo_tag():
+    """Docker also reports the id without the "sha256:" prefix."""
+    resolved = resolve_image_ref(
+        "a4cf2c928f01b2c3",
+        ["linuxserver/calibre:7.16"],
+        [],
+    )
+    assert resolved == "linuxserver/calibre:7.16"
+
+
+def test_resolve_bare_hex_image_id_falls_back_to_repo_digest():
+    resolved = resolve_image_ref(
+        "a4cf2c928f01",
+        [],
+        ["linuxserver/calibre@sha256:deadbeef"],
+    )
+    assert resolved == "linuxserver/calibre:latest"
+
+
+def test_resolve_bare_hex_image_id_dangling_returns_none():
+    assert resolve_image_ref("a4cf2c928f01", [], []) is None
+
+
+def test_resolve_short_hex_repo_name_returned_unchanged():
+    """A real repository that happens to be all-hex is not an image id."""
+    assert resolve_image_ref("cafe", ["other:latest"], []) == "cafe"
+
+
+def test_resolve_hex_repo_name_with_tag_returned_unchanged():
+    assert resolve_image_ref("deadbeefcafe:latest", ["other:latest"], []) == (
+        "deadbeefcafe:latest"
+    )
+
+
 # ---------------------------------------------------------------------------
 # _get_bearer_token_from_challenge
 # ---------------------------------------------------------------------------
