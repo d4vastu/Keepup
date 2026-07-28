@@ -1,12 +1,17 @@
 """
 Checks whether a Docker image has a newer version available on its registry
 by comparing the remote manifest digest against the local digest stored in
-the image's RepoDigests field.
+the image's RepoDigests field. Also owns the coarse failure-reason taxonomy
+(REASON_* constants, REASON_LABELS, reason_label()) used to explain why a
+check came back "unknown" instead of a definitive up-to-date/update-available
+answer (OP#217).
 """
 
 import logging
 import re
+from typing import NamedTuple
 
+import httpx
 
 from .httpx_client import make_client
 
@@ -18,6 +23,55 @@ MANIFEST_ACCEPT = (
     "application/vnd.oci.image.index.v1+json,"
     "application/vnd.oci.image.manifest.v1+json"
 )
+
+# Coarse reasons a container's update status is "unknown" (OP#217). The label
+# map is the single source of display text — templates never branch on these.
+REASON_UNRESOLVABLE_IMAGE = "unresolvable_image"
+REASON_NO_LOCAL_DIGEST = "no_local_digest"
+REASON_RATE_LIMITED = "rate_limited"
+REASON_AUTH_FAILED = "auth_failed"
+REASON_NOT_FOUND = "not_found"
+REASON_UNSUPPORTED_REGISTRY = "unsupported_registry"
+REASON_REGISTRY_ERROR = "registry_error"
+REASON_UNREACHABLE = "unreachable"
+
+# Reasons that arise before any registry lookup happens — the backend had
+# nothing to check. They live here so reason_label() stays the one place
+# display text is defined.
+REASON_NO_CONTAINERS = "no_containers"
+REASON_ENDPOINT_UNREACHABLE = "endpoint_unreachable"
+
+REASON_LABELS = {
+    REASON_UNRESOLVABLE_IMAGE: "Image not resolvable",
+    REASON_NO_LOCAL_DIGEST: "Nothing to compare",
+    REASON_RATE_LIMITED: "Rate limited",
+    REASON_AUTH_FAILED: "Auth failed",
+    REASON_NOT_FOUND: "Tag not found",
+    REASON_UNSUPPORTED_REGISTRY: "Unsupported registry",
+    REASON_REGISTRY_ERROR: "Registry error",
+    REASON_UNREACHABLE: "Registry unreachable",
+    REASON_NO_CONTAINERS: "No containers running",
+    REASON_ENDPOINT_UNREACHABLE: "Docker host unreachable",
+}
+
+
+def reason_label(reason: str | None) -> str:
+    """Display text for an unknown-status reason; "Unknown" when unrecognised."""
+    return REASON_LABELS.get(reason or "", "Unknown")
+
+
+class DigestResult(NamedTuple):
+    """Remote digest lookup outcome. ``reason`` is set only when digest is None."""
+
+    digest: str | None
+    reason: str | None = None
+
+
+class ImageCheck(NamedTuple):
+    """Update check outcome. ``reason`` is set only when status is "unknown"."""
+
+    status: str
+    reason: str | None = None
 
 
 def parse_image_ref(image: str) -> tuple[str, str, str]:
@@ -60,6 +114,19 @@ def extract_local_digest(repo_digests: list[str], image_name: str) -> str | None
     return None
 
 
+def _is_bare_image_id(image: str) -> bool:
+    """True when Image is an image id rather than a repository reference.
+
+    Docker reports the id either prefixed ("sha256:<hex>") or bare ("<hex>").
+    A bare id is 12 hex chars (short form) up to 64 (full digest) with no
+    registry, repository or tag punctuation — long enough that a real
+    repository name made only of hex characters won't be mistaken for one.
+    """
+    if image.startswith("sha256:"):
+        return True
+    return re.fullmatch(r"[0-9a-f]{12,64}", image) is not None
+
+
 def resolve_image_ref(
     image: str,
     repo_tags: list[str] | None = None,
@@ -69,18 +136,19 @@ def resolve_image_ref(
     Resolves a container's Image value to a real repo:tag suitable for a
     registry lookup, using image-inspect metadata.
 
-    Docker / Portainer report a container's Image as a bare "sha256:<id>" once
-    the tag it was started from is reassigned to a newer pull. Handing that bare
-    digest to parse_image_ref yields a bogus registry-1.docker.io/library/sha256
-    lookup that 401s, so the update is never surfaced (OP#215).
+    Docker / Portainer report a container's Image as a bare image id once the
+    tag it was started from is reassigned to a newer pull. Handing that id to
+    parse_image_ref yields a bogus registry-1.docker.io/library/<id> lookup
+    that 401s, so the container is reported as "Auth failed" and its update is
+    never surfaced (OP#215, OP#217).
 
-    A normal reference is returned unchanged. For a bare digest we recover the
+    A normal reference is returned unchanged. For a bare id we recover the
     reference from, in order:
       1. the first real RepoTags entry (skipping "<none>:<none>"), else
       2. the repository from RepoDigests ("repo@sha256:..." -> "repo:latest").
     Returns None when nothing usable is available (a truly dangling image).
     """
-    if not image.startswith("sha256:"):
+    if not _is_bare_image_id(image):
         return image
 
     for entry in repo_tags or []:
@@ -130,26 +198,57 @@ async def _get_bearer_token_from_challenge(www_authenticate: str) -> str | None:
     return None
 
 
+def _reason_for_status(status: int) -> str:
+    """Map an HTTP status from a registry to a coarse unknown-status reason."""
+    if status == 429:
+        return REASON_RATE_LIMITED
+    if status in (401, 403):
+        return REASON_AUTH_FAILED
+    if status == 404:
+        return REASON_NOT_FOUND
+    return REASON_REGISTRY_ERROR
+
+
+def _log_check_failure(image: str, reason: str, message: str, *args) -> None:
+    """Log a failed registry check — warning for actionable reasons someone
+    would want to notice while filtering by level, debug otherwise."""
+    level = log.warning if reason in (REASON_RATE_LIMITED, REASON_AUTH_FAILED) else log.debug
+    level(message, *args)
+
+
 async def get_remote_digest(
     image: str, dockerhub_creds: dict | None = None
-) -> str | None:
+) -> DigestResult:
     """
-    Returns the current remote manifest digest for an image tag, or None on failure.
-    Handles DockerHub, ghcr.io, lscr.io, and any registry that uses Bearer auth challenges.
+    Returns the current remote manifest digest for an image tag, plus the reason
+    when the lookup failed. Handles DockerHub, ghcr.io, lscr.io, and any
+    registry that uses Bearer auth challenges.
     """
     try:
         registry, repo, tag = parse_image_ref(image)
         headers = {"Accept": MANIFEST_ACCEPT}
 
         if registry == "registry-1.docker.io":
-            token = await _get_dockerhub_token(repo, dockerhub_creds)
+            try:
+                token = await _get_dockerhub_token(repo, dockerhub_creds)
+            except httpx.HTTPStatusError as exc:
+                status = exc.response.status_code
+                reason = _reason_for_status(status)
+                _log_check_failure(
+                    image,
+                    reason,
+                    "Docker Hub token fetch for %s returned HTTP %s",
+                    image,
+                    status,
+                )
+                return DigestResult(None, reason)
             headers["Authorization"] = f"Bearer {token}"
             url = f"https://registry-1.docker.io/v2/{repo}/manifests/{tag}"
         elif "." in registry:
             # Any other registry (ghcr.io, lscr.io, quay.io, cr.hotio.dev, etc.)
             url = f"https://{registry}/v2/{repo}/manifests/{tag}"
         else:
-            return None
+            return DigestResult(None, REASON_UNSUPPORTED_REGISTRY)
 
         async with make_client(follow_redirects=True) as client:
             resp = await client.head(url, headers=headers)
@@ -162,42 +261,65 @@ async def get_remote_digest(
                     headers["Authorization"] = f"Bearer {token}"
                     resp = await client.head(url, headers=headers, timeout=15)
                 else:
-                    log.debug(
+                    _log_check_failure(
+                        image,
+                        REASON_AUTH_FAILED,
                         "No bearer token for %s (401, no challenge): %s",
                         image,
                         www_auth,
                     )
-                    return None
+                    return DigestResult(None, REASON_AUTH_FAILED)
 
             if resp.status_code == 200:
-                return resp.headers.get("Docker-Content-Digest")
+                digest = resp.headers.get("Docker-Content-Digest")
+                if digest:
+                    return DigestResult(digest, None)
+                return DigestResult(None, REASON_REGISTRY_ERROR)
 
-            log.debug("Registry check for %s returned HTTP %s", image, resp.status_code)
+            reason = _reason_for_status(resp.status_code)
+            _log_check_failure(
+                image,
+                reason,
+                "Registry check for %s returned HTTP %s",
+                image,
+                resp.status_code,
+            )
+            return DigestResult(None, reason)
 
-    except Exception as e:
+    except (httpx.HTTPError, OSError) as e:
+        # The registry didn't answer at all — a real connectivity failure.
         log.debug("Registry check failed for %s: %s", image, e)
-
-    return None
+        return DigestResult(None, REASON_UNREACHABLE)
+    except Exception as e:
+        # The registry answered but something in our handling of that answer
+        # broke (e.g. an unexpected token-response shape) — that's a registry
+        # error, not a network fault, so don't mislabel it as "unreachable".
+        log.debug("Registry check failed for %s: %s", image, e)
+        return DigestResult(None, REASON_REGISTRY_ERROR)
 
 
 async def check_image_update(
     image: str,
     local_digest: str | None,
     dockerhub_creds: dict | None = None,
-) -> str:
+) -> ImageCheck:
     """
-    Returns one of: "update_available", "up_to_date", "unknown"
+    Returns an ImageCheck whose status is one of "update_available",
+    "up_to_date", "unknown"; reason is set only for "unknown".
     """
     if not image:
         log.debug("No resolvable image reference — skipping registry check")
-        return "unknown"
+        return ImageCheck("unknown", REASON_UNRESOLVABLE_IMAGE)
 
     if not local_digest:
         log.debug("No local digest for %s — skipping registry check", image)
-        return "unknown"
+        return ImageCheck("unknown", REASON_NO_LOCAL_DIGEST)
 
-    remote_digest = await get_remote_digest(image, dockerhub_creds)
-    if remote_digest is None:
-        return "unknown"
+    remote = await get_remote_digest(image, dockerhub_creds)
+    if remote.digest is None:
+        # get_remote_digest always sets a reason when digest is None; the
+        # fallback is defensive belt-and-braces, not an expected path.
+        return ImageCheck("unknown", remote.reason or REASON_REGISTRY_ERROR)
 
-    return "update_available" if remote_digest != local_digest else "up_to_date"
+    status = "update_available" if remote.digest != local_digest else "up_to_date"
+    return ImageCheck(status, None)

@@ -619,3 +619,79 @@ def test_docker_check_shows_lxc_connection_badge(client, config_file, monkeypatc
     response = client.get("/api/docker/check")
     assert response.status_code == 200
     assert "LXC 104 · pct exec" in response.text
+
+
+# ---------------------------------------------------------------------------
+# unknown container rendering (OP#217)
+# ---------------------------------------------------------------------------
+
+
+def _render_docker_status(stacks, failed_backends=None):
+    """Render the docker_status partial directly, bypassing the route."""
+    from app.templates_env import make_templates
+
+    templates = make_templates()
+    template = templates.env.get_template("partials/docker_status.html")
+    return template.render(stacks=stacks, failed_backends=failed_backends or [])
+
+
+def _stack(name, status, reason=None, path=None):
+    return {
+        "name": name,
+        "update_status": status,
+        "unknown_reason": reason,
+        "endpoint_name": "nas",
+        "connection_badge": "",
+        "update_path": path or f"docker/{name}",
+    }
+
+
+def test_unknown_not_counted_as_up_to_date():
+    """The green card counts verified containers only (OP#217)."""
+    html = _render_docker_status(
+        [
+            _stack("jellyfin", "up_to_date"),
+            _stack("paperless", "unknown", "rate_limited"),
+        ]
+    )
+    assert "All 1 remaining container up to date" in html
+    assert "All 2 containers up to date" not in html
+
+
+def test_unknown_group_shows_reason_label():
+    html = _render_docker_status([_stack("paperless", "unknown", "rate_limited")])
+    assert "Could not be checked" in html
+    assert "Rate limited" in html
+
+
+def test_unknown_group_has_no_action_button():
+    html = _render_docker_status([_stack("paperless", "unknown", "not_found")])
+    assert "Redeploy" not in html
+
+
+def test_no_green_card_when_nothing_verified():
+    html = _render_docker_status([_stack("paperless", "unknown", "rate_limited")])
+    assert "up to date" not in html
+
+
+def test_meta_line_reports_unchecked_count():
+    html = _render_docker_status(
+        [
+            _stack("jellyfin", "update_available"),
+            _stack("paperless", "unknown", "rate_limited"),
+        ]
+    )
+    assert "unchecked" in html
+
+
+def test_all_verified_keeps_original_wording():
+    html = _render_docker_status([_stack("jellyfin", "up_to_date")])
+    assert "All 1 container up to date" in html
+    assert "remaining" not in html
+
+
+def test_unknown_container_with_parentheses_in_name():
+    """Config-derived names with CSS-unsafe chars must not break markup."""
+    html = _render_docker_status([_stack("web (prod)", "unknown", "auth_failed")])
+    assert "web (prod)" in html
+    assert "Auth failed" in html

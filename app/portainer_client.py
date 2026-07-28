@@ -14,6 +14,10 @@ import logging
 
 from .httpx_client import make_breaker_client
 from .registry_client import (
+    ImageCheck,
+    REASON_ENDPOINT_UNREACHABLE,
+    REASON_NO_CONTAINERS,
+    REASON_REGISTRY_ERROR,
     check_image_update,
     extract_local_digest,
     resolve_image_ref,
@@ -21,6 +25,20 @@ from .registry_client import (
 from .self_identity import get_self_container_id, get_self_container_name
 
 log = logging.getLogger(__name__)
+
+
+def _rollup_unknown_reason(image_statuses: list[dict]) -> str | None:
+    """The single reason shared by a stack's unknown images, else None.
+
+    Two images that failed for different reasons give the stack no honest
+    single answer, so it reports none rather than picking one (OP#217).
+    """
+    reasons = {
+        r.get("reason")
+        for r in image_statuses
+        if r.get("status") == "unknown" and r.get("reason")
+    }
+    return reasons.pop() if len(reasons) == 1 else None
 
 
 class PortainerClient:
@@ -151,7 +169,8 @@ class PortainerClient:
         Each stack dict gets:
           "endpoint_name": str
           "update_status": "update_available" | "up_to_date" | "unknown" | "mixed"
-          "images": [{"name": str, "status": str}, ...]
+          "unknown_reason": coarse reason when update_status == "unknown", else None
+          "images": [{"name": str, "status": str, "reason": str | None}, ...]
         """
         endpoints = await self.get_endpoints()
         endpoint_map = {e["Id"]: e["Name"] for e in endpoints}
@@ -165,11 +184,13 @@ class PortainerClient:
 
         # Build endpoint -> containers mapping (one API call per endpoint)
         endpoint_containers: dict[int, list[dict]] = {}
+        unreachable_endpoints: set[int] = set()
         for ep in endpoints:
             try:
                 endpoint_containers[ep["Id"]] = await self._get_containers(ep["Id"])
             except Exception:
                 endpoint_containers[ep["Id"]] = []
+                unreachable_endpoints.add(ep["Id"])
 
         self_id = get_self_container_id()
         self_name = get_self_container_name()
@@ -226,16 +247,20 @@ class PortainerClient:
                     repo_tags = img_info.get("RepoTags", [])
                     local_digest = extract_local_digest(repo_digests, img_name)
                     resolved = resolve_image_ref(img_name, repo_tags, repo_digests)
-                    status = await check_image_update(
+                    check = await check_image_update(
                         resolved, local_digest, dockerhub_creds
                     )
                 except Exception as exc:
                     log.warning(
                         "Portainer: image check failed for %s — %s", img_name, exc
                     )
-                    status = "unknown"
+                    check = ImageCheck("unknown", REASON_REGISTRY_ERROR)
 
-                return {"name": img_name, "status": status}
+                return {
+                    "name": img_name,
+                    "status": check.status,
+                    "reason": check.reason if check.status == "unknown" else None,
+                }
 
             tasks = [_check(c) for c in stack_containers]
             checked = await asyncio.gather(*tasks)
@@ -243,14 +268,30 @@ class PortainerClient:
 
             # Roll up to a single status for the stack
             statuses = {r["status"] for r in image_statuses}
-            if "update_available" in statuses and len(statuses) == 1:
-                rollup = "update_available"
-            elif "update_available" in statuses:
-                rollup = "mixed"
-            elif statuses == {"up_to_date"}:
-                rollup = "up_to_date"
-            else:
+            if not image_statuses:
+                # Nothing was checked at all. Say which of the two very
+                # different causes it was rather than showing a bare "Unknown".
                 rollup = "unknown"
+                unknown_reason = (
+                    REASON_ENDPOINT_UNREACHABLE
+                    if endpoint_id in unreachable_endpoints
+                    else REASON_NO_CONTAINERS
+                )
+            else:
+                if "update_available" in statuses and len(statuses) == 1:
+                    rollup = "update_available"
+                elif "update_available" in statuses:
+                    rollup = "mixed"
+                elif statuses == {"up_to_date"}:
+                    rollup = "up_to_date"
+                else:
+                    rollup = "unknown"
+
+                unknown_reason = (
+                    _rollup_unknown_reason(image_statuses)
+                    if rollup == "unknown"
+                    else None
+                )
 
             if rollup in ("update_available", "mixed"):
                 endpoint_name = endpoint_map.get(endpoint_id, f"env-{endpoint_id}")
@@ -267,6 +308,7 @@ class PortainerClient:
                         endpoint_id, f"env-{endpoint_id}"
                     ),
                     "update_status": rollup,
+                    "unknown_reason": unknown_reason,
                     "images": image_statuses,
                 }
             )

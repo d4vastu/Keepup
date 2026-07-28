@@ -41,8 +41,16 @@ def _as_local(dt_str: str) -> str:
         return dt_str[:16].replace("T", " ") + " UTC"
 
 
+def _reason_label(reason: str | None) -> str:
+    """Display text for an unknown container-check reason (OP#217)."""
+    from .registry_client import reason_label
+
+    return reason_label(reason)
+
+
 def make_templates() -> Jinja2Templates:
     t = Jinja2Templates(directory=_TEMPLATES_DIR)
     t.env.filters["as_local"] = _as_local
     t.env.filters["css_id"] = _css_id
+    t.env.filters["reason_label"] = _reason_label
     return t

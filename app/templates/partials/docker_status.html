@@ -1,12 +1,15 @@
 {% set needs_update = stacks | selectattr("update_status", "in", ["update_available", "mixed"]) | list %}
+{% set unknown_list = stacks | selectattr("update_status", "equalto", "unknown") | list %}
+{% set verified = stacks | selectattr("update_status", "equalto", "up_to_date") | list %}
 {% set total_count = stacks | length %}
 {% set host_count = stacks | groupby("endpoint_name") | list | length %}
+{% set unchecked_suffix = " · " ~ (unknown_list | length) ~ " unchecked" if unknown_list else "" %}
 
 {# OOB: update section-header meta text #}
 {% if needs_update %}
-<span id="docker-meta" hx-swap-oob="true">{{ needs_update | length }} of {{ total_count }} need updating</span>
+<span id="docker-meta" hx-swap-oob="true">{{ needs_update | length }} of {{ total_count }} need updating{{ unchecked_suffix }}</span>
 {% elif stacks %}
-<span id="docker-meta" hx-swap-oob="true">{{ host_count }} host{{ 's' if host_count != 1 }} · {{ total_count }} container{{ 's' if total_count != 1 }}</span>
+<span id="docker-meta" hx-swap-oob="true">{{ host_count }} host{{ 's' if host_count != 1 }} · {{ total_count }} container{{ 's' if total_count != 1 }}{{ unchecked_suffix }}</span>
 {% else %}
 <span id="docker-meta" hx-swap-oob="true"></span>
 {% endif %}
@@ -24,7 +27,7 @@
 </div>
 {% endif %}
 
-{% if needs_update %}
+{% if needs_update or unknown_list %}
 <div class="bg-[#161b22] border border-[#21262d] rounded-lg overflow-hidden">
   <div class="hidden sm:grid sm:grid-cols-[1fr_160px_120px] gap-3 px-4 py-2 bg-[#0d1117] border-b border-[#21262d]">
     <span class="text-[11px] font-medium text-slate-600 uppercase tracking-widest">Container</span>
@@ -77,18 +80,51 @@
     {% endfor %}
   </div>
   {% endfor %}
-</div>
 
-{% elif stacks %}
-<div class="bg-[#161b22] border border-[#21262d] rounded-lg px-4 py-6 flex flex-col items-center gap-2 text-center">
+  {# Containers whose registry check failed — shown as their own state so they
+     are never counted as "up to date" (OP#217). No action button, so no id and
+     no CSS-selector exposure for config-derived names. #}
+  {% if unknown_list %}
+  <div>
+    <div class="host-group-header">
+      <div class="host-group-name">
+        <svg width="10" height="10" viewBox="0 0 16 16" fill="none">
+          <circle cx="8" cy="8" r="6" stroke="#8b949e" stroke-width="1.3"/>
+        </svg>
+        Could not be checked
+      </div>
+      <span class="host-group-count">{{ unknown_list | length }} container{{ 's' if unknown_list | length != 1 }}</span>
+    </div>
+
+    {% for stack in unknown_list %}
+    <div class="ct-row">
+      <div class="ct-indent">
+        <span class="ct-line"></span>
+        <span class="ct-name">{{ stack.name }}</span>
+      </div>
+      <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[12px] font-medium bg-slate-800/60 text-slate-400 border border-slate-700 w-fit">
+        <span class="w-1.5 h-1.5 rounded-full bg-current flex-shrink-0"></span>
+        {{ stack.unknown_reason | reason_label }}
+      </span>
+      <div></div>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+</div>
+{% endif %}
+
+{% if verified %}
+<div class="bg-[#161b22] border border-[#21262d] rounded-lg px-4 py-6 flex flex-col items-center gap-2 text-center{{ ' mt-3' if needs_update or unknown_list }}">
   <div class="w-9 h-9 rounded-full bg-[#0f2b17] border border-[#1a4a25] flex items-center justify-center mb-1">
     <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M3 8l3.5 3.5L13 4" stroke="#3fb950" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
   </div>
-  <div class="text-[13px] font-medium text-green-400">All {{ total_count }} container{{ 's' if total_count != 1 }} up to date</div>
-  <div class="text-[11px] text-slate-600">{{ stacks | map(attribute='name') | join(' · ') }}</div>
+  <div class="text-[13px] font-medium text-green-400">
+    All {{ verified | length }}{{ ' remaining' if unknown_list or needs_update }} container{{ 's' if verified | length != 1 }} up to date
+  </div>
+  <div class="text-[11px] text-slate-600">{{ verified | map(attribute='name') | join(' · ') }}</div>
 </div>
-
-{% else %}
+{% elif not stacks %}
 <div class="bg-[#161b22] border border-[#21262d] rounded-lg px-4 py-5">
   <p class="text-[12px] text-slate-500">No containers found.</p>
 </div>

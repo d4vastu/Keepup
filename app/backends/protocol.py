@@ -13,7 +13,8 @@ class ContainerBackend(Protocol):
         "endpoint_id":   str,   # host/environment identifier
         "endpoint_name": str,   # human-readable host/environment label
         "update_status": str,   # "update_available" | "up_to_date" | "unknown" | "mixed"
-        "images":        list,  # [{"name": str, "status": str}, ...]
+        "unknown_reason": str | None,  # coarse reason when update_status == "unknown"
+        "images":        list,  # [{"name": str, "status": str, "reason": str | None}, ...]
         "update_path":   str,   # opaque path: "{backend_key}/{ref}"
       }
     """

@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from app.portainer_client import PortainerClient
+from app.registry_client import ImageCheck
 
 
 @pytest.fixture
@@ -147,7 +148,7 @@ async def test_stacks_with_update_status_up_to_date(client):
         patch.object(client, "_get_image_info", new=AsyncMock(return_value=IMAGE_INFO)),
         patch(
             "app.portainer_client.check_image_update",
-            new=AsyncMock(return_value="up_to_date"),
+            new=AsyncMock(return_value=ImageCheck("up_to_date", None)),
         ),
         patch(
             "app.portainer_client.extract_local_digest", return_value="sha256:current"
@@ -172,7 +173,7 @@ async def test_stacks_with_update_status_update_available(client):
         patch.object(client, "_get_image_info", new=AsyncMock(return_value=IMAGE_INFO)),
         patch(
             "app.portainer_client.check_image_update",
-            new=AsyncMock(return_value="update_available"),
+            new=AsyncMock(return_value=ImageCheck("update_available", None)),
         ),
         patch("app.portainer_client.extract_local_digest", return_value="sha256:old"),
     ):
@@ -199,7 +200,7 @@ async def test_stacks_resolves_bare_sha256_image_via_repo_tags(client):
 
     async def fake_check(image, local_digest, creds=None):
         captured["image"] = image
-        return "update_available"
+        return ImageCheck("update_available", None)
 
     with (
         patch.object(
@@ -230,7 +231,7 @@ async def test_stacks_with_mixed_status(client):
     async def mock_check(image, local_digest, creds=None):
         result = statuses[call_count["n"] % len(statuses)]
         call_count["n"] += 1
-        return result
+        return ImageCheck(result, None)
 
     with (
         patch.object(
@@ -259,6 +260,7 @@ async def test_stacks_unknown_when_no_containers(client):
         results = await client.get_stacks_with_update_status()
 
     assert results[0]["update_status"] == "unknown"
+    assert results[0]["unknown_reason"] == "no_containers"
 
 
 @pytest.mark.asyncio
@@ -276,6 +278,9 @@ async def test_stacks_endpoint_container_fetch_failure(client):
         results = await client.get_stacks_with_update_status()
 
     assert results[0]["update_status"] == "unknown"
+    # An endpoint we couldn't reach is not the same as a stack with no
+    # containers — the two must not share a reason.
+    assert results[0]["unknown_reason"] == "endpoint_unreachable"
 
 
 @pytest.mark.asyncio
@@ -296,6 +301,8 @@ async def test_stacks_image_check_exception_gives_unknown(client):
         results = await client.get_stacks_with_update_status()
 
     assert results[0]["images"][0]["status"] == "unknown"
+    assert results[0]["images"][0]["reason"] == "registry_error"
+    assert results[0]["unknown_reason"] == "registry_error"
 
 
 @pytest.mark.asyncio
@@ -305,7 +312,7 @@ async def test_stacks_skips_duplicate_images(client):
         {**CONTAINERS[0], "Id": "c1"},
         {**CONTAINERS[0], "Id": "c2"},  # same Image as c1
     ]
-    check_mock = AsyncMock(return_value="up_to_date")
+    check_mock = AsyncMock(return_value=ImageCheck("up_to_date", None))
     with (
         patch.object(
             client, "get_endpoints", new=AsyncMock(return_value=ENDPOINTS[:1])
@@ -408,7 +415,7 @@ async def test_self_stack_excluded_from_discovery(client, monkeypatch):
             new=AsyncMock(return_value=[self_container, other_container])
         ),
         patch.object(client, "_get_image_info", new=AsyncMock(return_value=IMAGE_INFO)),
-        patch("app.portainer_client.check_image_update", new=AsyncMock(return_value="up_to_date")),
+        patch("app.portainer_client.check_image_update", new=AsyncMock(return_value=ImageCheck("up_to_date", None))),
         patch("app.portainer_client.extract_local_digest", return_value="sha256:x"),
     ):
         results = await client.get_stacks_with_update_status()
@@ -436,7 +443,7 @@ async def test_self_stack_not_excluded_when_not_in_docker(client, monkeypatch):
         patch.object(client, "get_stacks", new=AsyncMock(return_value=stacks)),
         patch.object(client, "_get_containers", new=AsyncMock(return_value=[self_container])),
         patch.object(client, "_get_image_info", new=AsyncMock(return_value=IMAGE_INFO)),
-        patch("app.portainer_client.check_image_update", new=AsyncMock(return_value="up_to_date")),
+        patch("app.portainer_client.check_image_update", new=AsyncMock(return_value=ImageCheck("up_to_date", None))),
         patch("app.portainer_client.extract_local_digest", return_value="sha256:x"),
     ):
         results = await client.get_stacks_with_update_status()
@@ -527,7 +534,7 @@ async def test_self_stack_excluded_by_container_name(client, monkeypatch):
             new=AsyncMock(return_value=[self_container, other_container]),
         ),
         patch.object(client, "_get_image_info", new=AsyncMock(return_value=IMAGE_INFO)),
-        patch("app.portainer_client.check_image_update", new=AsyncMock(return_value="up_to_date")),
+        patch("app.portainer_client.check_image_update", new=AsyncMock(return_value=ImageCheck("up_to_date", None))),
         patch("app.portainer_client.extract_local_digest", return_value="sha256:x"),
     ):
         results = await client.get_stacks_with_update_status()
@@ -558,3 +565,47 @@ async def test_update_stack_refused_by_container_name(client, monkeypatch):
     ):
         with pytest.raises(ValueError, match="Self-update refused"):
             await client.update_stack(20, 1)
+
+
+# ---------------------------------------------------------------------------
+# unknown_reason rollup (OP#217)
+# ---------------------------------------------------------------------------
+
+
+def test_rollup_unknown_reason_agrees():
+    """All unknown images share a reason — the stack reports it (OP#217)."""
+    from app.portainer_client import _rollup_unknown_reason
+
+    images = [
+        {"name": "a", "status": "unknown", "reason": "rate_limited"},
+        {"name": "b", "status": "unknown", "reason": "rate_limited"},
+    ]
+    assert _rollup_unknown_reason(images) == "rate_limited"
+
+
+def test_rollup_unknown_reason_disagrees():
+    """Mixed reasons collapse to None rather than inventing precision."""
+    from app.portainer_client import _rollup_unknown_reason
+
+    images = [
+        {"name": "a", "status": "unknown", "reason": "rate_limited"},
+        {"name": "b", "status": "unknown", "reason": "not_found"},
+    ]
+    assert _rollup_unknown_reason(images) is None
+
+
+def test_rollup_unknown_reason_ignores_known_images():
+    """A known-status image with a truthy reason must not pollute the rollup.
+
+    The known-status entry carries a bogus but truthy reason so this test
+    actually exercises the status == "unknown" filter — a reason of None
+    would pass even without that filter, since the falsy-reason check alone
+    would exclude it (OP#217 review).
+    """
+    from app.portainer_client import _rollup_unknown_reason
+
+    images = [
+        {"name": "a", "status": "up_to_date", "reason": "not_found"},
+        {"name": "b", "status": "unknown", "reason": "auth_failed"},
+    ]
+    assert _rollup_unknown_reason(images) == "auth_failed"

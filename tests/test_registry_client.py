@@ -2,14 +2,17 @@
 
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import httpx
 import pytest
 
 from app.registry_client import (
+    DigestResult,
     _get_bearer_token_from_challenge,
     check_image_update,
     extract_local_digest,
     get_remote_digest,
     parse_image_ref,
+    reason_label,
     resolve_image_ref,
 )
 
@@ -140,6 +143,40 @@ def test_resolve_bare_sha256_none_metadata_returns_none():
     assert resolve_image_ref("sha256:a4cf2c928f", None, None) is None
 
 
+def test_resolve_bare_hex_image_id_uses_first_repo_tag():
+    """Docker also reports the id without the "sha256:" prefix."""
+    resolved = resolve_image_ref(
+        "a4cf2c928f01b2c3",
+        ["linuxserver/calibre:7.16"],
+        [],
+    )
+    assert resolved == "linuxserver/calibre:7.16"
+
+
+def test_resolve_bare_hex_image_id_falls_back_to_repo_digest():
+    resolved = resolve_image_ref(
+        "a4cf2c928f01",
+        [],
+        ["linuxserver/calibre@sha256:deadbeef"],
+    )
+    assert resolved == "linuxserver/calibre:latest"
+
+
+def test_resolve_bare_hex_image_id_dangling_returns_none():
+    assert resolve_image_ref("a4cf2c928f01", [], []) is None
+
+
+def test_resolve_short_hex_repo_name_returned_unchanged():
+    """A real repository that happens to be all-hex is not an image id."""
+    assert resolve_image_ref("cafe", ["other:latest"], []) == "cafe"
+
+
+def test_resolve_hex_repo_name_with_tag_returned_unchanged():
+    assert resolve_image_ref("deadbeefcafe:latest", ["other:latest"], []) == (
+        "deadbeefcafe:latest"
+    )
+
+
 # ---------------------------------------------------------------------------
 # _get_bearer_token_from_challenge
 # ---------------------------------------------------------------------------
@@ -228,9 +265,9 @@ async def test_get_remote_digest_dockerhub():
     mock_client.head = AsyncMock(return_value=mock_manifest_resp)
 
     with patch("app.registry_client.make_client", return_value=mock_client):
-        digest = await get_remote_digest("nginx:latest")
+        result = await get_remote_digest("nginx:latest")
 
-    assert digest == "sha256:newdigest"
+    assert result.digest == "sha256:newdigest"
 
 
 @pytest.mark.asyncio
@@ -242,9 +279,9 @@ async def test_get_remote_digest_ghcr_200():
 
     mock_client = _make_mock_client([mock_resp])
     with patch("app.registry_client.make_client", return_value=mock_client):
-        digest = await get_remote_digest("ghcr.io/owner/app:latest")
+        result = await get_remote_digest("ghcr.io/owner/app:latest")
 
-    assert digest == "sha256:ghcrdigest"
+    assert result.digest == "sha256:ghcrdigest"
 
 
 @pytest.mark.asyncio
@@ -266,9 +303,9 @@ async def test_get_remote_digest_ghcr_401_then_200():
 
     mock_client = _make_mock_client([challenge_resp, ok_resp], get_response=token_resp)
     with patch("app.registry_client.make_client", return_value=mock_client):
-        digest = await get_remote_digest("ghcr.io/owner/app:latest")
+        result = await get_remote_digest("ghcr.io/owner/app:latest")
 
-    assert digest == "sha256:authed"
+    assert result.digest == "sha256:authed"
 
 
 @pytest.mark.asyncio
@@ -280,9 +317,9 @@ async def test_get_remote_digest_401_no_token():
 
     mock_client = _make_mock_client([challenge_resp])
     with patch("app.registry_client.make_client", return_value=mock_client):
-        digest = await get_remote_digest("ghcr.io/owner/app:latest")
+        result = await get_remote_digest("ghcr.io/owner/app:latest")
 
-    assert digest is None
+    assert result.digest is None
 
 
 @pytest.mark.asyncio
@@ -294,16 +331,16 @@ async def test_get_remote_digest_other_registry_with_dot():
 
     mock_client = _make_mock_client([mock_resp])
     with patch("app.registry_client.make_client", return_value=mock_client):
-        digest = await get_remote_digest("quay.io/prometheus/node-exporter:latest")
+        result = await get_remote_digest("quay.io/prometheus/node-exporter:latest")
 
-    assert digest == "sha256:quaydigest"
+    assert result.digest == "sha256:quaydigest"
 
 
 @pytest.mark.asyncio
 async def test_get_remote_digest_no_dot_returns_none():
     """Registry without a dot (and not DockerHub) returns None without a network call."""
-    digest = await get_remote_digest("localhost/myapp:latest")
-    assert digest is None
+    result = await get_remote_digest("localhost/myapp:latest")
+    assert result.digest is None
 
 
 @pytest.mark.asyncio
@@ -323,9 +360,9 @@ async def test_get_remote_digest_non_200_non_401_returns_none():
     mock_client.head = AsyncMock(return_value=mock_resp)
 
     with patch("app.registry_client.make_client", return_value=mock_client):
-        digest = await get_remote_digest("nginx:latest")
+        result = await get_remote_digest("nginx:latest")
 
-    assert digest is None
+    assert result.digest is None
 
 
 @pytest.mark.asyncio
@@ -333,8 +370,8 @@ async def test_get_remote_digest_exception_returns_none():
     with patch(
         "app.registry_client.make_client", side_effect=Exception("network error")
     ):
-        digest = await get_remote_digest("nginx:latest")
-    assert digest is None
+        result = await get_remote_digest("nginx:latest")
+    assert result.digest is None
 
 
 # ---------------------------------------------------------------------------
@@ -345,39 +382,187 @@ async def test_get_remote_digest_exception_returns_none():
 @pytest.mark.asyncio
 async def test_check_image_update_no_local_digest():
     result = await check_image_update("nginx:latest", local_digest=None)
-    assert result == "unknown"
+    assert result == ("unknown", "no_local_digest")
 
 
 @pytest.mark.asyncio
 async def test_check_image_update_remote_unavailable():
     with patch(
-        "app.registry_client.get_remote_digest", new=AsyncMock(return_value=None)
+        "app.registry_client.get_remote_digest",
+        new=AsyncMock(return_value=DigestResult(None, "unreachable")),
     ):
         result = await check_image_update("nginx:latest", local_digest="sha256:abc")
-    assert result == "unknown"
+    assert result == ("unknown", "unreachable")
 
 
 @pytest.mark.asyncio
 async def test_check_image_update_up_to_date():
     with patch(
         "app.registry_client.get_remote_digest",
-        new=AsyncMock(return_value="sha256:abc"),
+        new=AsyncMock(return_value=DigestResult("sha256:abc", None)),
     ):
         result = await check_image_update("nginx:latest", local_digest="sha256:abc")
-    assert result == "up_to_date"
+    assert result == ("up_to_date", None)
 
 
 @pytest.mark.asyncio
 async def test_check_image_update_available():
     with patch(
         "app.registry_client.get_remote_digest",
-        new=AsyncMock(return_value="sha256:new"),
+        new=AsyncMock(return_value=DigestResult("sha256:new", None)),
     ):
         result = await check_image_update("nginx:latest", local_digest="sha256:old")
-    assert result == "update_available"
+    assert result == ("update_available", None)
 
 
 @pytest.mark.asyncio
 async def test_check_image_update_none_image_is_unknown():
     result = await check_image_update(None, local_digest="sha256:abc")
-    assert result == "unknown"
+    assert result == ("unknown", "unresolvable_image")
+
+
+# ---------------------------------------------------------------------------
+# failure reasons (OP#217)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_check_image_update_no_image_ref():
+    result = await check_image_update("", "sha256:local")
+    assert result == ("unknown", "unresolvable_image")
+
+
+@pytest.mark.asyncio
+async def test_get_remote_digest_dockerhub_rate_limited():
+    """A 429 on the Docker Hub token fetch is reported as rate_limited."""
+    response = MagicMock()
+    response.status_code = 429
+    error = httpx.HTTPStatusError("429", request=MagicMock(), response=response)
+
+    token_resp = MagicMock()
+    token_resp.raise_for_status = MagicMock(side_effect=error)
+
+    mock_client = AsyncMock()
+    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_client.__aexit__ = AsyncMock(return_value=False)
+    mock_client.get = AsyncMock(return_value=token_resp)
+
+    with patch("app.registry_client.make_client", return_value=mock_client):
+        result = await get_remote_digest("nginx:latest")
+
+    assert result.digest is None
+    assert result.reason == "rate_limited"
+
+
+@pytest.mark.asyncio
+async def test_get_remote_digest_manifest_rate_limited():
+    resp = MagicMock()
+    resp.status_code = 429
+    resp.headers = {}
+
+    mock_client = _make_mock_client([resp])
+    with patch("app.registry_client.make_client", return_value=mock_client):
+        result = await get_remote_digest("ghcr.io/owner/app:latest")
+
+    assert result.reason == "rate_limited"
+
+
+@pytest.mark.asyncio
+async def test_get_remote_digest_not_found():
+    resp = MagicMock()
+    resp.status_code = 404
+    resp.headers = {}
+
+    mock_client = _make_mock_client([resp])
+    with patch("app.registry_client.make_client", return_value=mock_client):
+        result = await get_remote_digest("ghcr.io/owner/app:latest")
+
+    assert result.reason == "not_found"
+
+
+@pytest.mark.asyncio
+async def test_get_remote_digest_other_status_is_registry_error():
+    resp = MagicMock()
+    resp.status_code = 500
+    resp.headers = {}
+
+    mock_client = _make_mock_client([resp])
+    with patch("app.registry_client.make_client", return_value=mock_client):
+        result = await get_remote_digest("ghcr.io/owner/app:latest")
+
+    assert result.reason == "registry_error"
+
+
+@pytest.mark.asyncio
+async def test_get_remote_digest_exception_is_unreachable():
+    mock_client = AsyncMock()
+    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_client.__aexit__ = AsyncMock(return_value=False)
+    mock_client.head = AsyncMock(side_effect=OSError("dns failure"))
+
+    with patch("app.registry_client.make_client", return_value=mock_client):
+        result = await get_remote_digest("ghcr.io/owner/app:latest")
+
+    assert result.reason == "unreachable"
+
+
+@pytest.mark.asyncio
+async def test_get_remote_digest_dotless_registry_unsupported():
+    result = await get_remote_digest("localhost/owner/app:latest")
+    assert result.reason == "unsupported_registry"
+
+
+@pytest.mark.asyncio
+async def test_get_remote_digest_401_no_challenge_is_auth_failed():
+    challenge_resp = MagicMock()
+    challenge_resp.status_code = 401
+    challenge_resp.headers = {}
+
+    mock_client = _make_mock_client([challenge_resp])
+    with patch("app.registry_client.make_client", return_value=mock_client):
+        result = await get_remote_digest("ghcr.io/owner/app:latest")
+
+    assert result.reason == "auth_failed"
+
+
+def test_reason_label_falls_back():
+    assert reason_label("rate_limited") == "Rate limited"
+    assert reason_label(None) == "Unknown"
+    assert reason_label("something_new") == "Unknown"
+
+
+@pytest.mark.asyncio
+async def test_get_remote_digest_200_missing_digest_header_is_registry_error():
+    """A 200 with no Docker-Content-Digest header is a malformed answer, not a
+    match — the registry replied, so this is registry_error, not unreachable."""
+    resp = MagicMock()
+    resp.status_code = 200
+    resp.headers = {}
+
+    mock_client = _make_mock_client([resp])
+    with patch("app.registry_client.make_client", return_value=mock_client):
+        result = await get_remote_digest("ghcr.io/owner/app:latest")
+
+    assert result.digest is None
+    assert result.reason == "registry_error"
+
+
+@pytest.mark.asyncio
+async def test_get_remote_digest_dockerhub_token_shape_error_is_registry_error():
+    """The Docker Hub token endpoint answered but the response shape is
+    unexpected (e.g. no "token" key) — this is a registry_error, not a
+    network fault, so it must not be mislabelled unreachable."""
+    token_resp = MagicMock()
+    token_resp.raise_for_status = MagicMock()
+    token_resp.json.return_value = {}  # no "token" key -> KeyError
+
+    mock_client = AsyncMock()
+    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_client.__aexit__ = AsyncMock(return_value=False)
+    mock_client.get = AsyncMock(return_value=token_resp)
+
+    with patch("app.registry_client.make_client", return_value=mock_client):
+        result = await get_remote_digest("nginx:latest")
+
+    assert result.digest is None
+    assert result.reason == "registry_error"
