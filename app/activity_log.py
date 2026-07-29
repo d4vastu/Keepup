@@ -49,34 +49,26 @@ _OUTPUT_UNAVAILABLE = "Output unavailable — it was not written to disk."
 # ---------------------------------------------------------------------------
 
 
-def _load_index_ex() -> tuple[list[dict], bool]:
-    """Return ``(entries, quarantined)``.
+def _load_index() -> list[dict]:
+    """Return the index, or an empty list if it is missing or unreadable.
 
     Non-dict elements are dropped rather than left to crash a later ``.get``
-    call on whatever survived the JSON parse. ``quarantined`` is True only
-    when this call just moved an unreadable index out of the way — record_run
-    uses that to skip the orphan-file sweep for this one cycle, so quarantining
-    a bad index doesn't also erase every output file it used to point to.
+    call on whatever survived the JSON parse.
     """
     if not _INDEX_PATH.exists():
-        return [], False
+        return []
     try:
         data = json.loads(_INDEX_PATH.read_text())
         if not isinstance(data, list):
             raise ValueError("index is not a list")
-        return [e for e in data if isinstance(e, dict)], False
+        return [e for e in data if isinstance(e, dict)]
     except Exception as exc:
         log.error("Activity index unreadable (%s) — preserved as index.json.corrupt", exc)
         try:
             os.replace(_INDEX_PATH, _ACTIVITY_DIR / "index.json.corrupt")
         except OSError:
             pass
-        return [], True
-
-
-def _load_index() -> list[dict]:
-    """Return the index, or an empty list if it is missing or unreadable."""
-    return _load_index_ex()[0]
+        return []
 
 
 def _save_index(entries: list[dict]) -> None:
@@ -115,24 +107,47 @@ def _write_output(run_id: str, lines: list[str]) -> int:
         return 0
 
 
-def _delete_orphan_outputs(keep_ids: set[str]) -> None:
-    """Remove output files with no surviving index record.
+def _delete_output_files(run_ids: set[str]) -> None:
+    """Delete the output files for records that were just pruned.
 
-    Defensive throughout: cleanup is housekeeping, and must never be the
-    reason a run fails to be recorded. Callers must only invoke this after
-    the index that defines ``keep_ids`` has actually been committed to disk —
-    otherwise a crash between deletion and the index write can leave records
-    pointing at files that no longer exist.
+    Provenance here is known — these ids came from index records that
+    genuinely finished and then aged or counted out — so deleting them
+    outright is safe. Defensive throughout: cleanup is housekeeping, and must
+    never be the reason a run fails to be recorded. Callers must only invoke
+    this after the new index (which no longer lists these ids) has actually
+    been committed to disk — otherwise a crash between deletion and the index
+    write can leave surviving records pointing at files that no longer exist.
+    """
+    for run_id in run_ids:
+        if not run_id:
+            continue
+        try:
+            (_RUNS_DIR / f"{run_id}.log").unlink(missing_ok=True)
+        except OSError:
+            pass
+
+
+def _sweep_aged_orphans(keep_ids: set[str]) -> None:
+    """Delete output files with no index record at all, once they're old.
+
+    Provenance here is unknown — an orphan could be quarantine fallout, or a
+    crash between the output write and the index write, and it might be the
+    only surviving copy of a failed run's output. So it isn't deleted on
+    sight; it's left to age out under the same MAX_AGE_DAYS retention the
+    module already promises for everything else, which needs no operator to
+    notice anything happened.
     """
     if not _RUNS_DIR.is_dir():
         return
+    cutoff = datetime.now(timezone.utc).timestamp() - MAX_AGE_DAYS * 86400
     try:
-        stale = [p for p in _RUNS_DIR.glob("*.log") if p.stem not in keep_ids]
+        candidates = [p for p in _RUNS_DIR.glob("*.log") if p.stem not in keep_ids]
     except OSError:
         return
-    for path in stale:
+    for path in candidates:
         try:
-            path.unlink()
+            if path.stat().st_mtime < cutoff:
+                path.unlink()
         except OSError:
             pass
 
@@ -152,23 +167,27 @@ def _parse_ts(value: str, default: datetime) -> datetime:
     return parsed
 
 
-def _select_kept(entries: list[dict], protect_id: str = "") -> list[dict]:
-    """Return the records to keep after MAX_ENTRIES/MAX_AGE_DAYS.
+def _select_kept(
+    entries: list[dict], protect_id: str = ""
+) -> tuple[list[dict], list[dict]]:
+    """Split ``entries`` into ``(kept, dropped)`` after MAX_ENTRIES/MAX_AGE_DAYS.
 
-    Pure selection — no filesystem side effects; deletion of whatever this
-    drops is a separate step the caller runs only after the selection has
-    been durably saved. ``protect_id`` (the record just inserted by this
-    call) is exempt from the age cutoff, so a skewed host clock can't produce
-    a run id that record_run hands back only for get_run to immediately
-    resolve to None.
+    Pure selection — no filesystem side effects; deleting the dropped
+    records' files is a separate step the caller runs only after the
+    selection has been durably saved. ``protect_id`` (the record just
+    inserted by this call) is exempt from the age cutoff, so a skewed host
+    clock can't produce a run id that record_run hands back only for get_run
+    to immediately resolve to None.
     """
     now = datetime.now(timezone.utc)
     cutoff = now - timedelta(days=MAX_AGE_DAYS)
-    return [
-        e
-        for e in entries[:MAX_ENTRIES]
-        if e.get("id") == protect_id or _parse_ts(e.get("started_at", ""), now) >= cutoff
-    ]
+    kept, dropped = [], list(entries[MAX_ENTRIES:])
+    for e in entries[:MAX_ENTRIES]:
+        if e.get("id") == protect_id or _parse_ts(e.get("started_at", ""), now) >= cutoff:
+            kept.append(e)
+        else:
+            dropped.append(e)
+    return kept, dropped
 
 
 # ---------------------------------------------------------------------------
@@ -214,12 +233,12 @@ def record_run(
                 "error": error,
                 "line_count": line_count,
             }
-            entries, quarantined = _load_index_ex()
+            entries = _load_index()
             entries.insert(0, record)
-            kept = _select_kept(entries, protect_id=run_id)
+            kept, dropped = _select_kept(entries, protect_id=run_id)
             _save_index(kept)
-            if not quarantined:
-                _delete_orphan_outputs({e.get("id", "") for e in kept})
+            _delete_output_files({e.get("id", "") for e in dropped})
+            _sweep_aged_orphans({e.get("id", "") for e in kept})
         return run_id
     except Exception:
         log.exception("Failed to record activity for %s %s", kind, target)

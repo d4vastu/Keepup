@@ -181,14 +181,35 @@ def test_record_run_id_is_never_pruned_on_its_own_insertion():
 
 
 def test_prune_removes_orphan_log_files():
+    """An orphan .log file with no index record at all — provenance unknown —
+    is swept only once it's old enough (past MAX_AGE_DAYS) to be unlikely to
+    be the only surviving copy of something worth recovering."""
+    import os
+
     import app.activity_log as al
 
     al._RUNS_DIR.mkdir(parents=True, exist_ok=True)
     orphan = al._RUNS_DIR / "deadbeef.log"
     orphan.write_text("no index record points here")
+    old_time = (datetime.now(timezone.utc) - timedelta(days=al.MAX_AGE_DAYS + 1)).timestamp()
+    os.utime(orphan, (old_time, old_time))
 
     _record()
     assert not orphan.exists()
+
+
+def test_orphan_log_file_newer_than_cutoff_survives():
+    """A fresh orphan (mtime within MAX_AGE_DAYS) must not be swept just
+    because a record_run happens to run pruning — its provenance is unknown
+    and it might be the only surviving copy of a failed run's output."""
+    import app.activity_log as al
+
+    al._RUNS_DIR.mkdir(parents=True, exist_ok=True)
+    orphan = al._RUNS_DIR / "deadbeef.log"
+    orphan.write_text("recent orphan, provenance unknown")
+
+    _record()
+    assert orphan.exists()
 
 
 def test_save_index_failure_leaves_previous_index_intact(monkeypatch):
