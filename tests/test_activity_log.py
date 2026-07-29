@@ -7,12 +7,14 @@ import pytest
 
 
 @pytest.fixture(autouse=True)
-def _paths(data_dir, monkeypatch):
-    import app.activity_log as al
+def _use_data_dir(data_dir):
+    """Activate the data_dir fixture for every test in this module.
 
-    monkeypatch.setattr(al, "_ACTIVITY_DIR", data_dir / "activity")
-    monkeypatch.setattr(al, "_INDEX_PATH", data_dir / "activity" / "index.json")
-    monkeypatch.setattr(al, "_RUNS_DIR", data_dir / "activity" / "runs")
+    data_dir (in conftest.py) already monkeypatches app.activity_log's
+    module-level paths onto the temp dir; this just makes every test request
+    it without re-patching the same attributes a second time here.
+    """
+    return data_dir
 
 
 def _record(**kw):
@@ -84,6 +86,17 @@ def test_get_recent_filters():
     assert len(get_recent()) == 2
 
 
+def test_get_recent_limit_truncates():
+    from app.activity_log import get_recent
+
+    for i in range(5):
+        _record(target=f"host{i}")
+
+    limited = get_recent(limit=2)
+    assert len(limited) == 2
+    assert [e["target"] for e in limited] == ["host4", "host3"]
+
+
 def test_duration_from_started_at():
     from app.activity_log import get_recent
 
@@ -116,15 +129,55 @@ def test_prune_by_count_deletes_output_files(monkeypatch):
     assert not (al._RUNS_DIR / f"{first}.log").exists()
 
 
-def test_prune_by_age(monkeypatch):
+def test_prune_by_age():
+    """An existing record older than MAX_AGE_DAYS is dropped once a new run
+    triggers pruning.
+
+    Note: the *just-inserted* record is exempt from this cutoff (see
+    test_record_run_id_is_never_pruned_on_its_own_insertion) — so this seeds
+    the ancient record directly into the index rather than via record_run,
+    to test age-pruning of a pre-existing record deterministically.
+    """
+    import app.activity_log as al
     from app.activity_log import get_recent
 
+    al._ACTIVITY_DIR.mkdir(parents=True, exist_ok=True)
     old = (datetime.now(timezone.utc) - timedelta(days=91)).isoformat()
-    _record(target="ancient", started_at=old)
-    assert get_recent() == [] or get_recent()[0]["target"] != "ancient"
+    al._INDEX_PATH.write_text(
+        json.dumps(
+            [
+                {
+                    "id": "aaaaaaaa",
+                    "kind": "os_upgrade",
+                    "target": "ancient",
+                    "target_name": "Ancient",
+                    "trigger": "manual",
+                    "status": "success",
+                    "started_at": old,
+                    "finished_at": old,
+                    "duration_s": 0,
+                    "error": "",
+                    "line_count": 0,
+                }
+            ]
+        )
+    )
 
     _record(target="fresh")
     assert [e["target"] for e in get_recent()] == ["fresh"]
+
+
+def test_record_run_id_is_never_pruned_on_its_own_insertion():
+    """A skewed host clock (started_at far in the past) must not make
+    record_run hand back an id that's already gone by the time it returns."""
+    from app.activity_log import get_recent, get_run
+
+    old = (datetime.now(timezone.utc) - timedelta(days=91)).isoformat()
+    run_id = _record(target="clock-skew", started_at=old)
+
+    assert run_id
+    assert get_run(run_id) is not None
+    assert [e["target"] for e in get_recent()] == ["clock-skew"]
 
 
 def test_prune_removes_orphan_log_files():
@@ -138,12 +191,30 @@ def test_prune_removes_orphan_log_files():
     assert not orphan.exists()
 
 
-def test_index_written_atomically():
-    """No .tmp file is left behind after a write."""
-    import app.activity_log as al
+def test_save_index_failure_leaves_previous_index_intact(monkeypatch):
+    """A failed atomic replace (e.g. disk full) must not corrupt or drop the
+    previously committed index — only the new record is lost, not history.
 
-    _record()
-    assert list(al._ACTIVITY_DIR.glob("*.tmp")) == []
+    A naive write_text() with no tmp file would pass a weaker assertion here
+    (e.g. "no .tmp file is left behind") even without real atomicity, so this
+    forces os.replace to fail mid-write and checks the prior state survives.
+    """
+    import app.activity_log as al
+    from app.activity_log import get_recent
+
+    _record(target="safe")
+    assert [e["target"] for e in get_recent()] == ["safe"]
+
+    real_replace = al.os.replace
+
+    def boom(*a, **kw):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(al.os, "replace", boom)
+    assert _record(target="doomed") == ""
+
+    monkeypatch.setattr(al.os, "replace", real_replace)
+    assert [e["target"] for e in get_recent()] == ["safe"]
 
 
 def test_corrupt_index_preserved_and_treated_as_empty():
@@ -166,6 +237,65 @@ def test_index_that_is_not_a_list_is_corrupt():
 
     assert get_recent() == []
     assert (al._ACTIVITY_DIR / "index.json.corrupt").exists()
+
+
+def test_index_with_non_dict_entries_does_not_wedge_the_module():
+    """A list that parses fine but holds junk elements (e.g. a hand-edited or
+    half-written index) must not crash every later record_run/get_recent/
+    get_run call with an AttributeError on `.get`."""
+    import app.activity_log as al
+    from app.activity_log import get_recent, get_run
+
+    al._ACTIVITY_DIR.mkdir(parents=True, exist_ok=True)
+    al._INDEX_PATH.write_text(json.dumps(["junk", 5]))
+
+    assert get_recent() == []
+    assert get_recent(status="error") == []
+    assert get_run("deadbeef") is None
+
+    run_id = _record(target="recovered")
+    assert run_id
+    assert [e["target"] for e in get_recent()] == ["recovered"]
+
+
+def test_concurrent_record_run_keeps_every_output_file():
+    """The lock must cover the output write and the index update together.
+
+    Splitting them lets one thread's prune sweep (computed from an index that
+    doesn't yet contain a second thread's just-written record) delete that
+    second thread's output file before its index record exists — leaving an
+    index entry with line_count > 0 pointing at a file that isn't there.
+    """
+    import threading
+
+    from app.activity_log import get_run_output, record_run
+
+    n = 40
+    results: list[str] = [""] * n
+    lock = threading.Lock()
+
+    def worker(i):
+        run_id = record_run(
+            kind="os_upgrade",
+            target=f"host{i}",
+            target_name=f"Host {i}",
+            trigger="manual",
+            status="success",
+            output=[f"line-{i}"],
+        )
+        with lock:
+            results[i] = run_id
+
+    threads = [threading.Thread(target=worker, args=(i,)) for i in range(n)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert all(results)
+    assert len(set(results)) == n
+    for i, run_id in enumerate(results):
+        assert get_run_output(run_id) == [f"line-{i}"]
 
 
 def test_record_run_never_raises(monkeypatch):
@@ -194,6 +324,30 @@ def test_output_write_failure_still_records_the_run(monkeypatch):
     assert run_id
     assert get_recent()[0]["line_count"] == 0
     assert "unavailable" in get_run_output(run_id)[0].lower()
+
+
+def test_output_with_non_string_elements_does_not_lose_the_record():
+    """A non-str element (e.g. a stray None or exit code) in the output list
+    must not escape as a TypeError and take the whole metadata record down
+    with it — only the offending line should be coerced to text."""
+    from app.activity_log import get_recent, get_run_output
+
+    run_id = _record(output=["ok", None, 3])
+
+    assert run_id
+    assert get_recent()[0]["target"] == "my-host"
+    assert get_run_output(run_id) == ["ok", "None", "3"]
+
+
+def test_output_line_count_matches_embedded_newlines_on_read_back():
+    """A caller appending a multi-line chunk as one list element (job runners
+    do) must get back the same number of lines it wrote, not fewer."""
+    from app.activity_log import get_recent, get_run_output
+
+    run_id = _record(output=["step 1\nstep 2", "step 3"])
+
+    assert get_recent()[0]["line_count"] == 3
+    assert get_run_output(run_id) == ["step 1", "step 2", "step 3"]
 
 
 def test_missing_output_file_reports_unavailable():
