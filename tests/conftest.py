@@ -66,6 +66,13 @@ def data_dir(tmp_path, monkeypatch):
     monkeypatch.setattr(aul, "_DATA_DIR", d)
     monkeypatch.setattr(aul, "_LOG_PATH", d / "auto_update_log.json")
 
+    import app.activity_log as al
+
+    monkeypatch.setattr(al, "_DATA_DIR", d)
+    monkeypatch.setattr(al, "_ACTIVITY_DIR", d / "activity")
+    monkeypatch.setattr(al, "_INDEX_PATH", d / "activity" / "index.json")
+    monkeypatch.setattr(al, "_RUNS_DIR", d / "activity" / "runs")
+
     # Redirect audit log to temp dir so tests can read and verify entries.
     import app.audit as audit_mod
 
