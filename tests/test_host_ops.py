@@ -80,11 +80,115 @@ async def test_run_os_update_node_uses_ssh():
     with patch(
         "app.host_ops.run_host_update_buffered",
         new=AsyncMock(return_value=["node upgraded"]),
-    ) as mock_ssh:
+    ) as mock_ssh, patch(
+        "app.host_ops.get_integration_credentials",
+        return_value={"ssh_user": "root", "ssh_password": "pw"},
+    ):
         lines = await run_os_update(host, {})
 
     assert lines == ["node upgraded"]
     mock_ssh.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_run_os_update_node_supplies_integration_ssh_identity():
+    """OP#232: a node's config entry has no `user` — it comes from the integration.
+
+    The Proxmox integration auto-adds node hosts with ``user=None``, so the
+    stored entry is just name/host/proxmox_node. Routing that raw dict at the
+    plain-SSH path made every node upgrade die in 0.0s with "has no SSH user
+    configured". The upgrade must resolve its identity the same way the node's
+    reboot check already does.
+    """
+    from app.host_ops import run_os_update
+
+    # Exactly what the auto-add call sites write to config.yml — no `user`.
+    host = {"slug": "proxmox-ve-pve", "name": "Proxmox VE (pve)",
+            "host": "192.168.5.226", "proxmox_node": "pve"}
+
+    with patch(
+        "app.host_ops.run_host_update_buffered",
+        new=AsyncMock(return_value=["node upgraded"]),
+    ) as mock_ssh, patch(
+        "app.host_ops.get_integration_credentials",
+        return_value={"ssh_user": "root", "ssh_password": "pw", "ssh_port": 22},
+    ):
+        lines = await run_os_update(host, {})
+
+    assert lines == ["node upgraded"]
+    sent_host, sent_creds = mock_ssh.await_args.args
+    assert sent_host["user"] == "root", "node upgrade must carry an SSH user"
+    assert sent_host["host"] == "192.168.5.226"
+    assert sent_creds["ssh_password"] == "pw"
+
+
+@pytest.mark.asyncio
+async def test_run_os_update_node_never_raises_missing_ssh_user():
+    """OP#232: the resolved node entry must survive the real `_connect` guard.
+
+    Asserts on the failure the user actually saw rather than on dispatch alone:
+    `_connect` raises ValueError before any I/O when `user` is blank, which is
+    what produced a 0.0s run with an empty output file.
+    """
+    import asyncssh
+
+    from app.host_ops import _node_ssh_context
+    from app.ssh_client import _connect
+
+    host = {"slug": "proxmox-ve-pve", "name": "Proxmox VE (pve)",
+            "host": "192.168.5.226", "proxmox_node": "pve"}
+
+    with patch(
+        "app.host_ops.get_integration_credentials",
+        return_value={"ssh_user": "root", "ssh_password": "pw"},
+    ):
+        host_entry, ssh_creds = _node_ssh_context(host)
+
+    with patch.object(asyncssh, "connect", new=AsyncMock(return_value="conn")) as conn:
+        assert await _connect(host_entry, ssh_creds) == "conn"
+
+    assert conn.await_args.kwargs["username"] == "root"
+    assert conn.await_args.kwargs["host"] == "192.168.5.226"
+
+
+@pytest.mark.asyncio
+async def test_node_ssh_context_falls_back_to_root_when_user_blank():
+    """A stored-but-empty ssh_user must not reintroduce the userless entry.
+
+    `.get("ssh_user", "root")` returns "" when the key exists and is empty,
+    which would send a blank user straight back into `_connect`.
+    """
+    from app.host_ops import _node_ssh_context
+
+    host = {"name": "Proxmox VE (pve)", "host": "192.168.5.226",
+            "proxmox_node": "pve"}
+    with patch(
+        "app.host_ops.get_integration_credentials",
+        return_value={"ssh_user": "", "ssh_port": None},
+    ):
+        host_entry, ssh_creds = _node_ssh_context(host)
+
+    assert host_entry["user"] == "root"
+    assert host_entry["port"] == 22
+    assert ssh_creds["user"] == "root"
+
+
+@pytest.mark.asyncio
+async def test_run_os_update_vm_uses_raw_host_and_creds():
+    """A Proxmox VM has its own kernel and SSH identity — unchanged by OP#232."""
+    from app.host_ops import run_os_update
+
+    host = {"slug": "vm", "host": "1.2.3.4", "user": "admin",
+            "proxmox_node": "pve", "proxmox_vmid": 200, "proxmox_type": "vm"}
+    creds = {"ssh_password": "vm-pw"}
+    with patch(
+        "app.host_ops.run_host_update_buffered",
+        new=AsyncMock(return_value=["vm upgraded"]),
+    ) as mock_ssh:
+        lines = await run_os_update(host, creds)
+
+    assert lines == ["vm upgraded"]
+    mock_ssh.assert_awaited_once_with(host, creds)
 
 
 @pytest.mark.asyncio

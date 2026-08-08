@@ -83,11 +83,14 @@ def _node_ssh_context(host: dict) -> tuple[dict, dict]:
     own address. Credentials come from the stored Proxmox integration creds.
     """
     px_creds = get_integration_credentials("proxmox")
+    # `or` rather than a .get default: a stored-but-empty ssh_user would
+    # otherwise pass "" straight through to _connect, which rejects a blank
+    # user before opening a socket (OP#232).
     host_entry = {
         "name": host.get("name", host.get("host", "")),
         "host": host.get("host", ""),
-        "user": px_creds.get("ssh_user", "root"),
-        "port": px_creds.get("ssh_port", 22),
+        "user": px_creds.get("ssh_user") or "root",
+        "port": px_creds.get("ssh_port") or 22,
     }
     ssh_creds = {
         "user": host_entry["user"],
@@ -101,12 +104,22 @@ def _node_ssh_context(host: dict) -> tuple[dict, dict]:
 
 async def run_os_update(host: dict, creds: dict) -> list[str]:
     """Run the OS upgrade for ``host`` using the right mechanism for its kind."""
-    if classify_host(host) == "lxc":
+    kind = classify_host(host)
+    if kind == "lxc":
         client = await build_proxmox_client()
         ssh_host, ssh_creds = _lxc_ssh_context(host)
         return await client.upgrade_lxc(
             host["proxmox_node"], host["proxmox_vmid"], ssh_host, ssh_creds
         )
+    if kind == "node":
+        # A node upgrades over plain SSH (it is a Debian host), but its stored
+        # config entry carries no user and no credentials of its own — the
+        # integration auto-adds it with `user=None`. Identity comes from the
+        # Proxmox integration creds, exactly as the reboot check resolves it.
+        # Without this, every node upgrade died in _connect before any I/O
+        # with "has no SSH user configured" (OP#232).
+        host_entry, ssh_creds = _node_ssh_context(host)
+        return await run_host_update_buffered(host_entry, ssh_creds)
     return await run_host_update_buffered(host, creds)
 
 
