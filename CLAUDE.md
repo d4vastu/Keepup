@@ -32,6 +32,32 @@ self-contained PR descriptions, and the README is part of the product.
   touches config-derived IDs.
 - **Lint with ruff**: `ruff check app/ tests/` must pass.
 
+## QA Rules
+
+Mocks answer instantly and never time out, so a fully-mocked suite is blind to
+a whole class of defect. These rules exist because of OP#228: a Portainer
+redeploy inherited a 15-second read timeout, so every redeploy slower than that
+was reported as a *failure* while succeeding server-side. No test caught it —
+the mocked client returned immediately, so nothing ever waited.
+
+- **Timeouts on long-running calls are explicit and asserted.** Any network
+  call that waits on real work (redeploys, upgrades, reboots) must pass its own
+  timeout rather than inheriting the default, and a test must assert that
+  timeout is generous. Inheriting a default is a decision; make it a visible
+  one.
+- **Test the message-less failure.** For every persisted or user-visible error
+  path, include a case where the exception carries no message (`TimeoutError()`,
+  `httpx.ReadTimeout("")`). Assert on the *content* of what the user ends up
+  seeing, not just that a failure was flagged. `status == "error"` passing
+  while the error text is empty is how OP#228 stayed invisible.
+- **Live QA must include one genuinely real operation.** Stub what is dangerous,
+  but never stub everything: a QA pass where every underlying call is faked
+  proves only that the plumbing is connected. At least one end-to-end action
+  must hit the real external service, on real data, and be observed.
+- **Verify a failure is diagnosable, not just detected.** When QA sees a run
+  fail, read the stored/reported detail and confirm it names the cause. A
+  failure report that says nothing is its own bug.
+
 ## Branch and commit conventions
 
 - Topic branches: `feat/<slug>`, `fix/<slug>`, `docs/<slug>`, `chore/<slug>`.

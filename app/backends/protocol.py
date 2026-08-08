@@ -42,3 +42,13 @@ class ContainerBackend(Protocol):
     async def update_stack(self, ref: str) -> list[str]:
         """Pull and redeploy ``ref``. Returns the captured command output."""
         ...
+
+    async def describe_ref(self, ref: str) -> str:
+        """Human-readable name for ``ref``, for labelling a run.
+
+        Portainer refs are ``{stack_id}:{endpoint_id}`` and carry no name at
+        all, so the caller cannot derive one by parsing. Implementations should
+        fall back to the ref rather than raising — a run must never fail
+        because it could not be named nicely.
+        """
+        ...

@@ -293,6 +293,17 @@ _MIN_SECRET_LEN = 8
 REDACTED = "***"
 
 
+def exc_text(exc: BaseException) -> str:
+    """Readable text for an exception, even when it carries no message.
+
+    httpx timeouts stringify to ``""``, which produced job errors and activity
+    records naming neither the failure nor anything else — the one case this
+    module exists to explain, explaining nothing. A class name is a poor
+    description but an infinitely better one than the empty string.
+    """
+    return str(exc) or exc.__class__.__name__
+
+
 def _secret_values() -> set[str]:
     """Every stored credential value worth masking, host and integration alike."""
     from .credentials import _load_store

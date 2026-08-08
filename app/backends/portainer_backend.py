@@ -35,6 +35,12 @@ class PortainerBackend:
             )
         return enriched
 
+    async def describe_ref(self, ref: str) -> str:
+        """Resolve ``{stack_id}:{endpoint_id}`` to the stack's name."""
+        stack_id = ref.split(":", 1)[0]
+        stack = await self._client.get(f"/api/stacks/{stack_id}")
+        return (stack or {}).get("Name", "") or ref
+
     async def update_stack(self, ref: str) -> list[str]:
         log.info("Portainer backend: triggering update for ref %s", ref)
         stack_id_str, endpoint_id_str = ref.split(":", 1)

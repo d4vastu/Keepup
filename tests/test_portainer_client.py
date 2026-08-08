@@ -627,3 +627,93 @@ async def test_portainer_backend_update_stack_returns_lines():
     assert isinstance(lines, list)
     assert any("10" in line for line in lines)
     assert any("Portainer does not return" in line for line in lines)
+
+
+# ---------------------------------------------------------------------------
+# OP#228 — redeploys must not inherit the short default read timeout
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_redeploy_uses_a_long_timeout(client):
+    """A redeploy pulls images and recreates containers — 15s is not enough.
+
+    The default client timeout made every slow-but-successful redeploy look
+    like a failure, because httpx gave up while Portainer carried on.
+    """
+    import app.portainer_client as pc
+
+    captured = {}
+
+    def fake_factory(**kwargs):
+        captured.update(kwargs)
+        http = MagicMock()
+        http.__aenter__ = AsyncMock(return_value=http)
+        http.__aexit__ = AsyncMock(return_value=False)
+        resp = MagicMock()
+        resp.json.return_value = {"Id": 2, "Status": 1}
+        http.put = AsyncMock(return_value=resp)
+        return http
+
+    with (
+        patch.object(pc, "make_breaker_client", side_effect=fake_factory),
+        patch.object(client, "get", new=AsyncMock(return_value={"Name": "calbre", "Env": []})),
+        patch.object(client, "get_stack_file", new=AsyncMock(return_value="services: {}")),
+        patch("app.portainer_client.get_self_container_id", return_value=""),
+        patch("app.portainer_client.get_self_container_name", return_value=""),
+    ):
+        await client.update_stack(2, 3)
+
+    timeout = captured.get("timeout")
+    assert timeout is not None, "redeploy must pass an explicit timeout"
+    assert timeout.read >= 120, f"redeploy read timeout too short: {timeout.read}"
+
+
+@pytest.mark.asyncio
+async def test_ordinary_reads_keep_the_short_timeout(client):
+    """Only the redeploy is long-running — checks must stay snappy."""
+    import app.portainer_client as pc
+
+    captured = {}
+
+    def fake_factory(**kwargs):
+        captured.update(kwargs)
+        http = MagicMock()
+        http.__aenter__ = AsyncMock(return_value=http)
+        http.__aexit__ = AsyncMock(return_value=False)
+        resp = MagicMock()
+        resp.json.return_value = []
+        http.get = AsyncMock(return_value=resp)
+        return http
+
+    with patch.object(pc, "make_breaker_client", side_effect=fake_factory):
+        await client.get("/api/stacks")
+
+    assert captured.get("timeout") is None
+
+
+@pytest.mark.asyncio
+async def test_portainer_describe_ref_returns_the_stack_name():
+    from unittest.mock import AsyncMock, MagicMock
+
+    from app.backends.portainer_backend import PortainerBackend
+
+    mock_client = MagicMock()
+    mock_client.get = AsyncMock(return_value={"Id": 2, "Name": "calbre"})
+    backend = PortainerBackend(mock_client)
+
+    assert await backend.describe_ref("2:3") == "calbre"
+    mock_client.get.assert_awaited_once_with("/api/stacks/2")
+
+
+@pytest.mark.asyncio
+async def test_portainer_describe_ref_falls_back_to_the_ref():
+    from unittest.mock import AsyncMock, MagicMock
+
+    from app.backends.portainer_backend import PortainerBackend
+
+    mock_client = MagicMock()
+    mock_client.get = AsyncMock(return_value={})
+    backend = PortainerBackend(mock_client)
+
+    assert await backend.describe_ref("2:3") == "2:3"

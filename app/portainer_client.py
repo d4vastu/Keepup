@@ -11,6 +11,7 @@ Handles:
 import asyncio
 import logging
 
+import httpx
 
 from .httpx_client import make_breaker_client
 from .registry_client import (
@@ -23,6 +24,12 @@ from .registry_client import (
     resolve_image_ref,
 )
 from .self_identity import get_self_container_id, get_self_container_name
+
+# A redeploy pulls every image in the stack and recreates its containers, so it
+# is long-running by nature — the 15s default read timeout gave up while
+# Portainer carried on and finished the job, reporting a success as a failure.
+# Only this one call gets the long leash; checks stay on the snappy default.
+_REDEPLOY_TIMEOUT = httpx.Timeout(connect=5, read=600, write=600, pool=30)
 
 log = logging.getLogger(__name__)
 
@@ -53,11 +60,12 @@ class PortainerClient:
             return build_pinned_ssl_ctx(self._pinned_cert_pem)
         return None
 
-    def _client(self):
+    def _client(self, timeout: httpx.Timeout | None = None):
         return make_breaker_client(
             base_url=self.base,
             headers=self.headers,
             ssl_context=self._ssl_ctx(),
+            timeout=timeout,
         )
 
     async def get(self, path: str) -> dict | list:
@@ -66,8 +74,10 @@ class PortainerClient:
             resp.raise_for_status()
             return resp.json()
 
-    async def put(self, path: str, json: dict) -> dict:
-        async with self._client() as c:
+    async def put(
+        self, path: str, json: dict, timeout: httpx.Timeout | None = None
+    ) -> dict:
+        async with self._client(timeout) as c:
             resp = await c.put(path, json=json)
             resp.raise_for_status()
             return resp.json()
@@ -139,7 +149,9 @@ class PortainerClient:
             "pullImage": True,
         }
         result = await self.put(
-            f"/api/stacks/{stack_id}?endpointId={endpoint_id}", json=payload
+            f"/api/stacks/{stack_id}?endpointId={endpoint_id}",
+            json=payload,
+            timeout=_REDEPLOY_TIMEOUT,
         )
         log.info("Portainer: stack %s update complete", stack_name)
         return result

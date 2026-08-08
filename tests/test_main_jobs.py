@@ -1197,3 +1197,106 @@ def test_new_job_stamps_start_time_and_fields():
         assert job["status"] == "running"
     finally:
         main._jobs.pop(job_id, None)
+
+
+# ---------------------------------------------------------------------------
+# OP#228 — a failure with no message must still be diagnosable
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_message_less_failure_records_the_exception_type(config_file, data_dir):
+    """httpx timeouts stringify to "" — the record must not come out blank.
+
+    This is the exact shape of the calibre false-failure: status=error with an
+    empty error and empty output, which explained nothing.
+    """
+    import httpx
+
+    import app.main as main
+    from app.activity_log import get_recent, get_run_output
+
+    _manual_job(main, "empty-err-1", "container_redeploy", label="calbre",
+                target="portainer/2:3")
+
+    backend = MagicMock()
+    backend.BACKEND_KEY = "portainer"
+    backend.update_stack = AsyncMock(side_effect=httpx.ReadTimeout(""))
+
+    with patch("app.main.get_backends", return_value=[backend]):
+        await main._job_run_stack_update("empty-err-1", "portainer", "2:3")
+
+    entry = get_recent()[0]
+    assert entry["status"] == "error"
+    assert entry["error"] == "ReadTimeout"
+    assert get_run_output(entry["id"]) == ["ReadTimeout"]
+    # The live job modal reads the same field, so it is fixed too.
+    assert main._jobs["empty-err-1"]["error"] == "ReadTimeout"
+
+
+@pytest.mark.asyncio
+async def test_message_less_host_update_failure_is_named(config_file, data_dir):
+    import app.main as main
+    from app.activity_log import get_recent
+
+    _manual_job(main, "empty-err-2", "os_upgrade")
+
+    with patch("app.main.run_os_update", new=AsyncMock(side_effect=TimeoutError())):
+        await main._job_run_host_update("empty-err-2", {"name": "My Host"}, {})
+
+    assert get_recent()[0]["error"] == "TimeoutError"
+
+
+def test_exc_text_prefers_the_message_when_there_is_one():
+    import app.main as main
+
+    assert main.exc_text(ValueError("boom")) == "boom"
+    assert main.exc_text(ValueError()) == "ValueError"
+
+
+# ---------------------------------------------------------------------------
+# OP#229 — a Portainer run must be labelled with the stack name, not the ref
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_portainer_run_is_labelled_with_the_stack_name(config_file, data_dir):
+    """Portainer refs are '{stack_id}:{endpoint_id}' — no '/' to split on."""
+    import app.main as main
+    from app.activity_log import get_recent
+
+    _manual_job(main, "label-1", "container_redeploy", label="2:3",
+                target="portainer/2:3")
+
+    backend = MagicMock()
+    backend.BACKEND_KEY = "portainer"
+    backend.update_stack = AsyncMock(return_value=["redeployed"])
+    backend.describe_ref = AsyncMock(return_value="calbre")
+
+    with patch("app.main.get_backends", return_value=[backend]):
+        await main._job_run_stack_update("label-1", "portainer", "2:3")
+
+    assert get_recent()[0]["target_name"] == "calbre"
+    assert main._jobs["label-1"]["label"] == "calbre"
+
+
+@pytest.mark.asyncio
+async def test_label_survives_a_backend_that_cannot_describe(config_file, data_dir):
+    """Naming is a nicety — it must never take the redeploy down with it."""
+    import app.main as main
+    from app.activity_log import get_recent
+
+    _manual_job(main, "label-2", "container_redeploy", label="2:3",
+                target="portainer/2:3")
+
+    backend = MagicMock()
+    backend.BACKEND_KEY = "portainer"
+    backend.update_stack = AsyncMock(return_value=["redeployed"])
+    backend.describe_ref = AsyncMock(side_effect=RuntimeError("API down"))
+
+    with patch("app.main.get_backends", return_value=[backend]):
+        await main._job_run_stack_update("label-2", "portainer", "2:3")
+
+    entry = get_recent()[0]
+    assert entry["status"] == "success"
+    assert entry["target_name"] == "2:3"
