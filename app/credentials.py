@@ -180,8 +180,36 @@ def rename_credentials(old_slug: str, new_slug: str) -> None:
 
 
 def get_integration_credentials(key: str) -> dict:
-    """Return stored credentials for a named integration. Never raises."""
-    return _load_store().get(f"__integration_{key}__", {})
+    """Return stored credentials for a named integration. Never raises.
+
+    Compatibility shim (OP#209): the multi-server migration renames the Proxmox
+    entry to ``__integration_proxmox_{server_id}__``, so a bare ``"proxmox"``
+    lookup would come back empty and silently break every Proxmox upgrade.
+    Until OP#210 threads a server id through the call sites, fall back to the
+    first configured server. Proxmox-specific by design — no other integration
+    is multi-server yet.
+    """
+    store = _load_store()
+    entry = store.get(f"__integration_{key}__")
+    if entry is not None:
+        return entry
+    if key == "proxmox":
+        from .config_manager import get_proxmox_servers
+
+        servers = get_proxmox_servers()
+        if servers:
+            return store.get(f"__integration_proxmox_{servers[0]['id']}__", {})
+    return {}
+
+
+def rename_integration_credentials(old_key: str, new_key: str) -> None:
+    """Move an integration entry to a new key, e.g. during a migration."""
+    if old_key == new_key:
+        return
+    store = _load_store()
+    if f"__integration_{old_key}__" in store:
+        store[f"__integration_{new_key}__"] = store.pop(f"__integration_{old_key}__")
+        _save_store(store)
 
 
 def save_integration_credentials(key: str, **fields) -> None:

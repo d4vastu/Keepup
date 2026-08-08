@@ -38,6 +38,7 @@ from .config_manager import (
     get_proxmox_config,
     get_tofu_migrated,
     mark_tofu_migrated,
+    migrate_proxmox_servers,
     migrate_ssh_config,
     save_opnsense_config,
     save_pbs_config,
@@ -403,6 +404,13 @@ async def _startup() -> None:
     if missing:
         log.warning(
             "%d host(s) have no SSH user configured — set it via Admin › Hosts.", missing
+        )
+    # Before the TOFU pass, which reads and writes the Proxmox config block.
+    migrated_server = migrate_proxmox_servers()
+    if migrated_server:
+        log.info(
+            "Migrated the Proxmox integration to multi-server config (server id: %s)",
+            migrated_server,
         )
     await _migrate_tofu_certs()
     await reload_backends()
