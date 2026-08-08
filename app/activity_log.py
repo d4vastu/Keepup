@@ -191,6 +191,68 @@ def _select_kept(
 
 
 # ---------------------------------------------------------------------------
+# Redaction
+# ---------------------------------------------------------------------------
+
+# Credential fields whose values are secrets worth masking. ``ssh_key`` names a
+# file in the keys directory rather than holding key material, so it is
+# excluded — masking a filename makes the output harder to read for no security
+# gain.
+_SECRET_KEY_HINTS = ("password", "token", "secret", "api_key", "user_key", "passphrase")
+
+# Below this length a "secret" is more likely to collide with ordinary words in
+# the output than it is to be worth masking.
+_MIN_SECRET_LEN = 8
+
+REDACTED = "***"
+
+
+def _secret_values() -> set[str]:
+    """Every stored credential value worth masking, host and integration alike."""
+    from .credentials import _load_store
+
+    values: set[str] = set()
+    for entry in _load_store().values():
+        if not isinstance(entry, dict):
+            continue
+        for key, value in entry.items():
+            if not isinstance(value, str) or len(value) < _MIN_SECRET_LEN:
+                continue
+            if any(hint in key.lower() for hint in _SECRET_KEY_HINTS):
+                values.add(value)
+    return values
+
+
+def redact(lines: list[str]) -> list[str]:
+    """Mask stored credential values in captured output.
+
+    The same text already reaches the job modal, so this is not a new exposure
+    path — but persisting it makes anything a command echoes durable, and the
+    activity directory outlives the process that produced it.
+    """
+    try:
+        secrets = _secret_values()
+    except Exception:
+        log.warning("Could not load credentials for redaction — storing output as-is")
+        return lines
+    if not secrets:
+        return lines
+    # Longest first, so a secret containing another is masked whole rather than
+    # being chewed into gibberish by the shorter one landing first.
+    ordered = sorted(secrets, key=len, reverse=True)
+    out = []
+    for line in lines:
+        # str() for the same reason _write_output does it: a caller may append
+        # an exit code or None, and losing the whole run to an AttributeError
+        # here would defeat the point of recording.
+        line = str(line)
+        for secret in ordered:
+            line = line.replace(secret, REDACTED)
+        out.append(line)
+    return out
+
+
+# ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
 
@@ -219,7 +281,7 @@ def record_run(
         with _lock:
             # Output write, index read and index write must all happen while
             # holding the lock — see its comment for why.
-            line_count = _write_output(run_id, list(output or []))
+            line_count = _write_output(run_id, redact(list(output or [])))
             record = {
                 "id": run_id,
                 "kind": kind,

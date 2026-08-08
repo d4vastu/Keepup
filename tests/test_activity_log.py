@@ -398,3 +398,77 @@ def test_get_run_returns_record():
     run_id = _record(target="lookup-me")
     assert get_run(run_id)["target"] == "lookup-me"
     assert get_run("00000000") is None
+
+
+# ---------------------------------------------------------------------------
+# Redaction
+# ---------------------------------------------------------------------------
+
+
+def test_redacts_stored_secrets():
+    from app.activity_log import get_run_output
+    from app.credentials import save_credentials
+
+    save_credentials("my-host", ssh_password="hunter2-very-secret")
+
+    run_id = _record(output=["connecting with hunter2-very-secret", "ok"])
+    assert get_run_output(run_id) == ["connecting with ***", "ok"]
+
+
+def test_redacts_integration_secrets():
+    from app.activity_log import get_run_output
+    from app.credentials import save_integration_credentials
+
+    save_integration_credentials("dockerhub", token="dckr-pat-abcdefgh12345678")
+
+    run_id = _record(output=["Authorization: Bearer dckr-pat-abcdefgh12345678"])
+    assert get_run_output(run_id) == ["Authorization: Bearer ***"]
+
+
+def test_redaction_masks_the_longest_match_whole():
+    """A secret that contains another must not be half-masked into gibberish."""
+    from app.activity_log import get_run_output
+    from app.credentials import save_credentials
+
+    save_credentials("my-host", ssh_password="pass-outer-inner")
+    save_credentials("other-host", ssh_password="outer-inner")
+
+    run_id = _record(output=["value=pass-outer-inner"])
+    assert get_run_output(run_id) == ["value=***"]
+
+
+def test_redaction_ignores_non_secret_fields():
+    """ssh_key names a file in the keys dir — masking a filename helps nobody."""
+    from app.activity_log import get_run_output
+    from app.credentials import save_credentials
+
+    save_credentials("my-host", ssh_key="id_ed25519_deploy")
+
+    run_id = _record(output=["using key id_ed25519_deploy"])
+    assert get_run_output(run_id) == ["using key id_ed25519_deploy"]
+
+
+def test_redaction_ignores_short_values():
+    """A short 'secret' collides with ordinary words more often than it protects."""
+    from app.activity_log import get_run_output
+    from app.credentials import save_credentials
+
+    save_credentials("my-host", ssh_password="abc")
+
+    run_id = _record(output=["abcdef ghi"])
+    assert get_run_output(run_id) == ["abcdef ghi"]
+
+
+def test_redaction_failure_does_not_lose_the_run(monkeypatch):
+    import app.activity_log as al
+    from app.activity_log import get_recent, get_run_output
+
+    def boom():
+        raise RuntimeError("credential store unavailable")
+
+    monkeypatch.setattr(al, "_secret_values", boom)
+
+    run_id = _record(output=["some output"])
+    assert run_id
+    assert len(get_recent()) == 1
+    assert get_run_output(run_id) == ["some output"]
