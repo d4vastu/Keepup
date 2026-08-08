@@ -26,7 +26,7 @@ from ..registry_client import (
     REASON_REGISTRY_ERROR,
 )
 from ..credentials import get_credentials, get_integration_credentials, resolve_key_path
-from ..config_manager import get_hosts, get_proxmox_config, get_portainer_config, set_docker_monitoring
+from ..config_manager import get_hosts, get_portainer_config, set_docker_monitoring
 from ..self_identity import get_self_container_id
 from .protocol import StackUpdateError
 
@@ -97,8 +97,12 @@ class SSHDockerBackend:
             return host, get_credentials(host["slug"]), lambda c: c
 
         vmid = host["proxmox_vmid"]
-        px_cfg = get_proxmox_config()
-        px_creds = get_integration_credentials("proxmox")
+        # Container discovery must reach the LXC through the *same* server the
+        # update path uses, or a two-server setup would report containers from
+        # one server while upgrading on another (OP#210).
+        from ..host_ops import server_context
+
+        px_cfg, px_creds = server_context(host)
         px_host = urlparse(px_cfg.get("url", "")).hostname or host.get("host", "")
         ssh_user = px_creds.get("ssh_user") or "root"
         ssh_key = px_creds.get("ssh_key") or ""
