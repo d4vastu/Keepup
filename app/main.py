@@ -16,7 +16,7 @@ from slowapi.middleware import SlowAPIMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.middleware.sessions import SessionMiddleware
 
-from .activity_log import record_run
+from .activity_log import exc_text, record_run
 from .admin import router as admin_router
 from .audit import audit, setup_audit_log
 from .auth import admin_exists, get_session_secret, get_session_version
@@ -568,7 +568,7 @@ async def _job_run_host_update(job_id: str, host: dict, creds: dict) -> None:
         log.info("OS upgrade complete on %s", name)
     except Exception as exc:
         _jobs[job_id]["status"] = "error"
-        _jobs[job_id]["error"] = str(exc)
+        _jobs[job_id]["error"] = exc_text(exc)
         log.error("OS upgrade failed on %s: %s", name, exc)
     finally:
         _jobs[job_id]["done"] = True
@@ -585,7 +585,7 @@ async def _job_run_proxmox_node_upgrade(job_id: str, slug: str) -> None:
         log.info("Proxmox node upgrade complete: %s", slug)
     except Exception as exc:
         _jobs[job_id]["status"] = "error"
-        _jobs[job_id]["error"] = str(exc)
+        _jobs[job_id]["error"] = exc_text(exc)
         log.error("Proxmox node upgrade failed on %s: %s", slug, exc)
     finally:
         _jobs[job_id]["done"] = True
@@ -614,7 +614,7 @@ async def _job_run_lxc_upgrade(
         log.info("LXC upgrade complete: %s/%s", node, vmid)
     except Exception as exc:
         _jobs[job_id]["status"] = "error"
-        _jobs[job_id]["error"] = str(exc)
+        _jobs[job_id]["error"] = exc_text(exc)
         log.error("LXC upgrade failed on %s/%s: %s", node, vmid, exc)
     finally:
         _jobs[job_id]["done"] = True
@@ -628,7 +628,7 @@ async def _job_run_host_restart(job_id: str, host: dict, creds: dict) -> None:
         _jobs[job_id]["status"] = "done"
     except Exception as exc:
         _jobs[job_id]["status"] = "error"
-        _jobs[job_id]["error"] = str(exc)
+        _jobs[job_id]["error"] = exc_text(exc)
     finally:
         _jobs[job_id]["done"] = True
         _record_job(job_id)
@@ -662,7 +662,7 @@ async def _job_run_proxmox_node_restart(
             _jobs[job_id]["status"] = "done"
     except Exception as exc:
         _jobs[job_id]["status"] = "error"
-        _jobs[job_id]["error"] = str(exc)
+        _jobs[job_id]["error"] = exc_text(exc)
         log.error("Proxmox node restart failed on %s: %s", slug, exc)
     finally:
         _jobs[job_id]["done"] = True
@@ -676,6 +676,16 @@ async def _job_run_stack_update(job_id: str, backend_key: str, ref: str) -> None
         )
         if backend is None:
             raise ValueError(f"Backend {backend_key!r} not available")
+        # Resolve a readable label before running. Done here rather than in the
+        # route so the click stays instant, and best-effort because a run must
+        # never fail over its own name — Portainer refs are "{id}:{endpoint}"
+        # and cannot be parsed into anything a human recognises.
+        try:
+            name = await backend.describe_ref(ref)
+            if name:
+                _jobs[job_id]["label"] = name
+        except Exception as exc:
+            log.warning("Could not resolve a name for %s: %s", ref, exc_text(exc))
         lines = await backend.update_stack(ref)
         _jobs[job_id]["lines"] = list(lines or []) or [
             "Stack updated — containers restarted with new images."
@@ -684,9 +694,9 @@ async def _job_run_stack_update(job_id: str, backend_key: str, ref: str) -> None
     except Exception as exc:
         # A StackUpdateError carries whatever ran before it failed; keeping it
         # is the whole point — the failure is the case worth reading later.
-        _jobs[job_id]["lines"] = list(getattr(exc, "lines", [])) or [str(exc)]
+        _jobs[job_id]["lines"] = list(getattr(exc, "lines", [])) or [exc_text(exc)]
         _jobs[job_id]["status"] = "error"
-        _jobs[job_id]["error"] = str(exc)
+        _jobs[job_id]["error"] = exc_text(exc)
     finally:
         _jobs[job_id]["done"] = True
         _record_job(job_id)

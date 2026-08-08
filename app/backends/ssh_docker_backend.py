@@ -211,6 +211,13 @@ class SSHDockerBackend:
                 all_entries.extend(r)
         return sorted(all_entries, key=lambda s: (s["endpoint_name"], s["name"]))
 
+    async def describe_ref(self, ref: str) -> str:
+        """SSH refs already carry the name — no lookup needed."""
+        _slug, rest = self._parse_ref(ref)
+        if rest.startswith(_STANDALONE_PREFIX):
+            return rest[len(_STANDALONE_PREFIX):]
+        return rest.split(":", 1)[0] if ":" in rest else rest
+
     async def update_stack(self, ref: str) -> list[str]:
         slug, rest = self._parse_ref(ref)
         host = next((h for h in self._docker_hosts() if h["slug"] == slug), None)

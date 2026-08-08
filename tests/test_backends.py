@@ -3599,3 +3599,18 @@ async def test_self_update_refusal_still_raises_plainly(config_file, data_dir):
         backend = SSHDockerBackend()
         with pytest.raises(ValueError, match="Self-update refused"):
             await backend.update_stack("test-host/sonarr")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "ref,expected",
+    [
+        ("test-host/sonarr", "sonarr"),
+        ("test-host/mystack:sonarr", "mystack"),
+        ("test-host/~calibre", "calibre"),
+    ],
+)
+async def test_ssh_describe_ref_reads_the_name_from_the_ref(ref, expected):
+    """SSH refs already carry the name — no API round trip needed."""
+    backend = SSHDockerBackend()
+    assert await backend.describe_ref(ref) == expected

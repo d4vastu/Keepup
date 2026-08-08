@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 
-from .activity_log import record_run
+from .activity_log import exc_text, record_run
 from .config_manager import get_all_stack_auto_updates, get_hosts
 from .notifications import notify
 from .credentials import get_credentials
@@ -115,11 +115,11 @@ async def _run_os_update(slug: str) -> None:
             target_name=host["name"],
             trigger="scheduled",
             status="error",
-            output=[str(exc)],
+            output=[exc_text(exc)],
             started_at=started,
-            error=str(exc),
+            error=exc_text(exc),
         )
-        notify(f"Auto OS update failed: {host['name']}", str(exc))
+        notify(f"Auto OS update failed: {host['name']}", exc_text(exc))
 
 
 async def _run_stack_update(update_path: str, stack_name: str) -> None:
@@ -177,11 +177,11 @@ async def _run_stack_update(update_path: str, stack_name: str) -> None:
             trigger="scheduled",
             status="error",
             # A StackUpdateError carries the output captured before it failed.
-            output=list(getattr(exc, "lines", [])) or [str(exc)],
+            output=list(getattr(exc, "lines", [])) or [exc_text(exc)],
             started_at=started,
-            error=str(exc),
+            error=exc_text(exc),
         )
-        notify(f"Auto stack update failed: {stack_name}", str(exc))
+        notify(f"Auto stack update failed: {stack_name}", exc_text(exc))
 
 
 # ---------------------------------------------------------------------------
