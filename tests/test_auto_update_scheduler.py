@@ -339,3 +339,27 @@ def test_apply_all_schedules_runs_without_error(config_file):
     from app.auto_update_scheduler import apply_all_schedules
 
     apply_all_schedules()  # Should not raise
+
+
+@pytest.mark.asyncio
+async def test_stack_failure_records_captured_output(config_file):
+    """A failed redeploy stores what ran before it broke, not just the message."""
+    from app.activity_log import get_recent, get_run_output
+    from app.auto_update_scheduler import _run_stack_update, set_backends
+    from app.backends.protocol import StackUpdateError
+
+    mock_backend = MagicMock()
+    mock_backend.BACKEND_KEY = "ssh"
+    mock_backend.update_stack = AsyncMock(
+        side_effect=StackUpdateError(
+            "docker compose pull failed:\nno such image",
+            ["$ docker compose pull", "Error response from daemon: no such image"],
+        )
+    )
+    set_backends([mock_backend])
+
+    await _run_stack_update("ssh/h1/mystack", "mystack")
+
+    entry = get_recent()[0]
+    assert entry["status"] == "error"
+    assert "Error response from daemon: no such image" in get_run_output(entry["id"])

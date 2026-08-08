@@ -28,6 +28,7 @@ from ..registry_client import (
 from ..credentials import get_credentials, get_integration_credentials, resolve_key_path
 from ..config_manager import get_hosts, get_proxmox_config, get_portainer_config, set_docker_monitoring
 from ..self_identity import get_self_container_id
+from .protocol import StackUpdateError
 
 log = logging.getLogger(__name__)
 
@@ -35,6 +36,22 @@ log = logging.getLogger(__name__)
 #   Compose container:  "{project}:{container_name}"   (colon separator)
 #   Standalone:         "~{container_name}"             (tilde prefix)
 _STANDALONE_PREFIX = "~"
+
+
+def _capture(lines: list[str], label: str, result) -> None:
+    """Append a command label and its output to the captured run log.
+
+    The ``$ `` prefix is what the activity page's line classifier and a reader
+    skimming the output both use to tell "here is what Keepup ran" apart from
+    "here is what it printed".
+    """
+    lines.append(f"$ {label}")
+    text = (getattr(result, "stdout", "") or "").rstrip()
+    if text:
+        lines.extend(text.split("\n"))
+    code = getattr(result, "returncode", 0)
+    if code:
+        lines.append(f"[exit {code}]")
 
 # Seconds to wait after recreating a container before confirming it is still
 # running (not crash-looping) — so a container that starts then immediately
@@ -194,7 +211,7 @@ class SSHDockerBackend:
                 all_entries.extend(r)
         return sorted(all_entries, key=lambda s: (s["endpoint_name"], s["name"]))
 
-    async def update_stack(self, ref: str) -> None:
+    async def update_stack(self, ref: str) -> list[str]:
         slug, rest = self._parse_ref(ref)
         host = next((h for h in self._docker_hosts() if h["slug"] == slug), None)
         if host is None:
@@ -202,13 +219,13 @@ class SSHDockerBackend:
 
         if rest.startswith(_STANDALONE_PREFIX):
             container_name = rest[len(_STANDALONE_PREFIX):]
-            await self._update_standalone_container(host, container_name)
+            return await self._update_standalone_container(host, container_name)
         elif ":" in rest:
             project_name, _container_name = rest.split(":", 1)
-            await self._update_compose_project(host, project_name)
+            return await self._update_compose_project(host, project_name)
         else:
             # Backward-compat: old refs that were just project names
-            await self._update_compose_project(host, rest)
+            return await self._update_compose_project(host, rest)
 
     # ------------------------------------------------------------------
     # Internals — discovery
@@ -448,11 +465,12 @@ class SSHDockerBackend:
     # Internals — updates
     # ------------------------------------------------------------------
 
-    async def _update_compose_project(self, host: dict, project_name: str) -> None:
+    async def _update_compose_project(self, host: dict, project_name: str) -> list[str]:
         slug = host["slug"]
         h = host.get("host", slug)
         log.info("Docker SSH: updating compose project %s on %s", project_name, h)
         host_entry, ssh_creds, wrap = self._ssh_params_for(host)
+        lines: list[str] = [f"Updating compose project {project_name!r} on {h}"]
         async with await _connect(host_entry, ssh_creds) as conn:
             # Safety net: refuse to update a project that contains the self-container.
             self_id = get_self_container_id()
@@ -467,6 +485,7 @@ class SSHDockerBackend:
                                 f" compose project {project_name!r} on {h}"
                             )
             binary = await self._detect_compose_binary(conn, wrap, h)
+            lines.append(f"Using compose binary: {binary}")
             config_file = await self._get_config_file(conn, project_name, wrap)
             if config_file:
                 check = await conn.run(
@@ -496,23 +515,36 @@ class SSHDockerBackend:
                         "Docker SSH: compose config %r not found on %s, falling back to -p",
                         config_file, h,
                     )
+                    lines.append(
+                        f"Compose config {config_file!r} not found on {h}"
+                        f" — falling back to project name"
+                    )
                     config_file = ""
+                else:
+                    lines.append(f"Using compose file: {config_file}")
             args = f"-f {shlex.quote(config_file)}" if config_file else f"-p {shlex.quote(project_name)}"
             pull = await conn.run(wrap(f"{binary} {args} pull 2>&1"), check=False)
+            _capture(lines, f"{binary} {args} pull", pull)
             if pull.returncode != 0:
                 log.error("Docker SSH: pull failed for %s on %s", project_name, h)
-                raise RuntimeError(f"{binary} pull failed:\n{pull.stdout}")
+                raise StackUpdateError(f"{binary} pull failed:\n{pull.stdout}", lines)
             up = await conn.run(wrap(f"{binary} {args} up -d 2>&1"), check=False)
+            _capture(lines, f"{binary} {args} up -d", up)
             if up.returncode != 0:
                 log.error("Docker SSH: up -d failed for %s on %s", project_name, h)
-                raise RuntimeError(f"{binary} up -d failed:\n{up.stdout}")
+                raise StackUpdateError(f"{binary} up -d failed:\n{up.stdout}", lines)
         log.info("Docker SSH: %s on %s — compose update complete", project_name, h)
+        lines.append("Compose update complete.")
+        return lines
 
-    async def _update_standalone_container(self, host: dict, container_name: str) -> None:
+    async def _update_standalone_container(
+        self, host: dict, container_name: str
+    ) -> list[str]:
         slug = host["slug"]
         h = host.get("host", slug)
         log.info("Docker SSH: updating standalone container %s on %s", container_name, h)
         host_entry, ssh_creds, wrap = self._ssh_params_for(host)
+        lines: list[str] = [f"Updating standalone container {container_name!r} on {h}"]
         async with await _connect(host_entry, ssh_creds) as conn:
             inspect_result = await conn.run(
                 wrap(f"docker inspect {shlex.quote(container_name)}"), check=False
@@ -532,9 +564,10 @@ class SSHDockerBackend:
             image = inspect_data["Config"]["Image"]
             log.info("Docker SSH: pulling %s for container %s", image, container_name)
             pull = await conn.run(wrap(f"docker pull {shlex.quote(image)} 2>&1"), check=False)
+            _capture(lines, f"docker pull {image}", pull)
             if pull.returncode != 0:
                 log.error("Docker SSH: pull failed for %s on %s", container_name, h)
-                raise RuntimeError(f"docker pull failed:\n{pull.stdout}")
+                raise StackUpdateError(f"docker pull failed:\n{pull.stdout}", lines)
 
             # Verify-before-destroy: rename the live container aside as a backup
             # and stop it (freeing host ports) instead of removing it. The
@@ -547,16 +580,20 @@ class SSHDockerBackend:
             rename = await conn.run(
                 wrap(f"docker rename {name_q} {backup_q} 2>&1"), check=False
             )
+            _capture(lines, f"docker rename {container_name} {backup}", rename)
             if rename.returncode != 0:
                 log.error("Docker SSH: rename failed for %s on %s", container_name, h)
-                raise RuntimeError(
-                    f"docker rename failed (original left untouched):\n{rename.stdout}"
+                raise StackUpdateError(
+                    f"docker rename failed (original left untouched):\n{rename.stdout}",
+                    lines,
                 )
-            await conn.run(wrap(f"docker stop {backup_q}"), check=False)
+            stop = await conn.run(wrap(f"docker stop {backup_q}"), check=False)
+            _capture(lines, f"docker stop {backup}", stop)
 
             run_cmd = _build_docker_run_cmd(inspect_data)
             log.info("Docker SSH: recreating %s", container_name)
             run = await conn.run(wrap(f"{run_cmd} 2>&1"), check=False)
+            _capture(lines, f"docker run (recreating {container_name})", run)
 
             running = False
             if run.returncode == 0:
@@ -578,6 +615,11 @@ class SSHDockerBackend:
                     and fields[0] == "true"
                     and fields[1] == "0"
                 )
+                lines.append(
+                    f"Verified after {_RECREATE_SETTLE_SECONDS}s:"
+                    f" running={fields[0] if fields else 'unknown'}"
+                    f" restarts={fields[1] if len(fields) == 2 else 'unknown'}"
+                )
 
             if not running:
                 log.error(
@@ -587,14 +629,20 @@ class SSHDockerBackend:
                 await conn.run(wrap(f"docker rm -f {name_q}"), check=False)
                 await conn.run(wrap(f"docker rename {backup_q} {name_q}"), check=False)
                 await conn.run(wrap(f"docker start {name_q}"), check=False)
-                raise RuntimeError(
-                    f"docker run failed; rolled back to previous container:\n{run.stdout}"
+                lines.append("Rolled back to the previous container.")
+                raise StackUpdateError(
+                    f"docker run failed; rolled back to previous container:\n{run.stdout}",
+                    lines,
                 )
 
             # Success — the replacement is healthy, drop the backup.
             await conn.run(wrap(f"docker rm {backup_q}"), check=False)
+            lines.append(
+                f"Replacement is still running with no restarts — removed backup {backup}."
+            )
 
         log.info("Docker SSH: %s on %s — standalone container updated", container_name, h)
+        return lines
 
 
 # ------------------------------------------------------------------

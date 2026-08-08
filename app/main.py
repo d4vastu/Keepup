@@ -676,12 +676,15 @@ async def _job_run_stack_update(job_id: str, backend_key: str, ref: str) -> None
         )
         if backend is None:
             raise ValueError(f"Backend {backend_key!r} not available")
-        await backend.update_stack(ref)
-        _jobs[job_id]["lines"] = [
+        lines = await backend.update_stack(ref)
+        _jobs[job_id]["lines"] = list(lines or []) or [
             "Stack updated — containers restarted with new images."
         ]
         _jobs[job_id]["status"] = "done"
     except Exception as exc:
+        # A StackUpdateError carries whatever ran before it failed; keeping it
+        # is the whole point — the failure is the case worth reading later.
+        _jobs[job_id]["lines"] = list(getattr(exc, "lines", [])) or [str(exc)]
         _jobs[job_id]["status"] = "error"
         _jobs[job_id]["error"] = str(exc)
     finally:

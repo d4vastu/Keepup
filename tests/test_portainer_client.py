@@ -609,3 +609,21 @@ def test_rollup_unknown_reason_ignores_known_images():
         {"name": "b", "status": "unknown", "reason": "auth_failed"},
     ]
     assert _rollup_unknown_reason(images) == "auth_failed"
+
+
+@pytest.mark.asyncio
+async def test_portainer_backend_update_stack_returns_lines():
+    """The Portainer path has no command output, so it describes what it did."""
+    from unittest.mock import AsyncMock, MagicMock
+
+    from app.backends.portainer_backend import PortainerBackend
+
+    mock_client = MagicMock()
+    mock_client.update_stack = AsyncMock(return_value={"Id": 10, "Status": 1})
+    backend = PortainerBackend(mock_client)
+
+    lines = await backend.update_stack("10:1")
+
+    assert isinstance(lines, list)
+    assert any("10" in line for line in lines)
+    assert any("Portainer does not return" in line for line in lines)

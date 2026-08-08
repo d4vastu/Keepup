@@ -157,8 +157,6 @@ async def _run_stack_update(update_path: str, stack_name: str) -> None:
 
     started = datetime.now(timezone.utc).isoformat()
     try:
-        # update_stack returns nothing useful until Task 6 gives it captured
-        # output; list(... or []) keeps this correct either way.
         lines = await backend.update_stack(ref)
         record_run(
             kind="container_redeploy",
@@ -178,7 +176,8 @@ async def _run_stack_update(update_path: str, stack_name: str) -> None:
             target_name=stack_name,
             trigger="scheduled",
             status="error",
-            output=[str(exc)],
+            # A StackUpdateError carries the output captured before it failed.
+            output=list(getattr(exc, "lines", [])) or [str(exc)],
             started_at=started,
             error=str(exc),
         )

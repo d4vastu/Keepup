@@ -35,7 +35,20 @@ class PortainerBackend:
             )
         return enriched
 
-    async def update_stack(self, ref: str) -> None:
+    async def update_stack(self, ref: str) -> list[str]:
         log.info("Portainer backend: triggering update for ref %s", ref)
         stack_id_str, endpoint_id_str = ref.split(":", 1)
-        await self._client.update_stack(int(stack_id_str), int(endpoint_id_str))
+        stack_id, endpoint_id = int(stack_id_str), int(endpoint_id_str)
+        lines = [f"Redeploying Portainer stack {stack_id} on endpoint {endpoint_id}…"]
+        result = await self._client.update_stack(stack_id, endpoint_id)
+        status = (result or {}).get("Status", "unknown")
+        lines.append(
+            f"Portainer accepted the redeploy for stack {stack_id} (status {status})."
+        )
+        # Said out loud so a reader comparing this record against an SSH one
+        # knows the thinness is the API's, not a bug in the recording.
+        lines.append(
+            "Portainer does not return per-container pull output;"
+            " check the stack's container logs for detail."
+        )
+        return lines

@@ -3450,3 +3450,152 @@ async def test_compose_redeploy_non_portainer_missing_file_falls_back_to_p(data_
 
     ran = _ran_commands(conn)
     assert any("-p mystack" in c and " pull" in c for c in ran)
+
+
+# ---------------------------------------------------------------------------
+# update_stack returns captured output (activity log)
+# ---------------------------------------------------------------------------
+
+
+def _compose_ps_output(project="sonarr", config="/opt/sonarr/dc.yml"):
+    return json.dumps(
+        {
+            "Names": "/sonarr",
+            "Labels": (
+                f"com.docker.compose.project={project},"
+                f"com.docker.compose.project.config_files={config}"
+            ),
+        }
+    )
+
+
+@pytest.mark.asyncio
+async def test_update_stack_returns_captured_output(config_file, data_dir):
+    """The compose path returns what the commands printed, not a fixed string."""
+    import yaml
+
+    raw = yaml.safe_load(config_file.read_text())
+    raw["hosts"][0]["docker_mode"] = "all"
+    config_file.write_text(yaml.dump(raw))
+
+    conn = _make_multi_conn(
+        [
+            MagicMock(stdout="v2\n", returncode=0),
+            MagicMock(stdout=_compose_ps_output(), returncode=0),
+            MagicMock(stdout="exists", returncode=0),
+            MagicMock(stdout="Pulling sonarr ... done", returncode=0),
+            MagicMock(stdout="Recreating sonarr ... done", returncode=0),
+        ]
+    )
+
+    with patch(
+        "app.backends.ssh_docker_backend._connect", new=AsyncMock(return_value=conn)
+    ):
+        backend = SSHDockerBackend()
+        lines = await backend.update_stack("test-host/sonarr")
+
+    assert isinstance(lines, list)
+    assert any("Pulling sonarr ... done" in line for line in lines)
+    assert any("Recreating sonarr ... done" in line for line in lines)
+    assert any(line.startswith("$ ") and "pull" in line for line in lines)
+    assert any(line.startswith("$ ") and "up -d" in line for line in lines)
+
+
+@pytest.mark.asyncio
+async def test_update_stack_failure_carries_output_captured_so_far(config_file, data_dir):
+    """A failed pull must not throw away the lines that led up to it."""
+    import yaml
+
+    from app.backends.protocol import StackUpdateError
+
+    raw = yaml.safe_load(config_file.read_text())
+    raw["hosts"][0]["docker_mode"] = "all"
+    config_file.write_text(yaml.dump(raw))
+
+    conn = _make_multi_conn(
+        [
+            MagicMock(stdout="v2\n", returncode=0),
+            MagicMock(stdout=_compose_ps_output(), returncode=0),
+            MagicMock(stdout="exists", returncode=0),
+            MagicMock(stdout="Error response from daemon: no such image", returncode=1),
+        ]
+    )
+
+    with patch(
+        "app.backends.ssh_docker_backend._connect", new=AsyncMock(return_value=conn)
+    ):
+        backend = SSHDockerBackend()
+        with pytest.raises(StackUpdateError) as excinfo:
+            await backend.update_stack("test-host/sonarr")
+
+    assert any(
+        "Error response from daemon" in line for line in excinfo.value.lines
+    )
+    assert any("[exit 1]" in line for line in excinfo.value.lines)
+
+
+@pytest.mark.asyncio
+async def test_standalone_update_returns_captured_output(config_file, data_dir):
+    """The standalone path returns pull, backup and verification output."""
+    import yaml
+
+    raw = yaml.safe_load(config_file.read_text())
+    raw["hosts"][0]["docker_mode"] = "all"
+    config_file.write_text(yaml.dump(raw))
+
+    inspect_json = json.dumps(
+        [{"Id": "abc123", "Name": "/sonarr", "Config": {"Image": "linuxserver/sonarr:latest"}}]
+    )
+    conn = _make_multi_conn(
+        [
+            MagicMock(stdout=inspect_json, returncode=0),   # docker inspect
+            MagicMock(stdout="Status: Downloaded newer image", returncode=0),  # pull
+            MagicMock(stdout="", returncode=0),             # rename
+            MagicMock(stdout="", returncode=0),             # stop
+            MagicMock(stdout="newcontainerid", returncode=0),  # run
+            MagicMock(stdout="true 0", returncode=0),       # verify
+            MagicMock(stdout="", returncode=0),             # rm backup
+        ]
+    )
+
+    with (
+        patch("app.backends.ssh_docker_backend._connect", new=AsyncMock(return_value=conn)),
+        patch("app.backends.ssh_docker_backend._RECREATE_SETTLE_SECONDS", 0),
+    ):
+        backend = SSHDockerBackend()
+        lines = await backend.update_stack("test-host/~sonarr")
+
+    assert isinstance(lines, list)
+    assert any("Status: Downloaded newer image" in line for line in lines)
+    assert any("docker pull" in line for line in lines)
+    assert any("still running" in line.lower() or "healthy" in line.lower() for line in lines)
+
+
+@pytest.mark.asyncio
+async def test_self_update_refusal_still_raises_plainly(config_file, data_dir):
+    """The safety net fires before anything ran — a plain error is the honest record."""
+    import yaml
+
+    raw = yaml.safe_load(config_file.read_text())
+    raw["hosts"][0]["docker_mode"] = "all"
+    config_file.write_text(yaml.dump(raw))
+
+    ps_output = json.dumps(
+        {
+            "ID": "selfcontain",
+            "Names": "/keepup",
+            "Labels": "com.docker.compose.project=sonarr",
+        }
+    )
+    conn = _make_multi_conn([MagicMock(stdout=ps_output, returncode=0)])
+
+    with (
+        patch("app.backends.ssh_docker_backend._connect", new=AsyncMock(return_value=conn)),
+        patch(
+            "app.backends.ssh_docker_backend.get_self_container_id",
+            return_value="selfcontain",
+        ),
+    ):
+        backend = SSHDockerBackend()
+        with pytest.raises(ValueError, match="Self-update refused"):
+            await backend.update_stack("test-host/sonarr")
