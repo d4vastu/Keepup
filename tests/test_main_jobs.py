@@ -1054,3 +1054,146 @@ def test_host_update_lxc_job_completes(client):
         response = client.post("/api/host/my-lxc/update")
 
     assert response.status_code == 200
+
+
+# ---------------------------------------------------------------------------
+# Activity recording for manual runs
+# ---------------------------------------------------------------------------
+
+
+def _manual_job(main, job_id, job_type, **overrides):
+    """Seed a job dict shaped the way _new_job builds them."""
+    main._jobs[job_id] = {
+        "done": False,
+        "status": "running",
+        "error": None,
+        "lines": [],
+        "type": job_type,
+        "label": "My Host",
+        "target": "my-host",
+        "sub": "1.2.3.4",
+        "started_at": "2026-07-27T10:00:00+00:00",
+        "activity_id": "",
+        **overrides,
+    }
+    return main._jobs[job_id]
+
+
+@pytest.mark.asyncio
+async def test_manual_os_upgrade_is_recorded(config_file, data_dir):
+    import app.main as main
+    from app.activity_log import get_recent, get_run_output
+
+    _manual_job(main, "rec-job1", "os_upgrade")
+
+    with patch(
+        "app.main.run_os_update",
+        new=AsyncMock(return_value=["Reading package lists...", "0 upgraded"]),
+    ):
+        await main._job_run_host_update("rec-job1", {"name": "My Host"}, {})
+
+    entry = get_recent()[0]
+    assert entry["kind"] == "os_upgrade"
+    assert entry["trigger"] == "manual"
+    assert entry["status"] == "success"
+    assert entry["target"] == "my-host"
+    assert entry["target_name"] == "My Host"
+    assert entry["duration_s"] > 0
+    assert get_run_output(entry["id"])[-1] == "0 upgraded"
+    assert main._jobs["rec-job1"]["activity_id"] == entry["id"]
+
+
+@pytest.mark.asyncio
+async def test_manual_os_upgrade_failure_is_recorded(config_file, data_dir):
+    import app.main as main
+    from app.activity_log import get_recent
+
+    _manual_job(main, "rec-job2", "os_upgrade")
+
+    with patch(
+        "app.main.run_os_update",
+        new=AsyncMock(side_effect=RuntimeError("ssh: connection refused")),
+    ):
+        await main._job_run_host_update("rec-job2", {"name": "My Host"}, {})
+
+    entry = get_recent()[0]
+    assert entry["status"] == "error"
+    assert entry["error"] == "ssh: connection refused"
+    assert entry["trigger"] == "manual"
+
+
+@pytest.mark.asyncio
+async def test_restart_job_records_reboot_kind(config_file, data_dir):
+    import app.main as main
+    from app.activity_log import get_recent
+
+    _manual_job(main, "rec-job3", "os_restart")
+
+    with patch(
+        "app.main.reboot_host_typed", new=AsyncMock(return_value=["Rebooting..."])
+    ):
+        await main._job_run_host_restart("rec-job3", {"name": "My Host"}, {})
+
+    assert get_recent()[0]["kind"] == "reboot"
+
+
+@pytest.mark.asyncio
+async def test_stack_update_job_is_recorded(config_file, data_dir):
+    import app.main as main
+    from app.activity_log import get_recent
+
+    _manual_job(main, "rec-job4", "container_redeploy", label="sonarr",
+                target="portainer/10:1")
+
+    backend = MagicMock()
+    backend.BACKEND_KEY = "portainer"
+    backend.update_stack = AsyncMock(return_value=None)
+
+    with patch("app.main.get_backends", return_value=[backend]):
+        await main._job_run_stack_update("rec-job4", "portainer", "10:1")
+
+    entry = get_recent()[0]
+    assert entry["kind"] == "container_redeploy"
+    assert entry["trigger"] == "manual"
+    assert entry["target"] == "portainer/10:1"
+    assert entry["target_name"] == "sonarr"
+
+
+@pytest.mark.asyncio
+async def test_self_reboot_refusal_is_recorded(config_file, data_dir):
+    """The early return still has to leave a record — it is a real outcome."""
+    import app.main as main
+    from app.activity_log import get_recent, get_run_output
+
+    _manual_job(main, "rec-job5", "os_restart", label="PVE 1", target="pve1")
+
+    with patch("app.main.is_self_on_proxmox_node", return_value=True):
+        await main._job_run_proxmox_node_restart("rec-job5", "pve1", "pve")
+
+    entry = get_recent()[0]
+    assert entry["status"] == "error"
+    assert entry["kind"] == "reboot"
+    assert "refus" in get_run_output(entry["id"])[0].lower()
+
+
+def test_record_job_handles_missing_job():
+    import app.main as main
+
+    main._record_job("no-such-job")  # must not raise
+
+
+def test_new_job_stamps_start_time_and_fields():
+    import app.main as main
+
+    job_id = main._new_job("os_upgrade", "My Host", "my-host", "1.2.3.4")
+    try:
+        job = main._jobs[job_id]
+        assert job["type"] == "os_upgrade"
+        assert job["label"] == "My Host"
+        assert job["target"] == "my-host"
+        assert job["sub"] == "1.2.3.4"
+        assert job["started_at"]
+        assert job["done"] is False
+        assert job["status"] == "running"
+    finally:
+        main._jobs.pop(job_id, None)
