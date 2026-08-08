@@ -1,9 +1,10 @@
 import logging
+from datetime import datetime, timezone
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 
-from .auto_update_log import append_log
+from .activity_log import record_run
 from .config_manager import get_all_stack_auto_updates, get_hosts
 from .notifications import notify
 from .credentials import get_credentials
@@ -55,14 +56,19 @@ async def _run_os_update(slug: str) -> None:
     creds = get_credentials(slug)
 
     if _needs_sudo(host) and not creds.get("sudo_password"):
-        append_log(
-            "os",
-            slug,
-            host["name"],
-            "error",
-            [
-                "Auto-update skipped: sudo password not stored. Save it via Admin → Hosts → Credentials."
+        # Nothing ran, so this is "skipped" rather than a failure — it keeps
+        # the error filter on the activity page meaning "something broke".
+        record_run(
+            kind="os_upgrade",
+            target=slug,
+            target_name=host["name"],
+            trigger="scheduled",
+            status="skipped",
+            output=[
+                "Auto-update skipped: sudo password not stored."
+                " Save it via Admin → Hosts → Credentials."
             ],
+            error="sudo password not stored",
         )
         notify(
             f"Auto-update skipped: {host['name']}",
@@ -70,25 +76,49 @@ async def _run_os_update(slug: str) -> None:
         )
         return
 
+    started = datetime.now(timezone.utc).isoformat()
     try:
         lines = await run_os_update(host, creds)
-        append_log("os", slug, host["name"], "success", lines)
+        record_run(
+            kind="os_upgrade",
+            target=slug,
+            target_name=host["name"],
+            trigger="scheduled",
+            status="success",
+            output=lines,
+            started_at=started,
+        )
 
         if au.get("auto_reboot"):
             if await reboot_required_typed(host, creds):
-                await reboot_host_typed(host, creds)
-                append_log(
-                    "os",
-                    slug,
-                    host["name"],
-                    "success",
-                    [
+                reboot_started = datetime.now(timezone.utc).isoformat()
+                reboot_lines = await reboot_host_typed(host, creds)
+                # A reboot is its own run, not a second os_upgrade entry —
+                # which is all it ever was under the old log.
+                record_run(
+                    kind="reboot",
+                    target=slug,
+                    target_name=host["name"],
+                    trigger="scheduled",
+                    status="success",
+                    output=list(reboot_lines or [])
+                    + [
                         "Auto-reboot triggered — reboot-required flag was set after update."
                     ],
+                    started_at=reboot_started,
                 )
     except Exception as exc:
         logger.exception("Auto OS update failed for %s", slug)
-        append_log("os", slug, host["name"], "error", [str(exc)])
+        record_run(
+            kind="os_upgrade",
+            target=slug,
+            target_name=host["name"],
+            trigger="scheduled",
+            status="error",
+            output=[str(exc)],
+            started_at=started,
+            error=str(exc),
+        )
         notify(f"Auto OS update failed: {host['name']}", str(exc))
 
 
@@ -96,47 +126,62 @@ async def _run_stack_update(update_path: str, stack_name: str) -> None:
     # update_path is "{backend_key}/{ref}", e.g. "portainer/3:1" or "ssh/myhost/mystack"
     parts = update_path.split("/", 1)
     if len(parts) != 2:
-        append_log(
-            "docker",
-            update_path,
-            stack_name,
-            "error",
-            [f"Invalid update_path format: {update_path!r}"],
+        message = f"Invalid update_path format: {update_path!r}"
+        record_run(
+            kind="container_redeploy",
+            target=update_path,
+            target_name=stack_name,
+            trigger="scheduled",
+            status="error",
+            output=[message],
+            error=message,
         )
-        notify(
-            f"Auto stack update failed: {stack_name}",
-            f"Invalid update_path format: {update_path!r}",
-        )
+        notify(f"Auto stack update failed: {stack_name}", message)
         return
 
     backend_key, ref = parts
     backend = next((b for b in _backends if b.BACKEND_KEY == backend_key), None)
     if backend is None:
-        append_log(
-            "docker",
-            update_path,
-            stack_name,
-            "error",
-            [f"Backend {backend_key!r} is not configured or not running."],
+        message = f"Backend {backend_key!r} is not configured or not running."
+        record_run(
+            kind="container_redeploy",
+            target=update_path,
+            target_name=stack_name,
+            trigger="scheduled",
+            status="error",
+            output=[message],
+            error=message,
         )
-        notify(
-            f"Auto stack update failed: {stack_name}",
-            f"Backend {backend_key!r} is not configured or not running.",
-        )
+        notify(f"Auto stack update failed: {stack_name}", message)
         return
 
+    started = datetime.now(timezone.utc).isoformat()
     try:
-        await backend.update_stack(ref)
-        append_log(
-            "docker",
-            update_path,
-            stack_name,
-            "success",
-            ["Stack redeployed — containers restarted with latest images."],
+        # update_stack returns nothing useful until Task 6 gives it captured
+        # output; list(... or []) keeps this correct either way.
+        lines = await backend.update_stack(ref)
+        record_run(
+            kind="container_redeploy",
+            target=update_path,
+            target_name=stack_name,
+            trigger="scheduled",
+            status="success",
+            output=list(lines or [])
+            or ["Stack redeployed — containers restarted with latest images."],
+            started_at=started,
         )
     except Exception as exc:
         logger.exception("Auto stack update failed for %s", update_path)
-        append_log("docker", update_path, stack_name, "error", [str(exc)])
+        record_run(
+            kind="container_redeploy",
+            target=update_path,
+            target_name=stack_name,
+            trigger="scheduled",
+            status="error",
+            output=[str(exc)],
+            started_at=started,
+            error=str(exc),
+        )
         notify(f"Auto stack update failed: {stack_name}", str(exc))
 
 

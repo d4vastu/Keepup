@@ -5,11 +5,13 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 
 @pytest.fixture(autouse=True)
-def _setup(config_file, data_dir, monkeypatch):
-    """Each test gets isolated config and data dirs, and a clean log."""
-    import app.auto_update_log as log_mod
+def _setup(config_file, data_dir):
+    """Each test gets isolated config and data dirs, and a clean activity log.
 
-    monkeypatch.setattr(log_mod, "_LOG_PATH", data_dir / "auto_update_log.json")
+    data_dir (conftest.py) already points app.activity_log at the temp dir;
+    requesting it here is what makes that apply to every test in this module.
+    """
+    return data_dir
 
 
 # ---------------------------------------------------------------------------
@@ -30,7 +32,7 @@ async def test_run_os_update_host_not_found(config_file):
 async def test_run_os_update_disabled(config_file):
     """If os_enabled is False, function returns without running update."""
     from app.auto_update_scheduler import _run_os_update
-    from app.auto_update_log import get_recent
+    from app.activity_log import get_recent
 
     with patch(
         "app.auto_update_scheduler.run_os_update", new=AsyncMock()
@@ -43,10 +45,10 @@ async def test_run_os_update_disabled(config_file):
 
 @pytest.mark.asyncio
 async def test_run_os_update_success(config_file):
-    """Successful update logs to auto_update_log."""
+    """A successful scheduled update is recorded to the activity log."""
     import yaml
     from app.auto_update_scheduler import _run_os_update
-    from app.auto_update_log import get_recent
+    from app.activity_log import get_recent
 
     # Enable auto-update for test-host
     raw = yaml.safe_load(config_file.read_text())
@@ -67,6 +69,8 @@ async def test_run_os_update_success(config_file):
     assert len(entries) == 1
     assert entries[0]["status"] == "success"
     assert entries[0]["target"] == "test-host"
+    assert entries[0]["kind"] == "os_upgrade"
+    assert entries[0]["trigger"] == "scheduled"
 
 
 @pytest.mark.asyncio
@@ -74,7 +78,7 @@ async def test_run_os_update_failure_logs_error(config_file):
     """Exception during update is logged as error."""
     import yaml
     from app.auto_update_scheduler import _run_os_update
-    from app.auto_update_log import get_recent
+    from app.activity_log import get_recent, get_run_output
 
     raw = yaml.safe_load(config_file.read_text())
     raw["hosts"][0]["auto_update"] = {
@@ -93,15 +97,17 @@ async def test_run_os_update_failure_logs_error(config_file):
     entries = get_recent(10)
     assert len(entries) == 1
     assert entries[0]["status"] == "error"
-    assert "SSH timeout" in entries[0]["lines"][0]
+    assert entries[0]["trigger"] == "scheduled"
+    assert "SSH timeout" in entries[0]["error"]
+    assert "SSH timeout" in get_run_output(entries[0]["id"])[0]
 
 
 @pytest.mark.asyncio
 async def test_run_os_update_sudo_required_but_no_password(config_file):
-    """If sudo is needed but not stored, log an error and skip."""
+    """A run that never started is recorded as 'skipped', not as a failure."""
     import yaml
     from app.auto_update_scheduler import _run_os_update
-    from app.auto_update_log import get_recent
+    from app.activity_log import get_recent
 
     raw = yaml.safe_load(config_file.read_text())
     raw["hosts"][0]["auto_update"] = {
@@ -122,7 +128,9 @@ async def test_run_os_update_sudo_required_but_no_password(config_file):
     mock_update.assert_not_called()
     entries = get_recent(10)
     assert len(entries) == 1
-    assert entries[0]["status"] == "error"
+    assert entries[0]["status"] == "skipped"
+    assert entries[0]["kind"] == "os_upgrade"
+    assert entries[0]["trigger"] == "scheduled"
 
 
 @pytest.mark.asyncio
@@ -130,7 +138,7 @@ async def test_run_os_update_with_auto_reboot(config_file):
     """When auto_reboot=True and reboot_required, reboot is called."""
     import yaml
     from app.auto_update_scheduler import _run_os_update
-    from app.auto_update_log import get_recent
+    from app.activity_log import get_recent
 
     raw = yaml.safe_load(config_file.read_text())
     raw["hosts"][0]["auto_update"] = {
@@ -157,7 +165,10 @@ async def test_run_os_update_with_auto_reboot(config_file):
 
     mock_reboot.assert_called_once()
     entries = get_recent(10)
-    assert any(e["status"] == "success" for e in entries)
+    # The reboot is its own run, not a second os_upgrade entry.
+    assert [e["kind"] for e in entries] == ["reboot", "os_upgrade"]
+    assert all(e["status"] == "success" for e in entries)
+    assert all(e["trigger"] == "scheduled" for e in entries)
 
 
 @pytest.mark.asyncio
@@ -208,20 +219,22 @@ async def test_run_os_update_node_reboots_gracefully_not_ssh(config_file):
 async def test_run_stack_update_invalid_path(config_file):
     """Invalid update_path format logs error."""
     from app.auto_update_scheduler import _run_stack_update
-    from app.auto_update_log import get_recent
+    from app.activity_log import get_recent
 
     await _run_stack_update("badformat", "mystack")
 
     entries = get_recent(10)
     assert len(entries) == 1
     assert entries[0]["status"] == "error"
+    assert entries[0]["kind"] == "container_redeploy"
+    assert entries[0]["trigger"] == "scheduled"
 
 
 @pytest.mark.asyncio
 async def test_run_stack_update_no_backend(config_file, monkeypatch):
     """Missing backend logs error."""
     from app.auto_update_scheduler import _run_stack_update, set_backends
-    from app.auto_update_log import get_recent
+    from app.activity_log import get_recent, get_run_output
 
     set_backends([])
     await _run_stack_update("portainer/10:1", "sonarr")
@@ -229,14 +242,14 @@ async def test_run_stack_update_no_backend(config_file, monkeypatch):
     entries = get_recent(10)
     assert len(entries) == 1
     assert entries[0]["status"] == "error"
-    assert "portainer" in entries[0]["lines"][0]
+    assert "portainer" in get_run_output(entries[0]["id"])[0]
 
 
 @pytest.mark.asyncio
 async def test_run_stack_update_success(config_file):
     """Successful stack update logs success."""
     from app.auto_update_scheduler import _run_stack_update, set_backends
-    from app.auto_update_log import get_recent
+    from app.activity_log import get_recent
 
     mock_backend = MagicMock()
     mock_backend.BACKEND_KEY = "portainer"
@@ -248,6 +261,10 @@ async def test_run_stack_update_success(config_file):
     entries = get_recent(10)
     assert len(entries) == 1
     assert entries[0]["status"] == "success"
+    assert entries[0]["kind"] == "container_redeploy"
+    assert entries[0]["trigger"] == "scheduled"
+    assert entries[0]["target"] == "portainer/10:1"
+    assert entries[0]["target_name"] == "sonarr"
     mock_backend.update_stack.assert_called_once_with("10:1")
 
 
@@ -255,7 +272,7 @@ async def test_run_stack_update_success(config_file):
 async def test_run_stack_update_failure_logs_error(config_file):
     """Exception during stack update is logged as error."""
     from app.auto_update_scheduler import _run_stack_update, set_backends
-    from app.auto_update_log import get_recent
+    from app.activity_log import get_recent, get_run_output
 
     mock_backend = MagicMock()
     mock_backend.BACKEND_KEY = "portainer"
@@ -267,7 +284,8 @@ async def test_run_stack_update_failure_logs_error(config_file):
     entries = get_recent(10)
     assert len(entries) == 1
     assert entries[0]["status"] == "error"
-    assert "API error" in entries[0]["lines"][0]
+    assert "API error" in entries[0]["error"]
+    assert "API error" in get_run_output(entries[0]["id"])[0]
 
 
 # ---------------------------------------------------------------------------
