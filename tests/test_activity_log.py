@@ -731,6 +731,11 @@ def test_orphan_sweep_survives_unstatable_file(monkeypatch):
 
     monkeypatch.setattr(al.Path, "stat", stat_but_not_the_orphan)
     assert _record()
+
+    # Undo before asserting: Path.exists() routes through stat() on some
+    # versions, and a bare OSError is not in pathlib's ignore list, so the
+    # assertion would re-enter the patch and re-raise instead of answering.
+    monkeypatch.undo()
     assert orphan.exists()
 
 
