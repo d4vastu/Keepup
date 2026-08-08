@@ -333,7 +333,20 @@ def save_dockerhub_config(username: str) -> None:
 
 
 def get_proxmox_config() -> dict:
-    return load_config().get("proxmox", {})
+    """Return the singleton Proxmox block.
+
+    Compatibility shim (OP#209): after the multi-server migration there is no
+    ``proxmox:`` block, so this resolves to the *first* configured server minus
+    its ``id``. Removed in OP#210, once every call site passes a server id.
+    """
+    config = load_config()
+    legacy = config.get("proxmox")
+    if legacy:
+        return legacy
+    servers = config.get("proxmox_servers") or []
+    if servers:
+        return {k: v for k, v in servers[0].items() if k != "id"}
+    return {}
 
 
 def save_proxmox_config(
@@ -342,7 +355,16 @@ def save_proxmox_config(
     pinned_fingerprint: str = "",
     verify_ssl: bool = True,
 ) -> None:
+    """Write the singleton Proxmox block.
+
+    Compatibility shim (OP#209): once ``proxmox_servers`` exists this writes
+    through to the first server instead of recreating the legacy block, which
+    the migration has already removed. Removed in OP#210.
+    """
     config = load_config()
+    if config.get("proxmox_servers") is not None and not config.get("proxmox"):
+        _save_first_server(config, url, pinned_cert_pem, pinned_fingerprint, verify_ssl)
+        return
     if url:
         existing = config.get("proxmox", {})
         pem = pinned_cert_pem or existing.get("pinned_cert_pem", "")
@@ -355,6 +377,214 @@ def save_proxmox_config(
     else:
         config.pop("proxmox", None)
     save_config(config)
+
+
+def _save_first_server(
+    config: dict,
+    url: str,
+    pinned_cert_pem: str,
+    pinned_fingerprint: str,
+    verify_ssl: bool,
+) -> None:
+    """Back half of the :func:`save_proxmox_config` shim."""
+    servers = config["proxmox_servers"]
+    if not url:
+        if servers:
+            delete_proxmox_server(servers[0]["id"])
+        return
+    if not servers:
+        add_proxmox_server(url, verify_ssl, pinned_cert_pem, pinned_fingerprint)
+        return
+    update_proxmox_server(
+        servers[0]["id"],
+        url=url,
+        verify_ssl=verify_ssl,
+        pinned_cert_pem=pinned_cert_pem or None,
+        pinned_fingerprint=pinned_fingerprint or None,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Multi-server Proxmox (OP#209)
+#
+# A server's id is derived from its URL host and is used as an HTML id / CSS
+# selector in the admin UI, so it must be CSS-safe ([a-z0-9-] only).
+# ---------------------------------------------------------------------------
+
+_PROXMOX_FIELDS = ("proxmox_node", "proxmox_vmid", "proxmox_type", "proxmox_server")
+
+
+def slugify_server_id(url: str) -> str:
+    """Derive a CSS-safe server id from a URL's host.
+
+    ``slugify`` deletes every character outside ``[a-z0-9-]``, which would
+    collapse ``192.168.1.10`` to ``1921681 10``-style digit soup. Dots and
+    colons are the meaningful separators in a host, so map them to hyphens
+    first. ``slugify`` itself is left alone — it derives host slugs, and
+    changing it would silently rewrite every existing host's identity.
+    """
+    from urllib.parse import urlparse
+
+    host = urlparse(url).hostname or url
+    return slugify(host.replace(".", "-").replace(":", "-")) or "proxmox"
+
+
+def get_proxmox_servers() -> list[dict]:
+    return load_config().get("proxmox_servers", []) or []
+
+
+def get_proxmox_server(server_id: str) -> dict:
+    """Return one server entry, or ``{}`` if the id is unknown."""
+    for server in get_proxmox_servers():
+        if server.get("id") == server_id:
+            return server
+    return {}
+
+
+def _unique_server_id(base: str, taken: set[str]) -> str:
+    """Disambiguate two URLs whose hosts slugify to the same id."""
+    if base not in taken:
+        return base
+    suffix = 2
+    while f"{base}-{suffix}" in taken:
+        suffix += 1
+    return f"{base}-{suffix}"
+
+
+def add_proxmox_server(
+    url: str,
+    verify_ssl: bool = True,
+    pinned_cert_pem: str = "",
+    pinned_fingerprint: str = "",
+) -> str:
+    """Append a server and return its derived id."""
+    config = load_config()
+    servers = config.setdefault("proxmox_servers", [])
+    server_id = _unique_server_id(
+        slugify_server_id(url), {s.get("id") for s in servers}
+    )
+    entry: dict = {
+        "id": server_id,
+        "url": url.rstrip("/"),
+        "verify_ssl": verify_ssl,
+    }
+    if pinned_cert_pem:
+        entry["pinned_cert_pem"] = pinned_cert_pem
+        entry["pinned_fingerprint"] = pinned_fingerprint
+    servers.append(entry)
+    save_config(config)
+    return server_id
+
+
+def update_proxmox_server(
+    server_id: str,
+    url: str | None = None,
+    verify_ssl: bool | None = None,
+    pinned_cert_pem: str | None = None,
+    pinned_fingerprint: str | None = None,
+) -> None:
+    """Update a server in place. ``None`` leaves a field unchanged.
+
+    The id is deliberately *not* re-derived from a changed URL — host entries
+    reference it, and rewriting it would orphan them.
+    """
+    config = load_config()
+    for server in config.get("proxmox_servers", []) or []:
+        if server.get("id") != server_id:
+            continue
+        if url is not None:
+            server["url"] = url.rstrip("/")
+        if verify_ssl is not None:
+            server["verify_ssl"] = verify_ssl
+        if pinned_cert_pem is not None:
+            server["pinned_cert_pem"] = pinned_cert_pem
+        if pinned_fingerprint is not None:
+            server["pinned_fingerprint"] = pinned_fingerprint
+        save_config(config)
+        return
+
+
+def delete_proxmox_server(server_id: str) -> None:
+    """Remove a server, its credentials, and rewrite its hosts.
+
+    Its node and LXC hosts are unusable without the API, so they go. Its VMs
+    have their own kernel and SSH identity, so they survive as plain hosts with
+    every ``proxmox_*`` field stripped.
+    """
+    from .credentials import delete_credentials, delete_integration_credentials
+
+    config = load_config()
+    servers = config.get("proxmox_servers", []) or []
+    if not any(s.get("id") == server_id for s in servers):
+        return
+    config["proxmox_servers"] = [s for s in servers if s.get("id") != server_id]
+
+    kept: list[dict] = []
+    dropped: list[str] = []
+    for host in config.get("hosts", []) or []:
+        if host.get("proxmox_server") != server_id:
+            kept.append(host)
+            continue
+        is_vm = (
+            host.get("proxmox_vmid") is not None
+            and host.get("proxmox_type") == "vm"
+        )
+        if is_vm:
+            kept.append({k: v for k, v in host.items() if k not in _PROXMOX_FIELDS})
+        else:
+            dropped.append(slugify(host.get("name", "")))
+    config["hosts"] = kept
+    save_config(config)
+
+    delete_integration_credentials(f"proxmox_{server_id}")
+    for slug in dropped:
+        if slug:
+            delete_credentials(slug)
+
+
+def migrate_proxmox_servers() -> str:
+    """One-shot migration off the singleton ``proxmox:`` block.
+
+    Returns the derived server id, or ``""`` when nothing was migrated.
+    Follows the :func:`migrate_ssh_config` pattern and runs at startup.
+    Deleting the legacy key is what makes it idempotent — there is no separate
+    "migrated" flag to keep in sync.
+    """
+    from .credentials import rename_integration_credentials
+
+    config = load_config()
+    legacy = config.get("proxmox")
+    if not legacy:
+        return ""
+
+    # Hand-edited config carrying both shapes: the new list is authoritative,
+    # so drop the stale legacy block rather than merging a second server in.
+    if config.get("proxmox_servers"):
+        config.pop("proxmox", None)
+        save_config(config)
+        return ""
+
+    url = legacy.get("url", "")
+    server_id = slugify_server_id(url)
+    entry: dict = {
+        "id": server_id,
+        "url": url,
+        "verify_ssl": legacy.get("verify_ssl", True),
+    }
+    if legacy.get("pinned_cert_pem"):
+        entry["pinned_cert_pem"] = legacy["pinned_cert_pem"]
+        entry["pinned_fingerprint"] = legacy.get("pinned_fingerprint", "")
+    config["proxmox_servers"] = [entry]
+
+    for host in config.get("hosts", []) or []:
+        if host.get("proxmox_node"):
+            host["proxmox_server"] = server_id
+
+    config.pop("proxmox", None)
+    save_config(config)
+
+    rename_integration_credentials("proxmox", f"proxmox_{server_id}")
+    return server_id
 
 
 def get_pbs_config() -> dict:
