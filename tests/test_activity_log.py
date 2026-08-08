@@ -713,14 +713,25 @@ def test_orphan_sweep_survives_unstatable_file(monkeypatch):
 
     _record()
     # An orphan with no index record — the only thing the sweep looks at.
-    (al._RUNS_DIR / "deadbeef.log").write_text("orphaned output")
+    orphan = al._RUNS_DIR / "deadbeef.log"
+    orphan.write_text("orphaned output")
 
-    def boom(*a, **kw):
-        raise OSError("permission denied")
+    real_stat = al.Path.stat
 
-    monkeypatch.setattr(al.Path, "stat", boom)
+    def stat_but_not_the_orphan(self, *a, **kw):
+        """Fail only the orphan's stat.
+
+        Patching Path.stat wholesale breaks far more than the sweep — on some
+        Python versions Path.exists() routes through it, so the index read
+        fails too and the test stops testing what it claims to.
+        """
+        if self == orphan:
+            raise OSError("permission denied")
+        return real_stat(self, *a, **kw)
+
+    monkeypatch.setattr(al.Path, "stat", stat_but_not_the_orphan)
     assert _record()
-    assert (al._RUNS_DIR / "deadbeef.log").exists()
+    assert orphan.exists()
 
 
 def test_migration_rechecks_under_the_lock(data_dir, monkeypatch):
