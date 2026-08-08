@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 
 import pyotp
 from fastapi import APIRouter, Form, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 
 from .audit import audit
 from .auth import (
@@ -59,7 +59,7 @@ from .credentials import (
     wipe_credential_store,
 )
 from .ssh_client import verify_connection
-from .auto_update_log import get_recent
+from .activity_log import get_recent, get_run, get_run_output
 from .log_buffer import get_log_lines
 from .httpx_client import make_client
 from .templates_env import make_templates
@@ -1077,17 +1077,61 @@ async def admin_about(request: Request) -> HTMLResponse:
 
 
 # ---------------------------------------------------------------------------
-# Auto-update history
+# Activity log
 # ---------------------------------------------------------------------------
 
+_ACTIVITY_KINDS = {
+    "os_upgrade": "OS",
+    "container_redeploy": "Container",
+    "reboot": "Reboot",
+}
 
-@router.get("/auto-updates/history", response_class=HTMLResponse)
-async def admin_auto_update_history(request: Request) -> HTMLResponse:
-    entries = get_recent(100)
+
+@router.get("/activity", response_class=HTMLResponse)
+async def admin_activity(
+    request: Request,
+    status: str = "",
+    trigger: str = "",
+    kind: str = "",
+) -> HTMLResponse:
+    entries = get_recent(limit=500, status=status, trigger=trigger, kind=kind)
     return templates.TemplateResponse(
-        "admin_auto_update_history.html",
-        {"request": request, "entries": entries},
+        "admin_activity.html",
+        {
+            "request": request,
+            "entries": entries,
+            "kind_labels": _ACTIVITY_KINDS,
+            "f_status": status,
+            "f_trigger": trigger,
+            "f_kind": kind,
+        },
     )
+
+
+@router.get("/activity/{run_id}/output", response_class=HTMLResponse)
+async def admin_activity_output(request: Request, run_id: str) -> HTMLResponse:
+    """Full stored output for one run, rendered with the live modal's styling."""
+    # Function-local: admin.py is imported by main.py, so a module-level
+    # import here would be circular.
+    from .main import _log_line_items
+
+    record = get_run(run_id)
+    if record is None:
+        return HTMLResponse("")
+    return templates.TemplateResponse(
+        "partials/activity_output.html",
+        {
+            "request": request,
+            "entry": record,
+            "log_lines": _log_line_items(get_run_output(run_id)),
+        },
+    )
+
+
+@router.get("/auto-updates/history")
+async def admin_auto_update_history(request: Request) -> RedirectResponse:
+    """Superseded by /admin/activity, which covers manual runs too."""
+    return RedirectResponse("/admin/activity", status_code=302)
 
 
 @router.put("/ssh", response_class=HTMLResponse)

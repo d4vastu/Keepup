@@ -1,0 +1,36 @@
+<div class="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4"
+     onclick="if (event.target === this) document.getElementById('activity-modal').innerHTML = '';">
+  <div class="bg-[#0d1117] border border-[#30363d] rounded-xl max-w-4xl w-full max-h-[80vh] flex flex-col">
+
+    <div class="flex items-center justify-between px-4 py-3 border-b border-[#21262d]">
+      <div class="min-w-0">
+        <p class="text-slate-200 text-sm font-medium truncate">{{ entry.target_name }}</p>
+        <p class="text-slate-500 text-xs font-mono">
+          {{ entry.started_at | as_local }} · {{ entry.duration_s }}s · {{ entry.trigger }}
+        </p>
+      </div>
+      <div class="flex items-center gap-2 flex-shrink-0">
+        <button type="button"
+                onclick="navigator.clipboard.writeText(document.getElementById('activity-output-text').innerText);"
+                class="text-[12px] font-medium px-3 py-1.5 rounded-md border border-[#30363d] text-slate-400 hover:bg-[#161b22] hover:text-slate-100 transition-colors">
+          Copy output
+        </button>
+        <button type="button"
+                onclick="document.getElementById('activity-modal').innerHTML = '';"
+                class="text-[12px] font-medium px-3 py-1.5 rounded-md border border-[#30363d] text-slate-400 hover:bg-[#161b22] hover:text-slate-100 transition-colors">
+          Close
+        </button>
+      </div>
+    </div>
+
+    <div id="activity-output-text" class="overflow-auto px-4 py-3 font-mono text-xs leading-relaxed">
+      {% if not log_lines %}
+      <p class="text-slate-500">No output was captured for this run.</p>
+      {% endif %}
+      {% for line in log_lines %}
+      <div class="{{ line.cls }}">{{ line.text }}</div>
+      {% endfor %}
+    </div>
+
+  </div>
+</div>

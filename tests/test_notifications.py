@@ -127,60 +127,50 @@ def test_notifications_read_marks_read(client):
     assert "notif-badge" in response.text
 
 
-def test_auto_updates_page_has_history_link(client):
+def test_auto_updates_page_has_activity_link(client):
     response = client.get("/admin/auto-updates")
     assert response.status_code == 200
-    assert "/admin/auto-updates/history" in response.text
+    assert "/admin/activity" in response.text
 
 
 # ---------------------------------------------------------------------------
-# Auto-update history route
+# Activity page (replaces the auto-update history route)
 # ---------------------------------------------------------------------------
 
 
-def test_auto_update_history_empty(client):
-    response = client.get("/admin/auto-updates/history")
+def test_activity_page_empty(client):
+    response = client.get("/admin/activity")
     assert response.status_code == 200
-    assert (
-        "No auto-update runs" in response.text or "Auto-Update History" in response.text
+    assert "No activity recorded yet." in response.text
+
+
+def test_activity_page_with_entries(client, data_dir):
+    from app.activity_log import record_run
+
+    record_run(
+        kind="os_upgrade",
+        target="test-host",
+        target_name="Test Host",
+        trigger="scheduled",
+        status="success",
+        output=["All packages up to date."],
+    )
+    record_run(
+        kind="container_redeploy",
+        target="portainer/3:1",
+        target_name="My Stack",
+        trigger="manual",
+        status="error",
+        output=["Connection refused"],
+        error="Connection refused",
     )
 
-
-def test_auto_update_history_with_entries(client, monkeypatch):
-    import app.admin as a
-
-    monkeypatch.setattr(
-        a,
-        "get_recent",
-        lambda n: [
-            {
-                "id": "abc123",
-                "type": "os",
-                "target": "test-host",
-                "target_name": "Test Host",
-                "ran_at": "2026-04-04T12:00:00+00:00",
-                "status": "success",
-                "lines": ["All packages up to date."],
-                "read": True,
-            },
-            {
-                "id": "def456",
-                "type": "docker",
-                "target": "portainer/3:1",
-                "target_name": "My Stack",
-                "ran_at": "2026-04-04T11:00:00+00:00",
-                "status": "error",
-                "lines": ["Connection refused"],
-                "read": False,
-            },
-        ],
-    )
-    response = client.get("/admin/auto-updates/history")
+    response = client.get("/admin/activity")
     assert response.status_code == 200
     assert "Test Host" in response.text
     assert "My Stack" in response.text
     assert "Success" in response.text
-    assert "Error" in response.text
+    assert "Failed" in response.text
 
 
 # ---------------------------------------------------------------------------
