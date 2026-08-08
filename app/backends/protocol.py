@@ -1,6 +1,20 @@
 from typing import Protocol, runtime_checkable
 
 
+class StackUpdateError(RuntimeError):
+    """A redeploy failed, carrying the output captured before it did.
+
+    Without this the output of a *failed* redeploy is lost — the caller only
+    ever sees ``str(exc)`` — which is precisely the case the activity log
+    exists to explain. Subclasses RuntimeError so existing handlers that catch
+    the broader type keep working.
+    """
+
+    def __init__(self, message: str, lines: list[str] | None = None):
+        super().__init__(message)
+        self.lines = list(lines or [])
+
+
 @runtime_checkable
 class ContainerBackend(Protocol):
     """
@@ -25,4 +39,6 @@ class ContainerBackend(Protocol):
         self, dockerhub_creds: dict | None = None
     ) -> list[dict]: ...
 
-    async def update_stack(self, ref: str) -> None: ...
+    async def update_stack(self, ref: str) -> list[str]:
+        """Pull and redeploy ``ref``. Returns the captured command output."""
+        ...

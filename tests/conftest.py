@@ -55,16 +55,19 @@ def data_dir(tmp_path, monkeypatch):
     monkeypatch.setattr(auth, "_DATA_DIR", d)
     monkeypatch.setattr(auth, "_SESSION_SECRET_FILE", d / ".session_secret")
 
-    # Patch notifications and auto_update_log data paths
+    # Patch notifications data paths
     import app.notifications as notifs
 
     monkeypatch.setattr(notifs, "_DATA_DIR", d)
     monkeypatch.setattr(notifs, "_NOTIF_PATH", d / "notifications.json")
 
-    import app.auto_update_log as aul
+    import app.activity_log as al
 
-    monkeypatch.setattr(aul, "_DATA_DIR", d)
-    monkeypatch.setattr(aul, "_LOG_PATH", d / "auto_update_log.json")
+    monkeypatch.setattr(al, "_DATA_DIR", d)
+    monkeypatch.setattr(al, "_ACTIVITY_DIR", d / "activity")
+    monkeypatch.setattr(al, "_INDEX_PATH", d / "activity" / "index.json")
+    monkeypatch.setattr(al, "_RUNS_DIR", d / "activity" / "runs")
+    monkeypatch.setattr(al, "_LEGACY_PATH", d / "auto_update_log.json")
 
     # Redirect audit log to temp dir so tests can read and verify entries.
     import app.audit as audit_mod

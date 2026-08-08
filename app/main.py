@@ -4,6 +4,7 @@ import os
 import time
 import traceback
 import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import BackgroundTasks, FastAPI, Form, Request
@@ -15,6 +16,7 @@ from slowapi.middleware import SlowAPIMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.middleware.sessions import SessionMiddleware
 
+from .activity_log import record_run
 from .admin import router as admin_router
 from .audit import audit, setup_audit_log
 from .auth import admin_exists, get_session_secret, get_session_version
@@ -471,6 +473,57 @@ def _group_hosts(hosts: list[dict]) -> tuple[list[dict], list[dict]]:
 
 _jobs: dict[str, dict] = {}
 
+# Job "type" values as used in the job dicts, mapped to activity-log kinds.
+# A restart is a reboot in the activity log — the job type predates that name.
+_JOB_KINDS = {
+    "os_upgrade": "os_upgrade",
+    "os_restart": "reboot",
+    "container_redeploy": "container_redeploy",
+}
+
+
+def _new_job(job_type: str, label: str, target: str, sub: str) -> str:
+    """Create a job dict and return its id.
+
+    Stamps the start time so the activity record can carry a real duration
+    rather than one measured from whenever the runner happened to finish.
+    """
+    job_id = uuid.uuid4().hex[:8]
+    _jobs[job_id] = {
+        "done": False,
+        "status": "running",
+        "error": None,
+        "lines": [],
+        "type": job_type,
+        "label": label,
+        "target": target,
+        "sub": sub,
+        "started_at": datetime.now(timezone.utc).isoformat(),
+        "activity_id": "",
+    }
+    return job_id
+
+
+def _record_job(job_id: str) -> None:
+    """Persist a finished job. Called from each runner's finally block.
+
+    The runner's own status is the source of truth: anything that is not
+    ``done`` is an error, including the early returns that never ran a command.
+    """
+    job = _jobs.get(job_id)
+    if not job:
+        return
+    job["activity_id"] = record_run(
+        kind=_JOB_KINDS.get(job.get("type", ""), "os_upgrade"),
+        target=job.get("target", "") or job.get("label", ""),
+        target_name=job.get("label", ""),
+        trigger="manual",
+        status="success" if job.get("status") == "done" else "error",
+        output=job.get("lines", []),
+        started_at=job.get("started_at", ""),
+        error=job.get("error") or "",
+    )
+
 
 def _classify_log_line(line: str) -> str:
     lowered = line.lower()
@@ -519,6 +572,7 @@ async def _job_run_host_update(job_id: str, host: dict, creds: dict) -> None:
         log.error("OS upgrade failed on %s: %s", name, exc)
     finally:
         _jobs[job_id]["done"] = True
+        _record_job(job_id)
 
 
 async def _job_run_proxmox_node_upgrade(job_id: str, slug: str) -> None:
@@ -535,6 +589,7 @@ async def _job_run_proxmox_node_upgrade(job_id: str, slug: str) -> None:
         log.error("Proxmox node upgrade failed on %s: %s", slug, exc)
     finally:
         _jobs[job_id]["done"] = True
+        _record_job(job_id)
 
 
 async def _job_run_lxc_upgrade(
@@ -563,6 +618,7 @@ async def _job_run_lxc_upgrade(
         log.error("LXC upgrade failed on %s/%s: %s", node, vmid, exc)
     finally:
         _jobs[job_id]["done"] = True
+        _record_job(job_id)
 
 
 async def _job_run_host_restart(job_id: str, host: dict, creds: dict) -> None:
@@ -575,6 +631,7 @@ async def _job_run_host_restart(job_id: str, host: dict, creds: dict) -> None:
         _jobs[job_id]["error"] = str(exc)
     finally:
         _jobs[job_id]["done"] = True
+        _record_job(job_id)
 
 
 async def _job_run_proxmox_node_restart(
@@ -609,6 +666,7 @@ async def _job_run_proxmox_node_restart(
         log.error("Proxmox node restart failed on %s: %s", slug, exc)
     finally:
         _jobs[job_id]["done"] = True
+        _record_job(job_id)
 
 
 async def _job_run_stack_update(job_id: str, backend_key: str, ref: str) -> None:
@@ -618,16 +676,20 @@ async def _job_run_stack_update(job_id: str, backend_key: str, ref: str) -> None
         )
         if backend is None:
             raise ValueError(f"Backend {backend_key!r} not available")
-        await backend.update_stack(ref)
-        _jobs[job_id]["lines"] = [
+        lines = await backend.update_stack(ref)
+        _jobs[job_id]["lines"] = list(lines or []) or [
             "Stack updated — containers restarted with new images."
         ]
         _jobs[job_id]["status"] = "done"
     except Exception as exc:
+        # A StackUpdateError carries whatever ran before it failed; keeping it
+        # is the whole point — the failure is the case worth reading later.
+        _jobs[job_id]["lines"] = list(getattr(exc, "lines", [])) or [str(exc)]
         _jobs[job_id]["status"] = "error"
         _jobs[job_id]["error"] = str(exc)
     finally:
         _jobs[job_id]["done"] = True
+        _record_job(job_id)
 
 
 # ---------------------------------------------------------------------------
@@ -859,16 +921,7 @@ async def host_update(
         proxmox_node = host.get("proxmox_node")
         proxmox_vmid = host.get("proxmox_vmid")
         if proxmox_node and proxmox_vmid is None:
-            job_id = uuid.uuid4().hex[:8]
-            _jobs[job_id] = {
-                "done": False,
-                "status": "running",
-                "error": None,
-                "lines": [],
-                "type": "os_upgrade",
-                "label": host_name,
-                "sub": proxmox_node,
-            }
+            job_id = _new_job("os_upgrade", host_name, slug, proxmox_node)
             background_tasks.add_task(_job_run_proxmox_node_upgrade, job_id, slug)
             audit(request, "host.upgrade.trigger", target=slug, details={"host": host_name, "job_id": job_id})
             return templates.TemplateResponse(
@@ -880,16 +933,9 @@ async def host_update(
             proxmox_url = get_proxmox_config().get("url", "")
             import urllib.parse as _up
             ssh_host = _up.urlparse(proxmox_url).hostname or host.get("host", "")
-            job_id = uuid.uuid4().hex[:8]
-            _jobs[job_id] = {
-                "done": False,
-                "status": "running",
-                "error": None,
-                "lines": [],
-                "type": "os_upgrade",
-                "label": host_name,
-                "sub": f"{proxmox_node}/{proxmox_vmid}",
-            }
+            job_id = _new_job(
+                "os_upgrade", host_name, slug, f"{proxmox_node}/{proxmox_vmid}"
+            )
             background_tasks.add_task(
                 _job_run_lxc_upgrade, job_id, proxmox_node, proxmox_vmid, ssh_host
             )
@@ -912,16 +958,7 @@ async def host_update(
                 save_sudo_password(slug, sudo_password.strip())
             creds = {**creds, "sudo_password": effective_sudo}
 
-        job_id = uuid.uuid4().hex[:8]
-        _jobs[job_id] = {
-            "done": False,
-            "status": "running",
-            "error": None,
-            "lines": [],
-            "type": "os_upgrade",
-            "label": host["name"],
-            "sub": host.get("host", ""),
-        }
+        job_id = _new_job("os_upgrade", host["name"], slug, host.get("host", ""))
         background_tasks.add_task(_job_run_host_update, job_id, host, creds)
         audit(request, "host.upgrade.trigger", target=slug, details={"host": host_name, "job_id": job_id})
         return templates.TemplateResponse(
@@ -1007,17 +1044,8 @@ async def host_restart(
                         "message": _SELF_REBOOT_REFUSED.format(node=proxmox_node),
                     },
                 )
-            job_id = uuid.uuid4().hex[:8]
-            _jobs[job_id] = {
-                "done": False,
-                "status": "running",
-                "error": None,
-                "lines": [],
-                "type": "os_restart",
-                "label": host_name,
-                "sub": proxmox_node,
-                "slug": slug,
-            }
+            job_id = _new_job("os_restart", host_name, slug, proxmox_node)
+            _jobs[job_id]["slug"] = slug
             background_tasks.add_task(
                 _job_run_proxmox_node_restart,
                 job_id, slug, proxmox_node,
@@ -1041,16 +1069,7 @@ async def host_restart(
                 save_sudo_password(slug, sudo_password.strip())
             creds = {**creds, "sudo_password": effective_sudo}
 
-        job_id = uuid.uuid4().hex[:8]
-        _jobs[job_id] = {
-            "done": False,
-            "status": "running",
-            "error": None,
-            "lines": [],
-            "type": "os_restart",
-            "label": host["name"],
-            "sub": host.get("host", ""),
-        }
+        job_id = _new_job("os_restart", host["name"], slug, host.get("host", ""))
         background_tasks.add_task(_job_run_host_restart, job_id, host, creds)
         audit(request, "host.reboot.trigger", target=slug, details={"host": host["name"], "job_id": job_id})
         return templates.TemplateResponse(
@@ -1147,17 +1166,10 @@ async def stack_update(
             "partials/error.html",
             {"request": request, "message": f"Backend {backend_key!r} not configured."},
         )
-    job_id = uuid.uuid4().hex[:8]
     stack_name = ref.rsplit("/", 1)[-1]
-    _jobs[job_id] = {
-        "done": False,
-        "status": "running",
-        "error": None,
-        "lines": [],
-        "type": "container_redeploy",
-        "label": stack_name,
-        "sub": backend_key,
-    }
+    job_id = _new_job(
+        "container_redeploy", stack_name, f"{backend_key}/{ref}", backend_key
+    )
     background_tasks.add_task(_job_run_stack_update, job_id, backend_key, ref)
     audit(request, "docker.stack.update", target=f"{backend_key}/{ref}", details={"stack": stack_name, "job_id": job_id})
     return templates.TemplateResponse(

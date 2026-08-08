@@ -826,3 +826,109 @@ def test_admin_https_disable(client):
             with patch("app.admin.clear_ssl_config"):
                 response = client.post("/admin/https/disable")
     assert response.status_code == 200
+
+
+# ---------------------------------------------------------------------------
+# Activity page
+# ---------------------------------------------------------------------------
+
+
+def _seed_runs():
+    from app.activity_log import record_run
+
+    record_run(
+        kind="os_upgrade",
+        target="pve1",
+        target_name="PVE Node 1",
+        trigger="scheduled",
+        status="error",
+        output=["E: Could not get lock /var/lib/dpkg/lock-frontend"],
+        error="Could not get lock",
+    )
+    record_run(
+        kind="container_redeploy",
+        target="ssh/h1/media (prod)",
+        target_name="media (prod)",
+        trigger="manual",
+        status="success",
+        output=["$ docker compose pull", "Pulling sonarr ... done"],
+    )
+
+
+def test_activity_page_lists_runs(client, data_dir):
+    _seed_runs()
+    resp = client.get("/admin/activity")
+    assert resp.status_code == 200
+    assert "PVE Node 1" in resp.text
+    assert "media (prod)" in resp.text
+    assert "Could not get lock" in resp.text
+
+
+def test_activity_page_filters_by_status(client, data_dir):
+    _seed_runs()
+    resp = client.get("/admin/activity?status=error")
+    assert "PVE Node 1" in resp.text
+    assert "media (prod)" not in resp.text
+
+
+def test_activity_page_filters_by_trigger(client, data_dir):
+    _seed_runs()
+    resp = client.get("/admin/activity?trigger=manual")
+    assert "media (prod)" in resp.text
+    assert "PVE Node 1" not in resp.text
+
+
+def test_activity_page_filters_by_kind(client, data_dir):
+    _seed_runs()
+    resp = client.get("/admin/activity?kind=os_upgrade")
+    assert "PVE Node 1" in resp.text
+    assert "media (prod)" not in resp.text
+
+
+def test_activity_output_returns_full_output(client, data_dir):
+    from app.activity_log import get_recent
+
+    _seed_runs()
+    run_id = [e for e in get_recent() if e["status"] == "success"][0]["id"]
+    resp = client.get(f"/admin/activity/{run_id}/output")
+    assert resp.status_code == 200
+    assert "Pulling sonarr ... done" in resp.text
+
+
+def test_activity_output_unknown_id_is_empty(client, data_dir):
+    resp = client.get("/admin/activity/00000000/output")
+    assert resp.status_code == 200
+    assert resp.text.strip() == ""
+
+
+def test_activity_output_rejects_traversal(client, data_dir):
+    resp = client.get("/admin/activity/..%2F..%2Fetc%2Fpasswd/output")
+    assert resp.status_code in (200, 404)
+    assert "root:" not in resp.text
+
+
+def test_activity_page_ids_are_css_safe(client, data_dir):
+    """A stack name with parentheses must not produce a broken id or selector."""
+    import re as _re
+
+    _seed_runs()
+    resp = client.get("/admin/activity")
+
+    for match in _re.findall(r'id="([^"]+)"', resp.text):
+        assert _re.fullmatch(r"[A-Za-z0-9_-]+", match), f"unsafe id: {match}"
+
+
+def test_history_route_redirects_to_activity(client, data_dir):
+    resp = client.get("/admin/auto-updates/history", follow_redirects=False)
+    assert resp.status_code == 302
+    assert resp.headers["location"] == "/admin/activity"
+
+
+def test_activity_requires_auth(anon_client, data_dir):
+    resp = anon_client.get("/admin/activity", follow_redirects=False)
+    assert resp.status_code in (302, 303, 401, 403)
+
+
+def test_activity_output_requires_auth(anon_client, data_dir):
+    resp = anon_client.get("/admin/activity/00000000/output", follow_redirects=False)
+    assert resp.status_code in (302, 303, 401, 403)
