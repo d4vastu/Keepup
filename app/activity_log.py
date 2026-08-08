@@ -28,11 +28,22 @@ _ACTIVITY_DIR = _DATA_DIR / "activity"
 _INDEX_PATH = _ACTIVITY_DIR / "index.json"
 _RUNS_DIR = _ACTIVITY_DIR / "runs"
 
+# The file this module replaces. Imported once on first read, then renamed out
+# of the way so it can never be imported twice.
+_LEGACY_PATH = _DATA_DIR / "auto_update_log.json"
+
+_LEGACY_KINDS = {"os": "os_upgrade", "docker": "container_redeploy"}
+
 # Guards one whole record_run cycle: the output-file write, the index read,
 # and the index write (with any pruning) must happen as a single unit from
 # another thread's point of view. Splitting them let one thread's prune sweep
 # delete a second thread's output file before its index record had landed.
 _lock = threading.Lock()
+
+# Separate from _lock because record_run reaches migration while already
+# holding _lock — reusing it would deadlock. Serialises the read/import/rename
+# so two concurrent readers cannot both import the same legacy entries.
+_migrate_lock = threading.Lock()
 
 MAX_ENTRIES = 500
 MAX_AGE_DAYS = 90
@@ -49,7 +60,71 @@ _OUTPUT_UNAVAILABLE = "Output unavailable — it was not written to disk."
 # ---------------------------------------------------------------------------
 
 
-def _load_index() -> list[dict]:
+def migrate_legacy_log() -> None:
+    """Import ``auto_update_log.json`` once, then rename it out of the way.
+
+    Legacy entries only ever came from the scheduler, so they all migrate as
+    ``trigger="scheduled"``. Their ``ran_at`` becomes both start and finish —
+    the old format never recorded a duration. The rename happens even when the
+    file was unreadable, so a corrupt legacy log is not re-parsed on every
+    single read for the rest of the install's life.
+    """
+    if not _LEGACY_PATH.exists():
+        return
+    with _migrate_lock:
+        # Re-check under the lock: another thread may have finished the whole
+        # import while this one was waiting for it.
+        if not _LEGACY_PATH.exists():
+            return
+        try:
+            legacy = json.loads(_LEGACY_PATH.read_text())
+            if not isinstance(legacy, list):
+                raise ValueError("legacy log is not a list")
+        except Exception as exc:
+            log.error("Legacy auto-update log unreadable (%s) — skipping import", exc)
+            legacy = []
+
+        records = []
+        for entry in legacy:
+            if not isinstance(entry, dict):
+                continue
+            run_id = uuid.uuid4().hex[:8]
+            lines = [str(line) for line in entry.get("lines", [])]
+            ran_at = entry.get("ran_at", "")
+            failed = entry.get("status") == "error"
+            records.append(
+                {
+                    "id": run_id,
+                    "kind": _LEGACY_KINDS.get(entry.get("type", ""), "os_upgrade"),
+                    "target": entry.get("target", ""),
+                    "target_name": entry.get("target_name", ""),
+                    "trigger": "scheduled",
+                    "status": entry.get("status", "error"),
+                    "started_at": ran_at,
+                    "finished_at": ran_at,
+                    "duration_s": 0.0,
+                    "error": lines[-1] if failed and lines else "",
+                    "line_count": _write_output(run_id, redact(lines)),
+                }
+            )
+
+        try:
+            if records:
+                # Merged rather than prepended: migration can land after runs
+                # have already been recorded, and everything downstream —
+                # get_recent, and the MAX_ENTRIES cut in _select_kept — reads
+                # the index as newest-first.
+                now = datetime.now(timezone.utc)
+                merged = records + _read_index_file()
+                merged.sort(key=lambda e: _parse_ts(e.get("started_at", ""), now), reverse=True)
+                _save_index(merged)
+            os.replace(_LEGACY_PATH, _LEGACY_PATH.with_name("auto_update_log.json.migrated"))
+            log.info("Migrated %d entries from the legacy auto-update log", len(records))
+        except OSError as exc:
+            log.error("Legacy auto-update log migration failed: %s", exc)
+
+
+def _read_index_file() -> list[dict]:
     """Return the index, or an empty list if it is missing or unreadable.
 
     Non-dict elements are dropped rather than left to crash a later ``.get``
@@ -69,6 +144,17 @@ def _load_index() -> list[dict]:
         except OSError:
             pass
         return []
+
+
+def _load_index() -> list[dict]:
+    """The index every caller should read, legacy history folded in.
+
+    Migration hangs off the read rather than off startup so there is no
+    ordering requirement between the two — the first caller to look at the
+    index, whoever that turns out to be, pays for the one-time import.
+    """
+    migrate_legacy_log()
+    return _read_index_file()
 
 
 def _save_index(entries: list[dict]) -> None:

@@ -472,3 +472,145 @@ def test_redaction_failure_does_not_lose_the_run(monkeypatch):
     assert run_id
     assert len(get_recent()) == 1
     assert get_run_output(run_id) == ["some output"]
+
+
+# ---------------------------------------------------------------------------
+# Legacy auto_update_log migration
+# ---------------------------------------------------------------------------
+
+
+def _legacy(data_dir, entries):
+    path = data_dir / "auto_update_log.json"
+    path.write_text(json.dumps(entries))
+    return path
+
+
+def test_migrates_legacy_entries(data_dir):
+    from app.activity_log import get_recent, get_run_output
+
+    _legacy(
+        data_dir,
+        [
+            {
+                "id": "aaaaaaaa",
+                "type": "docker",
+                "target": "portainer/10:1",
+                "target_name": "sonarr",
+                "ran_at": "2026-07-20T10:00:00+00:00",
+                "status": "error",
+                "lines": ["pull failed", "no such image"],
+            },
+            {
+                "id": "bbbbbbbb",
+                "type": "os",
+                "target": "pve1",
+                "target_name": "PVE 1",
+                "ran_at": "2026-07-19T10:00:00+00:00",
+                "status": "success",
+                "lines": ["0 upgraded"],
+            },
+        ],
+    )
+
+    entries = get_recent()
+    assert [e["target_name"] for e in entries] == ["sonarr", "PVE 1"]
+    assert entries[0]["kind"] == "container_redeploy"
+    assert entries[1]["kind"] == "os_upgrade"
+    assert all(e["trigger"] == "scheduled" for e in entries)
+    assert entries[0]["started_at"] == "2026-07-20T10:00:00+00:00"
+    assert entries[0]["error"] == "no such image"
+    assert entries[1]["error"] == ""
+    assert get_run_output(entries[0]["id"]) == ["pull failed", "no such image"]
+
+
+def test_migrated_entries_are_merged_newest_first(data_dir):
+    """A run recorded before migration must stay ahead of older legacy entries."""
+    from app.activity_log import get_recent
+
+    run_id = _record(target_name="Recorded First")
+    _legacy(
+        data_dir,
+        [
+            {
+                "type": "os",
+                "target": "old",
+                "target_name": "Ancient",
+                "ran_at": "2020-01-01T00:00:00+00:00",
+                "status": "success",
+                "lines": [],
+            }
+        ],
+    )
+
+    entries = get_recent()
+    assert [e["id"] for e in entries][0] == run_id
+    assert entries[1]["target_name"] == "Ancient"
+
+
+def test_migration_renames_legacy_file(data_dir):
+    from app.activity_log import get_recent
+
+    legacy = _legacy(
+        data_dir,
+        [
+            {
+                "type": "os",
+                "target": "h",
+                "target_name": "H",
+                "ran_at": "2026-07-20T10:00:00+00:00",
+                "status": "success",
+                "lines": [],
+            }
+        ],
+    )
+
+    get_recent()
+    assert not legacy.exists()
+    assert (data_dir / "auto_update_log.json.migrated").exists()
+
+
+def test_migration_runs_once(data_dir):
+    from app.activity_log import get_recent
+
+    _legacy(
+        data_dir,
+        [
+            {
+                "type": "os",
+                "target": "h",
+                "target_name": "H",
+                "ran_at": "2026-07-20T10:00:00+00:00",
+                "status": "success",
+                "lines": [],
+            }
+        ],
+    )
+
+    assert len(get_recent()) == 1
+    assert len(get_recent()) == 1
+
+
+def test_migration_skips_non_dict_entries(data_dir):
+    from app.activity_log import get_recent
+
+    _legacy(data_dir, ["junk", None, {"type": "os", "target": "h",
+                                      "target_name": "H",
+                                      "ran_at": "2026-07-20T10:00:00+00:00",
+                                      "status": "success", "lines": []}])
+
+    assert len(get_recent()) == 1
+
+
+def test_migration_survives_corrupt_legacy_file(data_dir):
+    from app.activity_log import get_recent
+
+    (data_dir / "auto_update_log.json").write_text("not json!")
+
+    assert get_recent() == []
+    assert (data_dir / "auto_update_log.json.migrated").exists()
+
+
+def test_no_legacy_file_is_fine():
+    from app.activity_log import get_recent
+
+    assert get_recent() == []
