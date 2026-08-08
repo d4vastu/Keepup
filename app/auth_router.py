@@ -62,7 +62,7 @@ from .credentials import (
     save_integration_credentials,
 )
 from .audit import audit
-from .proxmox_client import ProxmoxClient
+from .proxmox_client import ProxmoxClient, assemble_token
 from .ssh_client import discover_containers, verify_connection
 from .backend_loader import reload_backends
 from .cert_utils import build_pinned_ssl_ctx, cert_info, fetch_server_cert, fingerprint
@@ -430,14 +430,7 @@ def _setup_proxmox_client_parts() -> tuple[str, str, str]:
     cfg = get_proxmox_config()
     creds = get_integration_credentials("proxmox")
     url = cfg.get("url", "")
-    token_id = creds.get("token_id", "")
-    secret = creds.get("secret", "")
-    if not token_id:
-        api_user = creds.get("api_user", "")
-        api_token = creds.get("api_token", "")
-        token = f"{api_user}!{api_token}" if api_user else api_token
-    else:
-        token = f"{token_id}={secret}"
+    token = assemble_token(creds)
     return url, token, cfg.get("pinned_cert_pem", "")
 
 
@@ -491,7 +484,7 @@ async def setup_test_proxmox(
         return HTMLResponse(
             '<span class="text-amber-400 text-sm">Enter a URL, Token ID, and Secret first.</span>'
         )
-    token = f"{token_id}={secret}"
+    token = assemble_token({"token_id": token_id, "secret": secret})
 
     if skip_ssl_verify == "1":
         try:
@@ -587,7 +580,7 @@ async def setup_save_proxmox(
     if url and token_id and secret:
         try:
             import urllib.parse
-            token = f"{token_id}={secret}"
+            token = assemble_token({"token_id": token_id, "secret": secret})
             px_cfg = get_proxmox_config()
             pinned_pem = px_cfg.get("pinned_cert_pem", "")
             client = ProxmoxClient(url=url, api_token=token, pinned_cert_pem=pinned_pem, verify_ssl=px_cfg.get("verify_ssl", True))

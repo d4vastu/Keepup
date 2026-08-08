@@ -537,30 +537,52 @@ class ProxmoxClient:
         return sorted(resources, key=lambda r: (r["node"], r["vmid"]))
 
 
-def client_from_config() -> "ProxmoxClient":
-    """Build a ProxmoxClient from the stored integration config + credentials.
+def assemble_token(creds: dict) -> str:
+    """Build the ``PVEAPIToken`` value from stored credentials.
 
-    Shared by the dashboard routes (``main``), the auto-update path
-    (``host_ops``), and anywhere else that needs a configured client, so the
-    token-assembly logic lives in exactly one place. Raises ``RuntimeError``
-    when the Proxmox integration is not configured.
+    The single source of truth for this format (OP#210). It was previously
+    duplicated across ``client_from_config``, the admin discover/add-node
+    routes and the setup wizard, which is exactly the kind of drift that lets
+    one call site quietly authenticate differently from another.
+
+    Current shape is ``token_id=secret``; ``api_user``/``api_token`` is the
+    legacy pair kept for stores written before token ids.
     """
-    from .config_manager import get_proxmox_config
+    token_id = creds.get("token_id", "")
+    if token_id:
+        return f"{token_id}={creds.get('secret', '')}"
+    api_user = creds.get("api_user", "")
+    api_token = creds.get("api_token", "")
+    return f"{api_user}!{api_token}" if api_user else api_token
+
+
+def client_from_config(server_id: str | None = None) -> "ProxmoxClient":
+    """Build a ProxmoxClient for one Proxmox server.
+
+    ``server_id`` selects the server; omitting it resolves to the first one via
+    the OP#209 compatibility shims, which is what the admin and setup-wizard
+    routes still do until OP#211/212 make them server-aware.
+
+    Raises ``RuntimeError`` when the named server is unknown or unconfigured.
+    """
+    from .config_manager import get_proxmox_config, get_proxmox_server
     from .credentials import get_integration_credentials
 
-    cfg = get_proxmox_config()
-    creds = get_integration_credentials("proxmox")
-    url = cfg.get("url", "")
-    token_id = creds.get("token_id", "")
-    secret = creds.get("secret", "")
-    if not token_id:
-        api_user = creds.get("api_user", "")
-        api_token = creds.get("api_token", "")
-        token = f"{api_user}!{api_token}" if api_user else api_token
+    if server_id:
+        cfg = get_proxmox_server(server_id)
+        creds = get_integration_credentials(f"proxmox_{server_id}")
     else:
-        token = f"{token_id}={secret}"
+        cfg = get_proxmox_config()
+        creds = get_integration_credentials("proxmox")
+
+    url = cfg.get("url", "")
+    token = assemble_token(creds)
     if not url or not token:
-        raise RuntimeError("Proxmox integration not configured.")
+        raise RuntimeError(
+            f"Proxmox server {server_id!r} is not configured."
+            if server_id
+            else "Proxmox integration not configured."
+        )
     return ProxmoxClient(
         url=url,
         api_token=token,

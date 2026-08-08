@@ -48,7 +48,7 @@ from .config_manager import (
     update_host,
 )
 from .cert_utils import cert_info, fetch_server_cert, fingerprint
-from .proxmox_client import ProxmoxClient
+from .proxmox_client import ProxmoxClient, assemble_token
 from .credentials import (
     credential_status,
     delete_credentials,
@@ -341,14 +341,7 @@ async def admin_proxmox_discover(request: Request) -> HTMLResponse:
     cfg = get_proxmox_config()
     creds = get_integration_credentials("proxmox")
     url = cfg.get("url", "")
-    token_id = creds.get("token_id", "")
-    secret = creds.get("secret", "")
-    if not token_id:
-        api_user = creds.get("api_user", "")
-        api_token = creds.get("api_token", "")
-        token = f"{api_user}!{api_token}" if api_user else api_token
-    else:
-        token = f"{token_id}={secret}"
+    token = assemble_token(creds)
     pinned_pem = cfg.get("pinned_cert_pem", "")
     verify_ssl = cfg.get("verify_ssl", True)
     if not url or not token:
@@ -445,14 +438,7 @@ async def admin_proxmox_add_node_host(request: Request) -> HTMLResponse:
     cfg = get_proxmox_config()
     creds = get_integration_credentials("proxmox")
     url = cfg.get("url", "")
-    token_id = creds.get("token_id", "")
-    secret = creds.get("secret", "")
-    if not token_id:
-        api_user = creds.get("api_user", "")
-        api_token = creds.get("api_token", "")
-        token = f"{api_user}!{api_token}" if api_user else api_token
-    else:
-        token = f"{token_id}={secret}"
+    token = assemble_token(creds)
     pinned_pem = cfg.get("pinned_cert_pem", "")
     verify_ssl = cfg.get("verify_ssl", True)
     if not url or not token:

@@ -600,23 +600,14 @@ async def _job_run_proxmox_node_upgrade(job_id: str, slug: str) -> None:
         _record_job(job_id)
 
 
-async def _job_run_lxc_upgrade(
-    job_id: str, node: str, vmid: int, ssh_host: str
-) -> None:
+async def _job_run_lxc_upgrade(job_id: str, host: dict) -> None:
+    # Delegates to host_ops rather than rebuilding the client and SSH context
+    # inline: that duplicate copy would have stayed singleton-bound while the
+    # scheduler went server-aware, so the dashboard and the scheduler could
+    # have upgraded the same LXC via *different* Proxmox servers (OP#210).
+    node, vmid = host.get("proxmox_node"), host.get("proxmox_vmid")
     try:
-        client = await _proxmox_client_from_config()
-        px_creds = get_integration_credentials("proxmox")
-        ssh_key = px_creds.get("ssh_key", "")
-        ssh_creds = {
-            "user": px_creds.get("ssh_user", "root"),
-            "port": px_creds.get("ssh_port", 22),
-            "ssh_password": px_creds.get("ssh_password", ""),
-        }
-        # Resolve the stored key filename into a file-based key_path the SSH
-        # layer honours for key-based Proxmox SSH (OP#182).
-        if ssh_key:
-            ssh_creds["key_path"] = _resolve_ssh_key_path(ssh_key)
-        lines = await client.upgrade_lxc(node, vmid, ssh_host, ssh_creds)
+        lines = await run_os_update(host, {})
         _jobs[job_id]["lines"] = lines
         _jobs[job_id]["status"] = "done"
         log.info("LXC upgrade complete: %s/%s", node, vmid)
@@ -643,8 +634,14 @@ async def _job_run_host_restart(job_id: str, host: dict, creds: dict) -> None:
 
 
 async def _job_run_proxmox_node_restart(
-    job_id: str, slug: str, proxmox_node: str
+    job_id: str, slug: str, proxmox_node: str, host: dict | None = None
 ) -> None:
+    """Reboot a Proxmox node through its own server's API.
+
+    ``host`` carries the owning server (OP#210). It is optional and defaults to
+    the singleton resolution, so a job scheduled against a host that has since
+    been removed from config still reboots rather than failing on lookup.
+    """
     try:
         if is_self_on_proxmox_node(proxmox_node):
             msg = _SELF_REBOOT_REFUSED.format(node=proxmox_node)
@@ -653,7 +650,7 @@ async def _job_run_proxmox_node_restart(
             _jobs[job_id]["error"] = msg
             return
 
-        client = await _proxmox_client_from_config()
+        client = await _proxmox_client_from_config(host)
 
         _jobs[job_id]["lines"].append(f"Issuing reboot to node {proxmox_node}…")
         await client.reboot_node(proxmox_node)
@@ -809,11 +806,15 @@ async def pbs_status(request: Request) -> HTMLResponse:
 # ---------------------------------------------------------------------------
 
 
-async def _proxmox_client_from_config():
-    """Build a ProxmoxClient from the stored integration config."""
+async def _proxmox_client_from_config(host: dict | None = None):
+    """Build a ProxmoxClient for ``host``'s Proxmox server.
+
+    Omitting ``host`` resolves to the first server via the OP#209 shims, which
+    is correct for the routes that are not scoped to one host.
+    """
     from .proxmox_client import client_from_config
 
-    return client_from_config()
+    return client_from_config((host or {}).get("proxmox_server"))
 
 
 @app.get("/api/host/{slug}/check", response_class=HTMLResponse)
@@ -830,22 +831,14 @@ async def host_check(request: Request, slug: str) -> HTMLResponse:
                 "Checking %s (%s) via pct exec (%s/%s)",
                 host_name, slug, proxmox_node, proxmox_vmid,
             )
-            from .credentials import get_integration_credentials as _get_int_creds
-            px_creds = _get_int_creds("proxmox")
-            ssh_user = px_creds.get("ssh_user", "root")
-            ssh_key = px_creds.get("ssh_key", "")
-            ssh_password = px_creds.get("ssh_password", "")
-            px_cfg = get_proxmox_config()
-            proxmox_url = px_cfg.get("url", "")
-            import urllib.parse
-            px_host = urllib.parse.urlparse(proxmox_url).hostname or host["host"]
-            ssh_key_path = _resolve_ssh_key_path(ssh_key) if ssh_key else None
-            ssh_creds: dict = {"user": ssh_user}
-            if ssh_key_path:
-                ssh_creds["key_path"] = ssh_key_path
-            elif ssh_password:
-                ssh_creds["ssh_password"] = ssh_password
-            client = await _proxmox_client_from_config()
+            # Same resolution the upgrade path uses, so a check and an upgrade
+            # of one LXC can never target different servers (OP#210).
+            from .host_ops import _lxc_ssh_context, server_context
+            px_host, ssh_creds = _lxc_ssh_context(host)
+            # The link back to the UI must point at the server that owns this
+            # guest, not whichever one happens to be first.
+            proxmox_url = server_context(host)[0].get("url", "")
+            client = await _proxmox_client_from_config(host)
             packages = await client.get_lxc_updates(
                 proxmox_node, proxmox_vmid, px_host, ssh_creds
             )
@@ -874,7 +867,7 @@ async def host_check(request: Request, slug: str) -> HTMLResponse:
             import asyncio as _asyncio
 
             from .host_ops import reboot_required_typed
-            client = await _proxmox_client_from_config()
+            client = await _proxmox_client_from_config(host)
             packages, reboot_required = await _asyncio.gather(
                 client.get_node_updates(proxmox_node),
                 reboot_required_typed(host, {}),
@@ -948,15 +941,10 @@ async def host_update(
             )
 
         if proxmox_node and proxmox_vmid is not None:
-            proxmox_url = get_proxmox_config().get("url", "")
-            import urllib.parse as _up
-            ssh_host = _up.urlparse(proxmox_url).hostname or host.get("host", "")
             job_id = _new_job(
                 "os_upgrade", host_name, slug, f"{proxmox_node}/{proxmox_vmid}"
             )
-            background_tasks.add_task(
-                _job_run_lxc_upgrade, job_id, proxmox_node, proxmox_vmid, ssh_host
-            )
+            background_tasks.add_task(_job_run_lxc_upgrade, job_id, host)
             audit(request, "host.upgrade.trigger", target=slug, details={"host": host_name, "job_id": job_id})
             return templates.TemplateResponse(
                 "partials/job_poll.html",
@@ -999,7 +987,7 @@ async def host_reboot_preview(request: Request, slug: str) -> HTMLResponse:
 
         if proxmox_node and proxmox_vmid is None:
             self_on_node = is_self_on_proxmox_node(proxmox_node)
-            client = await _proxmox_client_from_config()
+            client = await _proxmox_client_from_config(host)
             guests = await client.get_running_guests(proxmox_node)
             return templates.TemplateResponse(
                 "partials/proxmox_reboot_preview.html",
@@ -1066,7 +1054,7 @@ async def host_restart(
             _jobs[job_id]["slug"] = slug
             background_tasks.add_task(
                 _job_run_proxmox_node_restart,
-                job_id, slug, proxmox_node,
+                job_id, slug, proxmox_node, host,
             )
             audit(request, "host.reboot.trigger", target=slug, details={"host": host_name, "job_id": job_id})
             return templates.TemplateResponse(

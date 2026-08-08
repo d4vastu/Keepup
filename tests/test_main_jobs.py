@@ -981,19 +981,25 @@ async def test_job_run_lxc_upgrade_success(config_file, data_dir):
     mock_client = AsyncMock()
     mock_client.upgrade_lxc = AsyncMock(return_value=["5 upgraded", "done"])
 
+    # OP#210: the job now takes the host dict and delegates to host_ops, so the
+    # dashboard and the scheduler resolve the owning server identically.
+    host = {"slug": "ct", "name": "Ct", "host": "192.168.1.50",
+            "proxmox_node": "pve", "proxmox_vmid": 101, "proxmox_type": "lxc"}
+
     with (
-        patch("app.main._proxmox_client_from_config", new=AsyncMock(return_value=mock_client)),
-        patch("app.main.get_integration_credentials", return_value={"ssh_user": "root", "ssh_key": "id_ed25519"}),
-        patch("app.main.get_proxmox_config", return_value={"url": "https://192.168.1.10:8006"}),
+        patch("app.host_ops.build_proxmox_client", new=AsyncMock(return_value=mock_client)),
+        patch("app.host_ops.get_integration_credentials", return_value={"ssh_user": "root", "ssh_key": "id_ed25519"}),
+        patch("app.host_ops.get_proxmox_config", return_value={"url": "https://192.168.1.10:8006"}),
     ):
-        await m._job_run_lxc_upgrade(job_id, "pve", 101, "192.168.1.10")
+        await m._job_run_lxc_upgrade(job_id, host)
 
     assert m._jobs[job_id]["done"] is True
     assert m._jobs[job_id]["status"] == "done"
     assert "5 upgraded" in m._jobs[job_id]["lines"]
+    node, vmid, ssh_host, ssh_creds = mock_client.upgrade_lxc.await_args.args
+    assert (node, vmid, ssh_host) == ("pve", 101, "192.168.1.10")
     # Key-based Proxmox SSH: the stored `ssh_key` filename is resolved into a
     # file-based key_path the SSH layer honours (OP#182).
-    ssh_creds = mock_client.upgrade_lxc.await_args.args[3]
     assert ssh_creds["key_path"].endswith("/app/keys/id_ed25519")
 
 
@@ -1004,11 +1010,14 @@ async def test_job_run_lxc_upgrade_failure(config_file, data_dir):
     job_id = "lxcjob2"
     m._jobs[job_id] = {"done": False, "status": "running", "error": None, "lines": []}
 
+    host = {"slug": "ct", "name": "Ct", "host": "192.168.1.50",
+            "proxmox_node": "pve", "proxmox_vmid": 101, "proxmox_type": "lxc"}
+
     with patch(
-        "app.main._proxmox_client_from_config",
+        "app.host_ops.build_proxmox_client",
         new=AsyncMock(side_effect=Exception("pct exec failed")),
     ):
-        await m._job_run_lxc_upgrade(job_id, "pve", 101, "192.168.1.10")
+        await m._job_run_lxc_upgrade(job_id, host)
 
     assert m._jobs[job_id]["done"] is True
     assert m._jobs[job_id]["status"] == "error"

@@ -23,7 +23,7 @@ from __future__ import annotations
 import logging
 from urllib.parse import urlparse
 
-from .config_manager import get_proxmox_config
+from .config_manager import get_proxmox_config, get_proxmox_server
 from .credentials import get_integration_credentials, resolve_key_path
 from .proxmox_client import client_from_config
 from .self_identity import is_self_on_proxmox_node
@@ -47,20 +47,58 @@ def classify_host(host: dict) -> str:
     return "vm" if (host.get("proxmox_type") or "lxc") == "vm" else "lxc"
 
 
-async def build_proxmox_client():
-    """Construct a configured ProxmoxClient (thin wrapper, patchable in tests)."""
-    return client_from_config()
+def server_context(host: dict) -> tuple[dict, dict]:
+    """Return ``(server_cfg, creds)`` for the Proxmox server that owns ``host``.
+
+    A migrated host carries ``proxmox_server``; one written before OP#209 does
+    not, and falls back to the singleton shims (which resolve to the first
+    server). Single source of truth for "which server is this host on" —
+    ``main`` and the Docker backend route through it too, so the answer cannot
+    differ between the dashboard, the scheduler and container discovery.
+    """
+    server_id = host.get("proxmox_server")
+    if server_id:
+        return (
+            get_proxmox_server(server_id),
+            get_integration_credentials(f"proxmox_{server_id}"),
+        )
+    return get_proxmox_config(), get_integration_credentials("proxmox")
+
+
+def resolve_kind(host: dict) -> str:
+    """Like :func:`classify_host`, but degrades an orphaned host to ``plain``.
+
+    A hand-edited config (or a server deleted out from under its hosts) can
+    leave ``proxmox_server`` pointing at nothing. Treating that as a Proxmox
+    host would raise on every dispatch; treating it as plain at least keeps
+    direct SSH working, which is the AC for this case.
+    """
+    kind = classify_host(host)
+    if kind == "plain":
+        return "plain"
+    server_id = host.get("proxmox_server")
+    if server_id and not get_proxmox_server(server_id):
+        log.warning(
+            "Host %r references unknown Proxmox server %r — handling it as a "
+            "plain SSH host",
+            host.get("name", host.get("host", "")), server_id,
+        )
+        return "plain"
+    return kind
+
+
+async def build_proxmox_client(host: dict | None = None):
+    """Construct a ProxmoxClient for ``host``'s server (patchable in tests)."""
+    return client_from_config((host or {}).get("proxmox_server"))
 
 
 def _lxc_ssh_context(host: dict) -> tuple[str, dict]:
     """Resolve ``(ssh_host, ssh_creds)`` for reaching an LXC via its node.
 
-    SSH targets the Proxmox node (whose hostname comes from the integration
-    URL); credentials come from the stored Proxmox integration creds. Mirrors
-    the manual ``_job_run_lxc_upgrade`` path.
+    SSH targets the Proxmox node (whose hostname comes from the owning
+    server's URL); credentials come from that server's stored creds.
     """
-    px_cfg = get_proxmox_config()
-    px_creds = get_integration_credentials("proxmox")
+    px_cfg, px_creds = server_context(host)
     ssh_host = urlparse(px_cfg.get("url", "")).hostname or host.get("host", "")
     ssh_key = px_creds.get("ssh_key", "")
     ssh_creds = {
@@ -79,10 +117,10 @@ def _node_ssh_context(host: dict) -> tuple[dict, dict]:
     """Resolve ``(host_entry, ssh_creds)`` for SSHing to a Proxmox node itself.
 
     Unlike :func:`_lxc_ssh_context` (which reaches the node that *runs* an LXC
-    via the integration URL), a node's own reboot check must target that node's
-    own address. Credentials come from the stored Proxmox integration creds.
+    via the server URL), a node's own reboot check must target that node's own
+    address. Credentials come from its owning server's stored creds.
     """
-    px_creds = get_integration_credentials("proxmox")
+    _, px_creds = server_context(host)
     # `or` rather than a .get default: a stored-but-empty ssh_user would
     # otherwise pass "" straight through to _connect, which rejects a blank
     # user before opening a socket (OP#232).
@@ -104,9 +142,9 @@ def _node_ssh_context(host: dict) -> tuple[dict, dict]:
 
 async def run_os_update(host: dict, creds: dict) -> list[str]:
     """Run the OS upgrade for ``host`` using the right mechanism for its kind."""
-    kind = classify_host(host)
+    kind = resolve_kind(host)
     if kind == "lxc":
-        client = await build_proxmox_client()
+        client = await build_proxmox_client(host)
         ssh_host, ssh_creds = _lxc_ssh_context(host)
         return await client.upgrade_lxc(
             host["proxmox_node"], host["proxmox_vmid"], ssh_host, ssh_creds
@@ -125,7 +163,7 @@ async def run_os_update(host: dict, creds: dict) -> list[str]:
 
 async def reboot_required_typed(host: dict, creds: dict) -> bool:
     """Return whether ``host`` needs a reboot, queried the right way per kind."""
-    kind = classify_host(host)
+    kind = resolve_kind(host)
     if kind == "node":
         # Authoritative: SSH to the node and compare the next-boot kernel to the
         # running one. Fall back to the coarse API heuristic only if that fails
@@ -141,7 +179,7 @@ async def reboot_required_typed(host: dict, creds: dict) -> bool:
                     "falling back to API heuristic",
                     host.get("proxmox_node"), exc,
                 )
-        client = await build_proxmox_client()
+        client = await build_proxmox_client(host)
         return await client.get_node_reboot_required(host["proxmox_node"])
     if kind == "lxc":
         # LXCs share the host kernel — an LXC-level reboot is never required.
@@ -152,18 +190,18 @@ async def reboot_required_typed(host: dict, creds: dict) -> bool:
 
 async def reboot_host_typed(host: dict, creds: dict) -> list[str]:
     """Reboot ``host`` using the right mechanism, with the self-reboot guard."""
-    kind = classify_host(host)
+    kind = resolve_kind(host)
     if kind == "node":
         if is_self_on_proxmox_node(host["proxmox_node"]):
             raise ValueError(
                 f"Refusing self-reboot: Keepup runs on Proxmox node "
                 f"{host['proxmox_node']!r}"
             )
-        client = await build_proxmox_client()
+        client = await build_proxmox_client(host)
         await client.reboot_node(host["proxmox_node"])
         return ["Reboot initiated via Proxmox API — guests are stopped first."]
     if kind == "lxc":
-        client = await build_proxmox_client()
+        client = await build_proxmox_client(host)
         await client.reboot_lxc(host["proxmox_node"], host["proxmox_vmid"])
         return ["LXC reboot initiated via Proxmox API."]
     return await reboot_host(host, creds)
