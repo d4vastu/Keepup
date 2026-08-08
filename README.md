@@ -23,7 +23,7 @@ Built with FastAPI + HTMX. No JavaScript frameworks, no database, no agents to i
 - **One-click stack redeploy** — pulls latest images and restarts the stack
 - **Auto-updates** — schedule unattended OS upgrades and Docker stack redeployments per host/stack with cron schedules; optional auto-reboot per host
 - **Push notifications** — Pushover and Email (SMTP) support; fires on auto-update completion and failure
-- **Notification bell** — tracks auto-update run history; badge turns red on failure
+- **Notification bell** — tracks auto-update runs; badge turns red on failure
 - **Infrastructure integrations** — connect Proxmox VE, Proxmox Backup Server, OPNsense, pfSense, and Home Assistant via their APIs
 - **Encrypted credential store** — SSH keys, passwords, sudo passwords, API keys, and tokens stored encrypted on disk; nothing sensitive ever touches `config.yml`
 - **Two-factor authentication** — optional TOTP 2FA with any standard authenticator app
@@ -33,7 +33,7 @@ Built with FastAPI + HTMX. No JavaScript frameworks, no database, no agents to i
 - **Sudo support** — non-root users are prompted for their sudo password inline, with an option to save it for future runs
 - **HTTPS/TLS** — generate a self-signed cert or upload your own from **Admin → HTTPS**; the app restarts automatically
 - **Timezone support** — set your local timezone in **Admin → Account**; all timestamps are displayed in local time
-- **Auto-update history** — full log at **Admin → Auto-Updates → History**; live log viewer at **Admin → Logs**
+- **Activity log** — every update, redeploy and restart, whether you clicked it or the scheduler ran it, is recorded at **Admin → Activity** with its full output. Failed runs keep everything the command printed, so you can read back what went wrong instead of re-running it to find out. The last 500 runs are kept for 90 days. Live log viewer at **Admin → Logs**
 - **Single admin account** — single-user by design; all configuration is managed through the UI
 
 ---

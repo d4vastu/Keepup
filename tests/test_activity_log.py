@@ -614,3 +614,170 @@ def test_no_legacy_file_is_fine():
     from app.activity_log import get_recent
 
     assert get_recent() == []
+
+
+# ---------------------------------------------------------------------------
+# Failure paths — housekeeping must never be the reason a run goes unrecorded
+# ---------------------------------------------------------------------------
+
+
+def test_legacy_log_that_is_not_a_list_is_skipped(data_dir):
+    from app.activity_log import get_recent
+
+    (data_dir / "auto_update_log.json").write_text(json.dumps({"not": "a list"}))
+
+    assert get_recent() == []
+    assert (data_dir / "auto_update_log.json.migrated").exists()
+
+
+def test_migration_survives_rename_failure(data_dir, monkeypatch):
+    """A failed rename is logged, not raised into whoever asked for the index."""
+    import app.activity_log as al
+    from app.activity_log import get_recent
+
+    _legacy(
+        data_dir,
+        [
+            {
+                "type": "os",
+                "target": "h",
+                "target_name": "H",
+                "ran_at": "2026-07-20T10:00:00+00:00",
+                "status": "success",
+                "lines": [],
+            }
+        ],
+    )
+
+    def boom(*a, **kw):
+        raise OSError("read-only filesystem")
+
+    monkeypatch.setattr(al.os, "replace", boom)
+
+    assert get_recent() == []
+
+
+def test_corrupt_index_survives_rename_failure(monkeypatch):
+    import app.activity_log as al
+    from app.activity_log import get_recent
+
+    al._ACTIVITY_DIR.mkdir(parents=True, exist_ok=True)
+    al._INDEX_PATH.write_text("not json!")
+
+    def boom(*a, **kw):
+        raise OSError("read-only filesystem")
+
+    monkeypatch.setattr(al.os, "replace", boom)
+
+    assert get_recent() == []
+
+
+def test_pruning_survives_undeletable_output_files(monkeypatch):
+    """A file that cannot be deleted must not take the whole record down."""
+    import app.activity_log as al
+    from app.activity_log import get_recent
+
+    monkeypatch.setattr(al, "MAX_ENTRIES", 1)
+
+    def boom(*a, **kw):
+        raise OSError("permission denied")
+
+    _record(target="first")
+    monkeypatch.setattr(al.Path, "unlink", boom)
+    _record(target="second")
+
+    assert [e["target"] for e in get_recent()] == ["second"]
+
+
+def test_pruning_tolerates_records_without_ids(monkeypatch):
+    """A record with no id has no output file to chase — skip, don't crash."""
+    import app.activity_log as al
+
+    al._delete_output_files({"", None})  # must not raise
+
+
+def test_orphan_sweep_survives_unreadable_runs_dir(monkeypatch):
+    import app.activity_log as al
+
+    _record()
+
+    def boom(*a, **kw):
+        raise OSError("permission denied")
+
+    monkeypatch.setattr(al.Path, "glob", boom)
+    assert _record()  # the sweep failing must not lose the run
+
+
+def test_orphan_sweep_survives_unstatable_file(monkeypatch):
+    import app.activity_log as al
+
+    _record()
+    # An orphan with no index record — the only thing the sweep looks at.
+    (al._RUNS_DIR / "deadbeef.log").write_text("orphaned output")
+
+    def boom(*a, **kw):
+        raise OSError("permission denied")
+
+    monkeypatch.setattr(al.Path, "stat", boom)
+    assert _record()
+    assert (al._RUNS_DIR / "deadbeef.log").exists()
+
+
+def test_migration_rechecks_under_the_lock(data_dir, monkeypatch):
+    """Two readers racing must not both import the same legacy entries."""
+    import app.activity_log as al
+
+    _legacy(
+        data_dir,
+        [
+            {
+                "type": "os",
+                "target": "h",
+                "target_name": "H",
+                "ran_at": "2026-07-20T10:00:00+00:00",
+                "status": "success",
+                "lines": [],
+            }
+        ],
+    )
+
+    real_exists = al.Path.exists
+    calls = {"n": 0}
+
+    def exists_once(self):
+        """True for the pre-lock check, False for the re-check inside it."""
+        if self == al._LEGACY_PATH:
+            calls["n"] += 1
+            return calls["n"] == 1
+        return real_exists(self)
+
+    monkeypatch.setattr(al.Path, "exists", exists_once)
+    al.migrate_legacy_log()
+
+    assert calls["n"] == 2
+    # The legacy file is untouched: the re-check bailed before importing.
+    # Read rather than .exists() — that call is still patched out.
+    assert (data_dir / "auto_update_log.json").read_text()
+
+
+def test_naive_timestamps_are_treated_as_utc():
+    """Legacy and hand-edited records can carry a naive ran_at."""
+    from datetime import datetime
+
+    import app.activity_log as al
+
+    default = datetime(2020, 1, 1, tzinfo=timezone.utc)
+    parsed = al._parse_ts("2026-07-20T10:00:00", default)
+    assert parsed.tzinfo is timezone.utc
+
+
+def test_redaction_skips_non_dict_store_entries(monkeypatch):
+    """A hand-edited or partially-migrated store must not break recording."""
+    import app.activity_log as al
+
+    monkeypatch.setattr(
+        "app.credentials._load_store",
+        lambda: {"junk": "not a dict", "host": {"ssh_password": "hunter2-secret"}},
+    )
+
+    assert al._secret_values() == {"hunter2-secret"}
