@@ -62,6 +62,7 @@ def _build_host_entry(
     proxmox_node: str | None = None,
     proxmox_vmid: int | None = None,
     proxmox_type: str | None = None,
+    proxmox_server: str | None = None,
 ) -> dict:
     """Builds a host entry for config.yml — no credentials stored here."""
     entry: dict = {"name": name, "host": host}
@@ -79,6 +80,8 @@ def _build_host_entry(
         entry["proxmox_vmid"] = proxmox_vmid
     if proxmox_type:
         entry["proxmox_type"] = proxmox_type
+    if proxmox_server:
+        entry["proxmox_server"] = proxmox_server
     return entry
 
 
@@ -92,8 +95,14 @@ def add_host(
     proxmox_node: str | None = None,
     proxmox_vmid: int | None = None,
     proxmox_type: str | None = None,
+    proxmox_server: str | None = None,
 ) -> str:
-    """Add a host to config and return its slug."""
+    """Add a host to config and return its slug.
+
+    ``proxmox_server`` stamps the owning server. Leaving it unset makes
+    :func:`host_ops.server_context` fall back to the first server, so every
+    caller that knows which server a guest came from must pass it (OP#211).
+    """
     config = load_config()
     hosts = config.setdefault("hosts", [])
     hosts.append(
@@ -104,6 +113,7 @@ def add_host(
             proxmox_node=proxmox_node,
             proxmox_vmid=proxmox_vmid,
             proxmox_type=proxmox_type,
+            proxmox_server=proxmox_server,
         )
     )
     save_config(config)
@@ -441,9 +451,15 @@ def get_proxmox_server(server_id: str) -> dict:
     return {}
 
 
+#: Ids the UI reserves for itself. The admin blank card renders its fields as
+#: ``px-new-*`` (OP#211), so a real server claiming ``new`` would share HTML
+#: ids with it for as long as that card is open.
+_RESERVED_SERVER_IDS = frozenset({"new"})
+
+
 def _unique_server_id(base: str, taken: set[str]) -> str:
     """Disambiguate two URLs whose hosts slugify to the same id."""
-    if base not in taken:
+    if base not in taken and base not in _RESERVED_SERVER_IDS:
         return base
     suffix = 2
     while f"{base}-{suffix}" in taken:

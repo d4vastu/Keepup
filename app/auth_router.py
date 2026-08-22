@@ -35,7 +35,10 @@ from .config_manager import (
     get_pbs_config,
     get_pfsense_config,
     get_portainer_config,
+    add_proxmox_server,
     get_proxmox_config,
+    get_proxmox_server,
+    update_proxmox_server,
     get_pushover_config,
     get_timezone,
     get_update_check_schedule,
@@ -70,6 +73,10 @@ from .httpx_client import make_client
 from .templates_env import make_templates
 
 router = APIRouter()
+
+#: Form value the blank admin Proxmox card posts (OP#211). Not a valid slug,
+#: so it can never collide with a derived server id.
+_NEW_SERVER = "__new__"
 templates = make_templates()
 
 
@@ -468,6 +475,90 @@ def _proxmox_vm_step(request: Request, resources: list[dict]) -> HTMLResponse:
     )
 
 
+def _proxmox_cfg_for(server_id: str) -> dict:
+    """Config for the named server, or the singleton shim when unnamed.
+
+    ``__new__`` is the blank admin card, which has no stored config yet.
+    """
+    if server_id and server_id != _NEW_SERVER:
+        return get_proxmox_server(server_id)
+    return get_proxmox_config()
+
+
+def _proxmox_ssh_cred_kwargs(
+    ssh_user: str, ssh_auth: str, ssh_key: str, ssh_password: str
+) -> dict:
+    """Credential fields for the admin card's SSH section (OP#211).
+
+    These fields were rendered but never accepted by this route, so saving
+    them silently did nothing. Invisible with one server; with N servers each
+    needs its own SSH credentials, since ``_lxc_ssh_context()`` resolves them
+    per server.
+
+    Only non-empty values are written, so "leave blank to keep" holds and the
+    wizard's first-server save (which posts none of these) is unaffected.
+    Choosing one auth method clears the other: ``ssh_client._connect()``
+    prefers a password over a key, so a stale password would shadow a new key.
+    """
+    kwargs: dict = {}
+    user = ssh_user.strip()
+    if user:
+        kwargs["ssh_user"] = user
+    key = ssh_key.strip()
+    password = ssh_password.strip()
+    if ssh_auth == "key" and key:
+        kwargs["ssh_key"] = key
+        kwargs["ssh_password"] = ""
+    elif ssh_auth == "password" and password:
+        kwargs["ssh_password"] = password
+        kwargs["ssh_key"] = ""
+    return kwargs
+
+
+def _persist_proxmox_server(
+    server_id: str,
+    url: str,
+    pinned_cert_pem: str,
+    pinned_fingerprint: str,
+    verify_ssl: bool,
+) -> str:
+    """Write a server's config and return the id credentials belong under.
+
+    Three cases (OP#211):
+
+    * ``__new__`` — the blank admin card. Append a server and return its
+      derived id.
+    * a known id — update that server in place. Passing ``None`` for the
+      pinned cert leaves an existing pin alone, so saving an unrelated field
+      cannot silently unpin a certificate.
+    * empty — a pre-OP#211 caller (the setup wizard's first-server flow).
+      Keeps the singleton behaviour exactly, returning ``""`` so credentials
+      stay under the legacy ``proxmox`` key.
+    """
+    if server_id == _NEW_SERVER:
+        if not url:
+            return ""
+        return add_proxmox_server(
+            url, verify_ssl, pinned_cert_pem, pinned_fingerprint
+        )
+    if server_id and get_proxmox_server(server_id):
+        update_proxmox_server(
+            server_id,
+            url=url or None,
+            verify_ssl=verify_ssl,
+            pinned_cert_pem=pinned_cert_pem or None,
+            pinned_fingerprint=pinned_fingerprint or None,
+        )
+        return server_id
+    save_proxmox_config(
+        url=url,
+        pinned_cert_pem=pinned_cert_pem,
+        pinned_fingerprint=pinned_fingerprint,
+        verify_ssl=verify_ssl,
+    )
+    return ""
+
+
 @router.post("/setup/connect/proxmox/test", response_class=HTMLResponse)
 async def setup_test_proxmox(
     request: Request,
@@ -476,6 +567,7 @@ async def setup_test_proxmox(
     proxmox_secret: str = Form(""),
     trust_accepted: str = Form(""),
     skip_ssl_verify: str = Form(""),
+    server_id: str = Form(""),
 ) -> HTMLResponse:
     url = proxmox_url.strip().rstrip("/")
     token_id = proxmox_token_id.strip()
@@ -504,7 +596,7 @@ async def setup_test_proxmox(
                 '<span class="text-red-400 text-sm">&#10007; Session expired — re-test to try again.</span>'
             )
     else:
-        pem = get_proxmox_config().get("pinned_cert_pem", "")
+        pem = _proxmox_cfg_for(server_id).get("pinned_cert_pem", "")
 
     try:
         client = ProxmoxClient(url=url, api_token=token, pinned_cert_pem=pem)
@@ -531,11 +623,27 @@ async def setup_test_proxmox(
                 return HTMLResponse(
                     '<span class="text-red-400 text-sm">&#10007; SSL certificate error — could not fetch certificate details.</span>'
                 )
+            # The retry has to re-submit the fields the request came from. The
+            # admin card namespaces its ids per server (OP#211); the wizard has
+            # no ids on these inputs at all, so it selects them by name.
+            if server_id:
+                pid = "new" if server_id == _NEW_SERVER else server_id
+                include_ids = (
+                    f"#px-{pid}-server-id,#px-{pid}-url,#px-{pid}-api-user,"
+                    f"#px-{pid}-token-id,#px-{pid}-secret"
+                )
+                target_id = f"#px-{pid}-test-result"
+            else:
+                include_ids = (
+                    "[name='proxmox_url'],[name='proxmox_token_id'],"
+                    "[name='proxmox_secret']"
+                )
+                target_id = "#proxmox-test-result"
             return _cert_trust_response(
                 request, info,
                 test_url="/setup/connect/proxmox/test",
-                include_ids="#proxmox-url,#proxmox-api-user,#proxmox-token-id,#proxmox-secret",
-                target_id="#proxmox-test-result",
+                include_ids=include_ids,
+                target_id=target_id,
                 changed=changed,
             )
         msg = str(exc)
@@ -555,12 +663,18 @@ async def setup_save_proxmox(
     proxmox_token_id: str = Form(""),
     proxmox_secret: str = Form(""),
     skip_ssl_verify: str = Form(""),
+    server_id: str = Form(""),
+    proxmox_ssh_user: str = Form(""),
+    proxmox_ssh_auth: str = Form(""),
+    proxmox_ssh_key: str = Form(""),
+    proxmox_ssh_password: str = Form(""),
 ) -> HTMLResponse:
     url = proxmox_url.strip().rstrip("/")
     token_id = proxmox_token_id.strip()
     secret = proxmox_secret.strip()
     confirmed = request.session.pop("confirmed_cert_proxmox", {})
-    save_proxmox_config(
+    server_id = _persist_proxmox_server(
+        server_id,
         url=url,
         pinned_cert_pem=confirmed.get("pem", ""),
         pinned_fingerprint=confirmed.get("fingerprint", ""),
@@ -572,8 +686,15 @@ async def setup_save_proxmox(
         cred_kwargs["api_user"] = derive_api_user(token_id)
     if secret:
         cred_kwargs["secret"] = secret
+    cred_kwargs.update(
+        _proxmox_ssh_cred_kwargs(
+            proxmox_ssh_user, proxmox_ssh_auth, proxmox_ssh_key, proxmox_ssh_password
+        )
+    )
     if cred_kwargs:
-        save_integration_credentials("proxmox", **cred_kwargs)
+        save_integration_credentials(
+            f"proxmox_{server_id}" if server_id else "proxmox", **cred_kwargs
+        )
     _queue_integration_host(request, "proxmox", "Proxmox VE", url)
 
     resources: list[dict] = []
@@ -581,7 +702,7 @@ async def setup_save_proxmox(
         try:
             import urllib.parse
             token = assemble_token({"token_id": token_id, "secret": secret})
-            px_cfg = get_proxmox_config()
+            px_cfg = _proxmox_cfg_for(server_id)
             pinned_pem = px_cfg.get("pinned_cert_pem", "")
             client = ProxmoxClient(url=url, api_token=token, pinned_cert_pem=pinned_pem, verify_ssl=px_cfg.get("verify_ssl", True))
             nodes = await client.get_nodes()
@@ -597,6 +718,7 @@ async def setup_save_proxmox(
                         user=None,
                         port=None,
                         proxmox_node=node,
+                        proxmox_server=server_id or None,
                     )
                     existing.add(px_host)
             # Node auto-added — remove from SSH wizard queue to avoid duplicate

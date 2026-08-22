@@ -1,6 +1,8 @@
 import asyncio
 import os
 from datetime import datetime, timezone
+from html import escape
+from urllib.parse import urlparse
 
 import pyotp
 from fastapi import APIRouter, Form, Request
@@ -35,6 +37,8 @@ from .config_manager import (
     get_pfsense_config,
     get_portainer_config,
     get_proxmox_config,
+    get_proxmox_server,
+    get_proxmox_servers,
     get_pushover_config,
     get_ssl_config,
     get_timezone,
@@ -47,6 +51,7 @@ from .config_manager import (
     set_docker_monitoring,
     update_host,
 )
+from .config_manager import delete_proxmox_server
 from .cert_utils import cert_info, fetch_server_cert, fingerprint
 from .proxmox_client import ProxmoxClient, assemble_token
 from .credentials import (
@@ -121,6 +126,87 @@ def _connection_status() -> dict:
     }
 
 
+def _proxmox_card(server: dict) -> dict:
+    """View data for one Proxmox server card (OP#211).
+
+    API status and SSH status are independent: a valid API token with no SSH
+    credentials at all is a real, supported state (it just means LXC package
+    checks via ``pct exec`` cannot run).
+    """
+    sid = server.get("id", "")
+    creds = get_integration_credentials(f"proxmox_{sid}") if sid else {}
+    secret_set = bool(creds.get("secret") or creds.get("api_token"))
+    # _connect() prefers a password over a key, so report the one that wins.
+    if creds.get("ssh_password"):
+        ssh_state = "password"
+    elif creds.get("ssh_key"):
+        ssh_state = "key"
+    else:
+        ssh_state = "none"
+    url = server.get("url", "")
+    return {
+        "id": sid,
+        "is_new": False,
+        "url": url,
+        "host_label": urlparse(url).hostname or url,
+        "api_user": creds.get("api_user", ""),
+        "token_id": creds.get("token_id", ""),
+        "secret_set": secret_set,
+        "configured": bool(url and secret_set),
+        "pinned": bool(server.get("pinned_fingerprint")),
+        "cert_fingerprint": server.get("pinned_fingerprint", ""),
+        "verify_ssl": server.get("verify_ssl", True),
+        "ssh_user": creds.get("ssh_user", ""),
+        "ssh_key": creds.get("ssh_key", ""),
+        "ssh_password_set": bool(creds.get("ssh_password")),
+        "ssh_state": ssh_state,
+    }
+
+
+def _proxmox_blank_card() -> dict:
+    """The empty "add a server" card. Its ids are ``px-new-*``."""
+    return {
+        "id": "",
+        "is_new": True,
+        "url": "",
+        "host_label": "",
+        "api_user": "",
+        "token_id": "",
+        "secret_set": False,
+        "configured": False,
+        "pinned": False,
+        "cert_fingerprint": "",
+        "verify_ssl": True,
+        "ssh_user": "",
+        "ssh_key": "",
+        "ssh_password_set": False,
+        "ssh_state": "none",
+    }
+
+
+def _resolve_proxmox_server(server_id: str) -> tuple[str, dict, dict]:
+    """Return ``(server_id, config, credentials)`` for an admin request.
+
+    An empty ``server_id`` means a pre-OP#211 caller, which resolves to the
+    first server so the singleton flow keeps working. An unknown id resolves
+    to empty config, which every caller reports as "not configured" rather
+    than raising.
+    """
+    if server_id:
+        return (
+            server_id,
+            get_proxmox_server(server_id),
+            get_integration_credentials(f"proxmox_{server_id}"),
+        )
+    servers = get_proxmox_servers()
+    if servers:
+        first = servers[0]["id"]
+        return first, get_proxmox_server(first), get_integration_credentials(
+            f"proxmox_{first}"
+        )
+    return "", get_proxmox_config(), get_integration_credentials("proxmox")
+
+
 def _integration_status() -> dict:
     """Read status for all API integrations."""
     px_cfg = get_proxmox_config()
@@ -139,6 +225,8 @@ def _integration_status() -> dict:
     dh_creds = get_integration_credentials("dockerhub")
 
     return {
+        "proxmox_servers": [_proxmox_card(s) for s in get_proxmox_servers()],
+        "proxmox_blank": _proxmox_blank_card(),
         "proxmox_url": px_cfg.get("url", ""),
         "proxmox_api_user": px_creds.get("api_user", ""),
         "proxmox_token_id": px_creds.get("token_id", ""),
@@ -337,9 +425,10 @@ async def admin_integrations_save_dockerhub(
 
 
 @router.post("/integrations/proxmox/discover", response_class=HTMLResponse)
-async def admin_proxmox_discover(request: Request) -> HTMLResponse:
-    cfg = get_proxmox_config()
-    creds = get_integration_credentials("proxmox")
+async def admin_proxmox_discover(
+    request: Request, server_id: str = Form("")
+) -> HTMLResponse:
+    server_id, cfg, creds = _resolve_proxmox_server(server_id)
     url = cfg.get("url", "")
     token = assemble_token(creds)
     pinned_pem = cfg.get("pinned_cert_pem", "")
@@ -353,7 +442,7 @@ async def admin_proxmox_discover(request: Request) -> HTMLResponse:
         resources = await client.discover_resources()
         return templates.TemplateResponse(
             "partials/admin_proxmox_discover.html",
-            {"request": request, "resources": resources},
+            {"request": request, "resources": resources, "server_id": server_id},
         )
     except Exception as exc:
         return HTMLResponse(
@@ -362,12 +451,19 @@ async def admin_proxmox_discover(request: Request) -> HTMLResponse:
 
 
 @router.post("/integrations/proxmox/select-hosts", response_class=HTMLResponse)
-async def admin_proxmox_select_hosts(request: Request) -> HTMLResponse:
+async def admin_proxmox_select_hosts(
+    request: Request, server_id: str = Form("")
+) -> HTMLResponse:
     """Quick-add selected Proxmox VMs/LXCs as hosts without SSH setup.
 
     LXCs: stored with proxmox_node + proxmox_vmid so updates run via pct exec.
     VMs: stored as regular hosts (SSH credentials set later from Admin > Hosts).
+
+    Every guest is stamped with its owning server. Without that stamp
+    ``server_context()`` falls back to the first server, so a guest discovered
+    on server B would be checked and upgraded via server A (OP#211).
     """
+    server_id, _cfg, _creds = _resolve_proxmox_server(server_id)
     form = await request.form()
     selected = form.getlist("selected_hosts")
 
@@ -393,6 +489,7 @@ async def admin_proxmox_select_hosts(request: Request) -> HTMLResponse:
                 proxmox_node=node,
                 proxmox_vmid=vmid,
                 proxmox_type="lxc",
+                proxmox_server=server_id or None,
                 docker_mode="all",
             )
             lxc_added.append(name)
@@ -402,6 +499,7 @@ async def admin_proxmox_select_hosts(request: Request) -> HTMLResponse:
                 proxmox_node=node,
                 proxmox_vmid=vmid,
                 proxmox_type="vm",
+                proxmox_server=server_id or None,
             )
             vm_added.append(name)
         existing.add(ip)
@@ -433,10 +531,11 @@ async def admin_proxmox_select_hosts(request: Request) -> HTMLResponse:
 
 
 @router.post("/integrations/proxmox/add-node-host", response_class=HTMLResponse)
-async def admin_proxmox_add_node_host(request: Request) -> HTMLResponse:
+async def admin_proxmox_add_node_host(
+    request: Request, server_id: str = Form("")
+) -> HTMLResponse:
     """Add the Proxmox hypervisor node(s) as hosts monitored via the Proxmox apt API."""
-    cfg = get_proxmox_config()
-    creds = get_integration_credentials("proxmox")
+    server_id, cfg, creds = _resolve_proxmox_server(server_id)
     url = cfg.get("url", "")
     token = assemble_token(creds)
     pinned_pem = cfg.get("pinned_cert_pem", "")
@@ -469,6 +568,7 @@ async def admin_proxmox_add_node_host(request: Request) -> HTMLResponse:
             user=None,
             port=None,
             proxmox_node=node,
+            proxmox_server=server_id or None,
         )
         existing.add(host_ip)
         added.append(node)
@@ -480,6 +580,108 @@ async def admin_proxmox_add_node_host(request: Request) -> HTMLResponse:
     return HTMLResponse(
         f'<span style="font-size:12px;color:#3fb950">&#10003; Added: {", ".join(added)}. '
         f'<a href="/admin/hosts" style="color:#388bfd;text-decoration:underline">Go to Hosts →</a></span>'
+    )
+
+
+@router.post("/integrations/proxmox/add-server", response_class=HTMLResponse)
+async def admin_proxmox_add_server(request: Request) -> HTMLResponse:
+    """Render a blank server card. Nothing is persisted until it is saved."""
+    return templates.TemplateResponse(
+        "partials/admin_proxmox_card.html",
+        {
+            "request": request,
+            "s": _proxmox_blank_card(),
+            "integ": {"proxmox_servers": get_proxmox_servers()},
+            "available_keys": get_available_ssh_keys(),
+        },
+    )
+
+
+def _hosts_lost_with_server(server_id: str) -> tuple[list[str], list[str]]:
+    """Return ``(dropped, converted)`` host names for removing ``server_id``.
+
+    Mirrors :func:`delete_proxmox_server`: node and LXC hosts are unusable
+    without the API so they go, VMs survive as plain SSH hosts.
+    """
+    dropped, converted = [], []
+    for host in get_hosts():
+        if host.get("proxmox_server") != server_id:
+            continue
+        is_vm = (
+            host.get("proxmox_vmid") is not None
+            and host.get("proxmox_type") == "vm"
+        )
+        (converted if is_vm else dropped).append(host.get("name", ""))
+    return dropped, converted
+
+
+@router.post(
+    "/integrations/proxmox/remove-server-confirm", response_class=HTMLResponse
+)
+async def admin_proxmox_remove_server_confirm(
+    request: Request, server_id: str = Form("")
+) -> HTMLResponse:
+    """Confirmation naming the full URL and exactly what removal will take.
+
+    Server ids are derived from IPs that can differ by a single character, so
+    the prompt names the URL rather than the id, and lists the hosts.
+    """
+    server = get_proxmox_server(server_id)
+    if not server:
+        return HTMLResponse(
+            '<span style="font-size:12px;color:#f85149">Unknown Proxmox server.</span>'
+        )
+    dropped, converted = _hosts_lost_with_server(server_id)
+    # Names come from Proxmox and from hand-edited config, so they are escaped
+    # before being interpolated into the prompt.
+    lines = [
+        f'<div style="font-size:12px;color:#e6edf3;margin-bottom:6px;">'
+        f'Remove <strong>{escape(server.get("url", ""))}</strong>?</div>'
+    ]
+    if dropped:
+        lines.append(
+            f'<div style="font-size:11px;color:#f85149;margin-bottom:4px;">'
+            f'These hosts will be deleted: {escape(", ".join(dropped))}.</div>'
+        )
+    if converted:
+        lines.append(
+            f'<div style="font-size:11px;color:#8b949e;margin-bottom:4px;">'
+            f'These VMs will be kept as plain SSH hosts: {escape(", ".join(converted))}.</div>'
+        )
+    if not dropped and not converted:
+        lines.append(
+            '<div style="font-size:11px;color:#8b949e;margin-bottom:4px;">'
+            'No hosts reference this server.</div>'
+        )
+    lines.append(
+        f'<button class="btn-test" hx-post="/admin/integrations/proxmox/remove-server"'
+        f' hx-vals=\'{{"server_id": "{server_id}"}}\''
+        f' hx-target="#config-proxmox" hx-swap="outerHTML"'
+        f' style="color:#f85149;border-color:#5a1e1e;">Yes, remove it</button>'
+    )
+    return HTMLResponse("".join(lines))
+
+
+@router.post("/integrations/proxmox/remove-server", response_class=HTMLResponse)
+async def admin_proxmox_remove_server(
+    request: Request, server_id: str = Form("")
+) -> HTMLResponse:
+    """Remove a server, its credentials, and rewrite its hosts."""
+    server = get_proxmox_server(server_id)
+    if not server:
+        return HTMLResponse(
+            '<span style="font-size:12px;color:#f85149">Unknown Proxmox server.</span>'
+        )
+    url = server.get("url", "")
+    delete_proxmox_server(server_id)
+    audit(request, "proxmox.server.remove", target=server_id, details={"url": url})
+    return templates.TemplateResponse(
+        "partials/admin_proxmox_section.html",
+        {
+            "request": request,
+            "integ": _integration_status(),
+            "available_keys": get_available_ssh_keys(),
+        },
     )
 
 

@@ -5,8 +5,11 @@
 <p style="font-size:12px;color:#8b949e;margin-top:10px;">No VMs or LXC containers found.</p>
 {% else %}
 <form hx-post="/admin/integrations/proxmox/select-hosts"
-      hx-target="#proxmox-discover-section"
+      hx-target="#px-{{ server_id or 'new' }}-discover-section"
       style="margin-top:12px;">
+  {# Carries the server the resources were discovered from, so the guests are
+     stamped with their owning server rather than falling back to the first. #}
+  <input type="hidden" name="server_id" value="{{ server_id or '' }}">
 
   {% if vms %}
   <div style="margin-bottom:14px;">
