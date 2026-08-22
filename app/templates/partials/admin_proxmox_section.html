@@ -1,0 +1,29 @@
+<div class="config-section" id="config-proxmox">
+  {# One card per server (OP#211). With exactly one server this renders the
+     same single card as before, minus any per-card chrome. #}
+  {% for s in integ.proxmox_servers %}
+  {% include "partials/admin_proxmox_card.html" %}
+  {% endfor %}
+  {% if not integ.proxmox_servers %}
+  {% set s = integ.proxmox_blank %}
+  {% include "partials/admin_proxmox_card.html" %}
+  {% endif %}
+  <div id="proxmox-add-slot"></div>
+  {% if integ.proxmox_servers %}
+  <button class="btn-test"
+    hx-post="/admin/integrations/proxmox/add-server"
+    hx-target="#proxmox-add-slot"
+    hx-swap="beforeend"
+    style="color:#388bfd;border-color:#1a3a6e;">+ Add Proxmox server</button>
+  {% endif %}
+  <script>
+  // Scoped per card: with N cards a single global toggle bound to fixed ids
+  // would always operate on the first one.
+  function togglePxSshAuth(val, pid) {
+    var keyRow = document.getElementById('px-' + pid + '-ssh-key-row');
+    var passRow = document.getElementById('px-' + pid + '-ssh-pass-row');
+    if (keyRow) keyRow.style.display = val === 'key' ? '' : 'none';
+    if (passRow) passRow.style.display = val === 'password' ? '' : 'none';
+  }
+  </script>
+</div>
