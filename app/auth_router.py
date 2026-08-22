@@ -1,3 +1,4 @@
+import logging
 import re
 import time
 from collections import defaultdict
@@ -38,6 +39,8 @@ from .config_manager import (
     add_proxmox_server,
     get_proxmox_config,
     get_proxmox_server,
+    get_proxmox_servers,
+    migrate_proxmox_servers,
     update_proxmox_server,
     get_pushover_config,
     get_timezone,
@@ -77,6 +80,8 @@ router = APIRouter()
 #: Form value the blank admin Proxmox card posts (OP#211). Not a valid slug,
 #: so it can never collide with a derived server id.
 _NEW_SERVER = "__new__"
+
+logger = logging.getLogger(__name__)
 templates = make_templates()
 
 
@@ -432,16 +437,52 @@ async def setup_connect(request: Request) -> HTMLResponse:
 # --- Proxmox ---
 
 
-def _setup_proxmox_client_parts() -> tuple[str, str, str]:
-    """Return (url, token, pinned_cert_pem) from saved Proxmox config."""
-    cfg = get_proxmox_config()
-    creds = get_integration_credentials("proxmox")
+def _setup_proxmox_client_parts(server_id: str = "") -> tuple[str, str, str]:
+    """Return (url, token, pinned_cert_pem) for a server, or the singleton."""
+    cfg = _proxmox_cfg_for(server_id)
+    creds = (
+        get_integration_credentials(f"proxmox_{server_id}")
+        if server_id and server_id != _NEW_SERVER
+        else get_integration_credentials("proxmox")
+    )
     url = cfg.get("url", "")
     token = assemble_token(creds)
     return url, token, cfg.get("pinned_cert_pem", "")
 
 
-def _proxmox_lxc_step(request: Request, resources: list[dict]) -> HTMLResponse:
+def _wizard_proxmox_servers() -> list[dict]:
+    """Servers to list on the wizard's done step.
+
+    Before the first "add another" the only server may still live in the
+    legacy ``proxmox:`` block, which is not in ``proxmox_servers`` yet. Show it
+    anyway so the done step never looks empty right after a successful save.
+    """
+    servers = get_proxmox_servers()
+    if servers:
+        return servers
+    legacy_url = get_proxmox_config().get("url", "")
+    return [{"id": "", "url": legacy_url}] if legacy_url else []
+
+
+def _proxmox_done_step(
+    request: Request, server_id: str = "", summary: str | None = None
+) -> HTMLResponse:
+    return templates.TemplateResponse(
+        "partials/setup_proxmox_section.html",
+        {
+            "request": request,
+            "proxmox_connected": True,
+            "proxmox_step": "done",
+            "proxmox_server_id": server_id,
+            "proxmox_servers": _wizard_proxmox_servers(),
+            "proxmox_added_summary": summary,
+        },
+    )
+
+
+def _proxmox_lxc_step(
+    request: Request, resources: list[dict], server_id: str = ""
+) -> HTMLResponse:
     lxcs = [r for r in resources if r["type"] == "lxc"]
     if lxcs:
         return templates.TemplateResponse(
@@ -451,13 +492,16 @@ def _proxmox_lxc_step(request: Request, resources: list[dict]) -> HTMLResponse:
                 "proxmox_connected": True,
                 "proxmox_step": "lxcs",
                 "proxmox_resources": resources,
+                "proxmox_server_id": server_id,
                 "available_keys": get_available_ssh_keys(),
             },
         )
-    return _proxmox_vm_step(request, resources)
+    return _proxmox_vm_step(request, resources, server_id)
 
 
-def _proxmox_vm_step(request: Request, resources: list[dict]) -> HTMLResponse:
+def _proxmox_vm_step(
+    request: Request, resources: list[dict], server_id: str = ""
+) -> HTMLResponse:
     vms = [r for r in resources if r["type"] == "qemu"]
     if vms:
         return templates.TemplateResponse(
@@ -467,12 +511,10 @@ def _proxmox_vm_step(request: Request, resources: list[dict]) -> HTMLResponse:
                 "proxmox_connected": True,
                 "proxmox_step": "vms",
                 "proxmox_resources": resources,
+                "proxmox_server_id": server_id,
             },
         )
-    return templates.TemplateResponse(
-        "partials/setup_proxmox_section.html",
-        {"request": request, "proxmox_connected": True, "proxmox_step": "done"},
-    )
+    return _proxmox_done_step(request, server_id)
 
 
 def _proxmox_cfg_for(server_id: str) -> dict:
@@ -728,18 +770,50 @@ async def setup_save_proxmox(
         except Exception:
             pass
 
-    return _proxmox_lxc_step(request, resources)
+    return _proxmox_lxc_step(request, resources, server_id)
+
+
+@router.post("/setup/connect/proxmox/add-another", response_class=HTMLResponse)
+async def setup_proxmox_add_another(request: Request) -> HTMLResponse:
+    """Restart the per-server flow for an additional Proxmox server.
+
+    Migrates first. The wizard's first-server save writes the legacy
+    ``proxmox:`` block, and appending to ``proxmox_servers`` while that block
+    still exists leaves the config carrying both shapes — which
+    ``migrate_proxmox_servers()`` resolves by discarding the legacy block as
+    stale. The first server would disappear and its hosts, being unstamped,
+    would resolve through ``server_context()`` onto the *second* server. So the
+    first server is converted into a real entry before a second one is added.
+    """
+    migrated = migrate_proxmox_servers()
+    if migrated:
+        logger.info(
+            "Migrated the singleton Proxmox config to server %r before adding "
+            "another", migrated,
+        )
+    return templates.TemplateResponse(
+        "partials/setup_proxmox_section.html",
+        {
+            "request": request,
+            "proxmox_connected": False,
+            "proxmox_step": "",
+            "proxmox_server_id": _NEW_SERVER,
+            "proxmox_servers": _wizard_proxmox_servers(),
+        },
+    )
 
 
 @router.post("/setup/connect/proxmox/discover", response_class=HTMLResponse)
-async def setup_proxmox_discover(request: Request) -> HTMLResponse:
+async def setup_proxmox_discover(
+    request: Request, server_id: str = Form("")
+) -> HTMLResponse:
     """For already-connected Proxmox: discover resources and enter the guided flow."""
     import urllib.parse
-    url, token, pinned_pem = _setup_proxmox_client_parts()
+    url, token, pinned_pem = _setup_proxmox_client_parts(server_id)
     if not url or not token:
         return HTMLResponse('<p class="text-sm text-red-400">Proxmox not configured.</p>')
     try:
-        client = ProxmoxClient(url=url, api_token=token, pinned_cert_pem=pinned_pem, verify_ssl=get_proxmox_config().get("verify_ssl", True))
+        client = ProxmoxClient(url=url, api_token=token, pinned_cert_pem=pinned_pem, verify_ssl=_proxmox_cfg_for(server_id).get("verify_ssl", True))
         nodes = await client.get_nodes()
         resources = await client.discover_resources()
         request.session["setup_proxmox_resources"] = resources
@@ -753,13 +827,14 @@ async def setup_proxmox_discover(request: Request) -> HTMLResponse:
                     user=None,
                     port=None,
                     proxmox_node=node,
+                    proxmox_server=server_id or None,
                 )
                 existing.add(px_host)
         # Node auto-added — remove from SSH wizard queue to avoid duplicate
         pending = request.session.get("setup_integration_pending", [])
         pending = [h for h in pending if h.get("integration") != "proxmox"]
         request.session["setup_integration_pending"] = pending
-        return _proxmox_lxc_step(request, resources)
+        return _proxmox_lxc_step(request, resources, server_id)
     except Exception as exc:
         return HTMLResponse(f'<p class="text-sm text-red-400">Discovery failed: {exc}</p>')
 
@@ -772,9 +847,10 @@ async def setup_proxmox_test_ssh(
     proxmox_ssh_auth: str = Form("key"),
     proxmox_ssh_key: str = Form(""),
     proxmox_ssh_password: str = Form(""),
+    server_id: str = Form(""),
 ) -> HTMLResponse:
     import urllib.parse
-    cfg = get_proxmox_config()
+    cfg = _proxmox_cfg_for(server_id)
     px_host = urllib.parse.urlparse(cfg.get("url", "")).hostname or ""
     if not px_host:
         return HTMLResponse('<span class="text-red-400 text-xs">Proxmox not configured.</span>')
@@ -864,6 +940,7 @@ async def setup_proxmox_save_lxcs(
     proxmox_ssh_auth: str = Form("key"),
     proxmox_ssh_key: str = Form(""),
     proxmox_ssh_password: str = Form(""),
+    server_id: str = Form(""),
 ) -> HTMLResponse:
     form = await request.form()
     selected = form.getlist("selected_lxcs")
@@ -878,7 +955,9 @@ async def setup_proxmox_save_lxcs(
     if ssh_password:
         cred_kwargs["ssh_password"] = ssh_password
         cred_kwargs["ssh_key"] = None
-    save_integration_credentials("proxmox", **cred_kwargs)
+    save_integration_credentials(
+        f"proxmox_{server_id}" if server_id else "proxmox", **cred_kwargs
+    )
 
     existing = {h["host"] for h in get_hosts()}
     added_lxcs: list[dict] = []
@@ -892,24 +971,31 @@ async def setup_proxmox_save_lxcs(
             continue
         vmid = int(vmid_str) if vmid_str.isdigit() else None
         if vmid is not None:
-            add_host(name=name, host=ip, user=None, port=None, proxmox_node=node, proxmox_vmid=vmid, docker_mode="all")
+            add_host(
+                name=name, host=ip, user=None, port=None,
+                proxmox_node=node, proxmox_vmid=vmid,
+                proxmox_server=server_id or None,
+                docker_mode="all",
+            )
             existing.add(ip)
             added_lxcs.append({"name": name, "slug": slugify(name)})
 
     resources = request.session.get("setup_proxmox_resources", [])
     if added_lxcs:
-        return _proxmox_docker_step(request, added_lxcs, resources)
-    return _proxmox_vm_step(request, resources)
+        return _proxmox_docker_step(request, added_lxcs, resources, server_id)
+    return _proxmox_vm_step(request, resources, server_id)
 
 
 @router.post("/setup/connect/proxmox/skip-lxcs", response_class=HTMLResponse)
-async def setup_proxmox_skip_lxcs(request: Request) -> HTMLResponse:
+async def setup_proxmox_skip_lxcs(
+    request: Request, server_id: str = Form("")
+) -> HTMLResponse:
     resources = request.session.get("setup_proxmox_resources", [])
-    return _proxmox_vm_step(request, resources)
+    return _proxmox_vm_step(request, resources, server_id)
 
 
 def _proxmox_docker_step(
-    request: Request, lxcs: list[dict], resources: list[dict]
+    request: Request, lxcs: list[dict], resources: list[dict], server_id: str = ""
 ) -> HTMLResponse:
     request.session["setup_proxmox_docker_lxcs"] = lxcs
     return templates.TemplateResponse(
@@ -919,12 +1005,15 @@ def _proxmox_docker_step(
             "proxmox_connected": True,
             "proxmox_step": "docker",
             "proxmox_lxcs": lxcs,
+            "proxmox_server_id": server_id,
         },
     )
 
 
 @router.post("/setup/connect/proxmox/save-docker", response_class=HTMLResponse)
-async def setup_proxmox_save_docker(request: Request) -> HTMLResponse:
+async def setup_proxmox_save_docker(
+    request: Request, server_id: str = Form("")
+) -> HTMLResponse:
     form = await request.form()
     checked_slugs = set(form.getlist("docker_lxcs"))
     all_lxcs = request.session.get("setup_proxmox_docker_lxcs") or []
@@ -933,17 +1022,21 @@ async def setup_proxmox_save_docker(request: Request) -> HTMLResponse:
         if slug not in checked_slugs:
             set_docker_monitoring(slug=slug, mode="none")
     resources = request.session.get("setup_proxmox_resources", [])
-    return _proxmox_vm_step(request, resources)
+    return _proxmox_vm_step(request, resources, server_id)
 
 
 @router.post("/setup/connect/proxmox/skip-docker", response_class=HTMLResponse)
-async def setup_proxmox_skip_docker(request: Request) -> HTMLResponse:
+async def setup_proxmox_skip_docker(
+    request: Request, server_id: str = Form("")
+) -> HTMLResponse:
     resources = request.session.get("setup_proxmox_resources", [])
-    return _proxmox_vm_step(request, resources)
+    return _proxmox_vm_step(request, resources, server_id)
 
 
 @router.post("/setup/connect/proxmox/save-vms", response_class=HTMLResponse)
-async def setup_proxmox_save_vms(request: Request) -> HTMLResponse:
+async def setup_proxmox_save_vms(
+    request: Request, server_id: str = Form("")
+) -> HTMLResponse:
     form = await request.form()
     selected = form.getlist("selected_vms")
     vm_action = str(form.get("vm_action", "later"))
@@ -973,23 +1066,14 @@ async def setup_proxmox_save_vms(request: Request) -> HTMLResponse:
         note = "continue to set up logins" if vm_action == "now" else "finish login setup from Admin › Hosts"
         summary = f"{label} — {note}"
 
-    return templates.TemplateResponse(
-        "partials/setup_proxmox_section.html",
-        {
-            "request": request,
-            "proxmox_connected": True,
-            "proxmox_step": "done",
-            "proxmox_added_summary": summary,
-        },
-    )
+    return _proxmox_done_step(request, server_id, summary)
 
 
 @router.post("/setup/connect/proxmox/skip-vms", response_class=HTMLResponse)
-async def setup_proxmox_skip_vms(request: Request) -> HTMLResponse:
-    return templates.TemplateResponse(
-        "partials/setup_proxmox_section.html",
-        {"request": request, "proxmox_connected": True, "proxmox_step": "done"},
-    )
+async def setup_proxmox_skip_vms(
+    request: Request, server_id: str = Form("")
+) -> HTMLResponse:
+    return _proxmox_done_step(request, server_id)
 
 
 # --- Proxmox Backup Server ---

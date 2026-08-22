@@ -1,4 +1,7 @@
-<div id="proxmox-section" class="bg-slate-800/60 border border-slate-700 rounded-2xl overflow-hidden" data-step="{{ proxmox_step or '' }}">
+<div id="proxmox-section" class="bg-slate-800/60 border border-slate-700 rounded-2xl overflow-hidden" data-step="{{ proxmox_step or '' }}" data-server-id="{{ proxmox_server_id or '' }}">
+{# Every step re-posts the server it belongs to, so a second server's flow
+   cannot write into the first one's config or credentials (OP#212). #}
+<input type="hidden" id="proxmox-server-id" name="server_id" value="{{ proxmox_server_id or '' }}">
   <div class="flex items-center justify-between px-5 py-4 border-b border-slate-700">
     <div>
       <h2 class="text-sm font-semibold text-slate-200">Proxmox VE</h2>
@@ -35,7 +38,7 @@
   <div class="flex gap-2">
     <button type="button"
       hx-post="/setup/connect/proxmox/save-docker"
-      hx-include=".proxmox-docker-check"
+      hx-include=".proxmox-docker-check,#proxmox-server-id"
       hx-target="#proxmox-section"
       hx-swap="outerHTML"
       class="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-sm font-medium text-white transition-colors">
@@ -43,6 +46,7 @@
     </button>
     <button type="button"
       hx-post="/setup/connect/proxmox/skip-docker"
+      hx-include="#proxmox-server-id"
       hx-target="#proxmox-section"
       hx-swap="outerHTML"
       class="px-4 py-2 rounded-lg bg-slate-700 hover:bg-slate-600 text-sm font-medium text-slate-300 transition-colors">
@@ -142,7 +146,7 @@
     <div class="flex items-center gap-3">
       <button type="button"
         hx-post="/setup/connect/proxmox/test-ssh"
-        hx-include="#proxmox-lxc-ssh-user,#proxmox-lxc-ssh-auth,#proxmox-lxc-ssh-key,#proxmox-lxc-ssh-pass"
+        hx-include="#proxmox-lxc-ssh-user,#proxmox-lxc-ssh-auth,#proxmox-lxc-ssh-key,#proxmox-lxc-ssh-pass,#proxmox-server-id"
         hx-target="#proxmox-lxc-test-result"
         class="px-3 py-1.5 rounded-lg bg-slate-600 hover:bg-slate-500 text-xs font-medium text-slate-200 transition-colors">
         Test connection
@@ -154,7 +158,7 @@
   <div class="flex gap-2 items-center flex-wrap">
     <button id="proxmox-add-lxcs-btn" type="button" disabled
       hx-post="/setup/connect/proxmox/save-lxcs"
-      hx-include=".proxmox-lxc-check,#proxmox-lxc-ssh-user,#proxmox-lxc-ssh-auth,#proxmox-lxc-ssh-key,#proxmox-lxc-ssh-pass"
+      hx-include=".proxmox-lxc-check,#proxmox-lxc-ssh-user,#proxmox-lxc-ssh-auth,#proxmox-lxc-ssh-key,#proxmox-lxc-ssh-pass,#proxmox-server-id"
       hx-target="#proxmox-section"
       hx-swap="outerHTML"
       class="px-4 py-2 rounded-lg bg-blue-600 text-sm font-medium text-white transition-colors opacity-50 cursor-not-allowed">
@@ -162,6 +166,7 @@
     </button>
     <button type="button"
       hx-post="/setup/connect/proxmox/skip-lxcs"
+      hx-include="#proxmox-server-id"
       hx-target="#proxmox-section"
       hx-swap="outerHTML"
       class="px-4 py-2 rounded-lg bg-slate-700 hover:bg-slate-600 text-sm font-medium text-slate-300 transition-colors">
@@ -246,7 +251,7 @@
   <div class="flex flex-col gap-2 items-start pt-1">
     <button type="button"
       hx-post="/setup/connect/proxmox/save-vms"
-      hx-include="#proxmox-vm-form"
+      hx-include="#proxmox-vm-form,#proxmox-server-id"
       hx-vals='{"vm_action": "now"}'
       hx-target="#proxmox-section"
       hx-swap="outerHTML"
@@ -255,7 +260,7 @@
     </button>
     <button type="button"
       hx-post="/setup/connect/proxmox/save-vms"
-      hx-include="#proxmox-vm-form"
+      hx-include="#proxmox-vm-form,#proxmox-server-id"
       hx-vals='{"vm_action": "later"}'
       hx-target="#proxmox-section"
       hx-swap="outerHTML"
@@ -264,6 +269,7 @@
     </button>
     <button type="button"
       hx-post="/setup/connect/proxmox/skip-vms"
+      hx-include="#proxmox-server-id"
       hx-target="#proxmox-section"
       hx-swap="outerHTML"
       class="text-xs text-slate-500 hover:text-slate-400 transition-colors px-1 py-1">
@@ -277,6 +283,26 @@
   {% if proxmox_added_summary %}
   <p class="text-xs text-slate-400">{{ proxmox_added_summary }}</p>
   {% endif %}
+  {% if proxmox_servers %}
+  <div class="mt-3">
+    <p class="text-xs font-medium text-slate-400 mb-1">Configured servers</p>
+    <ul class="space-y-1">
+      {% for s in proxmox_servers %}
+      <li class="text-xs text-slate-300 flex items-center gap-2">
+        <span class="w-1.5 h-1.5 rounded-full bg-green-500 flex-shrink-0"></span>
+        {{ s.url }}
+      </li>
+      {% endfor %}
+    </ul>
+  </div>
+  {% endif %}
+  <button
+    hx-post="/setup/connect/proxmox/add-another"
+    hx-target="#proxmox-section"
+    hx-swap="outerHTML"
+    class="mt-3 px-4 py-2 rounded-lg bg-slate-600 hover:bg-slate-500 text-sm font-medium text-slate-200 transition-colors">
+    Add another Proxmox server
+  </button>
 
   {% elif proxmox_connected %}
   <!-- Already connected — offer to continue setup -->
@@ -285,6 +311,7 @@
   </p>
   <button
     hx-post="/setup/connect/proxmox/discover"
+      hx-include="#proxmox-server-id"
     hx-target="#proxmox-section"
     hx-swap="outerHTML"
     class="px-4 py-2 rounded-lg bg-slate-600 hover:bg-slate-500 text-sm font-medium text-slate-200 transition-colors">
@@ -317,14 +344,14 @@
   <div class="flex gap-2 items-center flex-wrap">
     <button
       hx-post="/setup/connect/proxmox/test"
-      hx-include="[name='proxmox_url'],[name='proxmox_token_id'],[name='proxmox_secret']"
+      hx-include="[name='proxmox_url'],[name='proxmox_token_id'],[name='proxmox_secret'],#proxmox-server-id"
       hx-target="#proxmox-test-result"
       class="px-4 py-2 rounded-lg bg-slate-600 hover:bg-slate-500 text-sm font-medium text-slate-200 transition-colors">
       Test connection
     </button>
     <button
       hx-post="/setup/connect/proxmox/save"
-      hx-include="[name='proxmox_url'],[name='proxmox_token_id'],[name='proxmox_secret']"
+      hx-include="[name='proxmox_url'],[name='proxmox_token_id'],[name='proxmox_secret'],#proxmox-server-id"
       hx-target="#proxmox-section"
       hx-swap="outerHTML"
       class="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-sm font-medium text-white transition-colors">
