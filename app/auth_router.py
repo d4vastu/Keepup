@@ -485,6 +485,36 @@ def _proxmox_cfg_for(server_id: str) -> dict:
     return get_proxmox_config()
 
 
+def _proxmox_ssh_cred_kwargs(
+    ssh_user: str, ssh_auth: str, ssh_key: str, ssh_password: str
+) -> dict:
+    """Credential fields for the admin card's SSH section (OP#211).
+
+    These fields were rendered but never accepted by this route, so saving
+    them silently did nothing. Invisible with one server; with N servers each
+    needs its own SSH credentials, since ``_lxc_ssh_context()`` resolves them
+    per server.
+
+    Only non-empty values are written, so "leave blank to keep" holds and the
+    wizard's first-server save (which posts none of these) is unaffected.
+    Choosing one auth method clears the other: ``ssh_client._connect()``
+    prefers a password over a key, so a stale password would shadow a new key.
+    """
+    kwargs: dict = {}
+    user = ssh_user.strip()
+    if user:
+        kwargs["ssh_user"] = user
+    key = ssh_key.strip()
+    password = ssh_password.strip()
+    if ssh_auth == "key" and key:
+        kwargs["ssh_key"] = key
+        kwargs["ssh_password"] = ""
+    elif ssh_auth == "password" and password:
+        kwargs["ssh_password"] = password
+        kwargs["ssh_key"] = ""
+    return kwargs
+
+
 def _persist_proxmox_server(
     server_id: str,
     url: str,
@@ -634,6 +664,10 @@ async def setup_save_proxmox(
     proxmox_secret: str = Form(""),
     skip_ssl_verify: str = Form(""),
     server_id: str = Form(""),
+    proxmox_ssh_user: str = Form(""),
+    proxmox_ssh_auth: str = Form(""),
+    proxmox_ssh_key: str = Form(""),
+    proxmox_ssh_password: str = Form(""),
 ) -> HTMLResponse:
     url = proxmox_url.strip().rstrip("/")
     token_id = proxmox_token_id.strip()
@@ -652,6 +686,11 @@ async def setup_save_proxmox(
         cred_kwargs["api_user"] = derive_api_user(token_id)
     if secret:
         cred_kwargs["secret"] = secret
+    cred_kwargs.update(
+        _proxmox_ssh_cred_kwargs(
+            proxmox_ssh_user, proxmox_ssh_auth, proxmox_ssh_key, proxmox_ssh_password
+        )
+    )
     if cred_kwargs:
         save_integration_credentials(
             f"proxmox_{server_id}" if server_id else "proxmox", **cred_kwargs

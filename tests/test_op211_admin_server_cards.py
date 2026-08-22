@@ -517,3 +517,103 @@ def test_add_server_button_replaces_rather_than_appends(
     add_button = add_button[: add_button.index("</button>")]
     assert 'hx-swap="innerHTML"' in add_button
     assert "beforeend" not in add_button
+
+
+# ---------------------------------------------------------------------------
+# SSH credentials from the admin card
+# ---------------------------------------------------------------------------
+
+
+def test_save_persists_ssh_credentials_for_the_named_server(
+    client, config_file, data_dir
+):
+    """The card renders SSH fields; saving must actually store them.
+
+    Pre-OP#211 the admin card posted these to /setup/connect/proxmox/save,
+    which never accepted them — the fields silently did nothing. With one
+    server that was invisible; with N servers each needs its own SSH
+    credentials, since _lxc_ssh_context() resolves them per server.
+    """
+    a, b = _two_servers(config_file, data_dir)
+
+    client.post(
+        "/setup/connect/proxmox/save",
+        data={
+            "server_id": b,
+            "proxmox_url": "https://192.168.5.226:8006",
+            "proxmox_ssh_user": "keepup",
+            "proxmox_ssh_auth": "key",
+            "proxmox_ssh_key": "id_ed25519",
+        },
+    )
+
+    from app.credentials import get_integration_credentials
+
+    creds = get_integration_credentials(f"proxmox_{b}")
+    assert creds["ssh_user"] == "keepup"
+    assert creds["ssh_key"] == "id_ed25519"
+    assert not get_integration_credentials(f"proxmox_{a}").get("ssh_user")
+
+
+def test_switching_to_key_auth_clears_a_stored_password(
+    client, config_file, data_dir
+):
+    """_connect() prefers a password over a key, so a stale one shadows the key."""
+    from app.credentials import get_integration_credentials, save_integration_credentials
+
+    a, b = _two_servers(config_file, data_dir)
+    save_integration_credentials(f"proxmox_{b}", ssh_user="root", ssh_password="old")
+
+    client.post(
+        "/setup/connect/proxmox/save",
+        data={
+            "server_id": b,
+            "proxmox_url": "https://192.168.5.226:8006",
+            "proxmox_ssh_user": "root",
+            "proxmox_ssh_auth": "key",
+            "proxmox_ssh_key": "id_ed25519",
+        },
+    )
+
+    creds = get_integration_credentials(f"proxmox_{b}")
+    assert creds["ssh_key"] == "id_ed25519"
+    assert not creds.get("ssh_password")
+
+
+def test_blank_ssh_password_keeps_the_stored_one(client, config_file, data_dir):
+    """The placeholder says "Leave blank to keep" — it must mean that."""
+    from app.credentials import get_integration_credentials, save_integration_credentials
+
+    a, b = _two_servers(config_file, data_dir)
+    save_integration_credentials(f"proxmox_{b}", ssh_user="root", ssh_password="keepme")
+
+    client.post(
+        "/setup/connect/proxmox/save",
+        data={
+            "server_id": b,
+            "proxmox_url": "https://192.168.5.226:8006",
+            "proxmox_ssh_user": "root",
+            "proxmox_ssh_auth": "password",
+            "proxmox_ssh_password": "",
+        },
+    )
+
+    assert get_integration_credentials(f"proxmox_{b}")["ssh_password"] == "keepme"
+
+
+def test_wizard_save_without_ssh_fields_stores_no_ssh_user(
+    client, config_file, data_dir
+):
+    """The wizard's first-server save posts no SSH fields — don't invent any."""
+    client.post(
+        "/setup/connect/proxmox/save",
+        data={
+            "proxmox_url": "https://192.168.5.226:8006",
+            "proxmox_token_id": "root@pam!A",
+            "proxmox_secret": "s",
+        },
+    )
+
+    from app.credentials import get_integration_credentials
+
+    assert not get_integration_credentials("proxmox").get("ssh_user")
