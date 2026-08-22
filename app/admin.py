@@ -1,6 +1,7 @@
 import asyncio
 import os
 from datetime import datetime, timezone
+from html import escape
 from urllib.parse import urlparse
 
 import pyotp
@@ -631,19 +632,21 @@ async def admin_proxmox_remove_server_confirm(
             '<span style="font-size:12px;color:#f85149">Unknown Proxmox server.</span>'
         )
     dropped, converted = _hosts_lost_with_server(server_id)
+    # Names come from Proxmox and from hand-edited config, so they are escaped
+    # before being interpolated into the prompt.
     lines = [
         f'<div style="font-size:12px;color:#e6edf3;margin-bottom:6px;">'
-        f'Remove <strong>{server.get("url", "")}</strong>?</div>'
+        f'Remove <strong>{escape(server.get("url", ""))}</strong>?</div>'
     ]
     if dropped:
         lines.append(
             f'<div style="font-size:11px;color:#f85149;margin-bottom:4px;">'
-            f'These hosts will be deleted: {", ".join(dropped)}.</div>'
+            f'These hosts will be deleted: {escape(", ".join(dropped))}.</div>'
         )
     if converted:
         lines.append(
             f'<div style="font-size:11px;color:#8b949e;margin-bottom:4px;">'
-            f'These VMs will be kept as plain SSH hosts: {", ".join(converted)}.</div>'
+            f'These VMs will be kept as plain SSH hosts: {escape(", ".join(converted))}.</div>'
         )
     if not dropped and not converted:
         lines.append(

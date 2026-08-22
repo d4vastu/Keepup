@@ -617,3 +617,27 @@ def test_wizard_save_without_ssh_fields_stores_no_ssh_user(
     from app.credentials import get_integration_credentials
 
     assert not get_integration_credentials("proxmox").get("ssh_user")
+
+
+def test_remove_confirmation_escapes_host_names(client, config_file, data_dir):
+    """Names come from Proxmox and from hand-edited config — treat them as data."""
+    from app.config_manager import add_host
+
+    a, b = _two_servers(config_file, data_dir)
+    add_host(
+        name="<script>alert(1)</script>",
+        host="192.168.5.61",
+        user=None,
+        port=None,
+        proxmox_node="pve2",
+        proxmox_vmid=141,
+        proxmox_type="lxc",
+        proxmox_server=b,
+    )
+
+    resp = client.post(
+        "/admin/integrations/proxmox/remove-server-confirm", data={"server_id": b}
+    )
+
+    assert "<script>alert(1)</script>" not in resp.text
+    assert "&lt;script&gt;" in resp.text
