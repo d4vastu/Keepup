@@ -13,7 +13,9 @@
   <button class="btn-test"
     hx-post="/admin/integrations/proxmox/add-server"
     hx-target="#proxmox-add-slot"
-    hx-swap="beforeend"
+    {# innerHTML, not beforeend: two blank cards would carry identical
+       px-new-* ids, which is the duplicate-id bug this story removes. #}
+    hx-swap="innerHTML"
     style="color:#388bfd;border-color:#1a3a6e;">+ Add Proxmox server</button>
   {% endif %}
   <script>

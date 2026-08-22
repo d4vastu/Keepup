@@ -504,3 +504,16 @@ def test_cert_trust_retry_uses_name_selectors_for_the_wizard(
     # Jinja escapes the quotes; the browser decodes them back into a selector.
     assert "[name='proxmox_url']" in html.unescape(resp.text)
     assert "#proxmox-test-result" in resp.text
+
+
+def test_add_server_button_replaces_rather_than_appends(
+    client, config_file, data_dir
+):
+    """Two blank cards would share px-new-* ids — the bug this story removes."""
+    _two_servers(config_file, data_dir)
+    body = client.get("/admin/integrations").text
+
+    add_button = body[body.index("/admin/integrations/proxmox/add-server"):]
+    add_button = add_button[: add_button.index("</button>")]
+    assert 'hx-swap="innerHTML"' in add_button
+    assert "beforeend" not in add_button
