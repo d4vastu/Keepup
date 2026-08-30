@@ -148,13 +148,15 @@ class ProxmoxClient:
                 f"pct exec {vmid} -- sh -c "
                 f"'apt-get update -qq 2>/dev/null; "
                 f"apt list -qq --upgradable 2>/dev/null; "
-                f"echo __APPLY__; apt-get -s upgrade 2>/dev/null'"
+                f"echo __APPLY__; apt-get -s upgrade 2>/dev/null; "
+                f"echo __FULL__; apt-get -s full-upgrade 2>/dev/null'"
             )
         else:
             cmd = (
                 f"pct exec {vmid} -- sh -c "
                 f"'apt list -qq --upgradable 2>/dev/null; "
-                f"echo __APPLY__; apt-get -s upgrade 2>/dev/null'"
+                f"echo __APPLY__; apt-get -s upgrade 2>/dev/null; "
+                f"echo __FULL__; apt-get -s full-upgrade 2>/dev/null'"
             )
 
         async with await _connect(host_entry, ssh_creds) as conn:
@@ -164,11 +166,14 @@ class ProxmoxClient:
 
         from .package_managers import _apt_applicable_names
 
-        # Mirrors the __APPLY__/held_back handling in AptPackageManager.parse;
-        # keep the two in sync if the apt-get -s upgrade contract changes.
+        # Mirrors the __APPLY__/__FULL__/held_back handling in
+        # AptPackageManager.parse; keep the two in sync if the apt-get -s
+        # upgrade contract changes.
         # No __APPLY__ separator (older output) => held_back stays False.
         list_part, sep, apply_part = result.stdout.partition("__APPLY__")
+        apply_part, full_sep, full_part = apply_part.partition("__FULL__")
         applicable = _apt_applicable_names(apply_part) if sep else None
+        full_names = _apt_applicable_names(full_part) if full_sep else None
 
         packages = []
         for line in list_part.splitlines():
@@ -183,13 +188,20 @@ class ProxmoxClient:
                 old_ver = ""
                 if "upgradable from:" in line:
                     old_ver = line.split("upgradable from:")[-1].strip().rstrip("]")
+                held_back = applicable is not None and pkg_name not in applicable
+                if not held_back or full_names is None:
+                    reason = None
+                elif pkg_name in full_names:
+                    reason = "needs_full_upgrade"
+                else:
+                    reason = "phased"
                 packages.append(
                     {
                         "name": pkg_name,
                         "current": old_ver,
                         "available": new_ver,
-                        "held_back": applicable is not None
-                        and pkg_name not in applicable,
+                        "held_back": held_back,
+                        "held_back_reason": reason,
                     }
                 )
 

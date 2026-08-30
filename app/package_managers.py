@@ -24,6 +24,10 @@ import re
 # APT additionally sets an optional "held_back": bool flag (OP#179) for packages
 # that `apt-get upgrade` will not apply (phased or kept back). Other package
 # managers omit it, so mixed-PM consumers must read it via .get("held_back").
+# Alongside it, "held_back_reason" (OP#241) says *why*, because the two causes
+# behave oppositely: "phased" clears itself over time, "needs_full_upgrade"
+# never does. It is None when the package is applicable, or when the check
+# output carried no __FULL__ section to tell the two apart.
 Package = dict[str, str]
 
 
@@ -139,6 +143,8 @@ class AptPackageManager(PackageManager):
             "apt list --upgradable 2>/dev/null; "
             "echo __APPLY__; "
             "apt-get -s upgrade 2>/dev/null; "
+            "echo __FULL__; "
+            "apt-get -s full-upgrade 2>/dev/null; "
             "echo __REBOOT__; "
             "[ -f /var/run/reboot-required ] && echo yes || echo no"
         )
@@ -162,12 +168,25 @@ class AptPackageManager(PackageManager):
 
         if "__APPLY__" in body:
             list_part, apply_part = body.split("__APPLY__", 1)
-            applicable = _apt_applicable_names(apply_part)
             have_apply = True
+            # `apt-get -s full-upgrade` plans the installs a plain upgrade
+            # refuses, so a held-back package listed there is deferred until
+            # someone runs full-upgrade — it will never roll out on its own.
+            # A phased package is skipped by both simulations (OP#241).
+            if "__FULL__" in apply_part:
+                apply_part, full_part = apply_part.split("__FULL__", 1)
+                full_names = _apt_applicable_names(full_part)
+                have_full = True
+            else:
+                full_names = set()
+                have_full = False
+            applicable = _apt_applicable_names(apply_part)
         else:
             list_part = body
             applicable = set()
+            full_names = set()
             have_apply = False
+            have_full = False
 
         packages: list[Package] = []
         for line in list_part.splitlines():
@@ -178,12 +197,22 @@ class AptPackageManager(PackageManager):
                 parts = line.split()
                 available = parts[1] if len(parts) > 1 else "?"
                 current = parts[-1].rstrip("]") if len(parts) > 3 else "?"
+                held_back = have_apply and name not in applicable
+                if not held_back or not have_full:
+                    # Without a full-upgrade simulation the cause is unknown;
+                    # say nothing rather than guess.
+                    reason = None
+                elif name in full_names:
+                    reason = "needs_full_upgrade"
+                else:
+                    reason = "phased"
                 packages.append(
                     {
                         "name": name,
                         "current": current,
                         "available": available,
-                        "held_back": have_apply and name not in applicable,
+                        "held_back": held_back,
+                        "held_back_reason": reason,
                     }
                 )
             except Exception:
