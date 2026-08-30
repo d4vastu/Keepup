@@ -100,10 +100,21 @@ async def _run(
     needs_sudo: bool,
     timeout: int | None = None,
 ) -> asyncssh.SSHCompletedProcess:
-    """Run a command, wrapping with sudo -S if needed."""
-    if needs_sudo and sudo_password:
-        full_cmd = f"sudo -S {cmd}"
-        stdin_data = sudo_password + "\n"
+    """Run a command, wrapping with sudo if the host needs it.
+
+    A host whose SSH user has passwordless sudo stores no sudo password, so
+    ``sudo -n`` is used instead of ``sudo -S``. Dropping sudo entirely in that
+    case ran privileged commands unprivileged (OP#240). ``-n`` also fails fast
+    with sudo's own "a password is required" on hosts that do need one, rather
+    than hanging on a prompt nobody can answer.
+    """
+    if needs_sudo:
+        if sudo_password:
+            full_cmd = f"sudo -S {cmd}"
+            stdin_data = sudo_password + "\n"
+        else:
+            full_cmd = f"sudo -n {cmd}"
+            stdin_data = None
     else:
         full_cmd = cmd
         stdin_data = None
