@@ -7,7 +7,8 @@
     {{ applicable_pkgs | length }} update{{ 's' if applicable_pkgs | length != 1 }}
   </span>
   {% if held_back_pkgs %}
-  <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium bg-slate-800/60 text-slate-400 border border-slate-700/50" title="apt-get upgrade won't apply these — they're phased or need apt-get full-upgrade. They roll out automatically over time.">
+  {% set full_pkgs = held_back_pkgs | selectattr('held_back_reason', 'equalto', 'needs_full_upgrade') | list %}
+  <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium {% if full_pkgs %}bg-amber-950/50 text-amber-400 border border-amber-900/40{% else %}bg-slate-800/60 text-slate-400 border border-slate-700/50{% endif %}" title="{% if full_pkgs %}{{ full_pkgs | length }} of these will never be applied by apt-get upgrade — they need a new package installed, which only apt-get full-upgrade does. Waiting will not clear them.{% else %}apt-get upgrade won't apply these — they're phased or need apt-get full-upgrade.{% endif %}">
     {{ held_back_pkgs | length }} held back
   </span>
   {% endif %}
@@ -52,10 +53,12 @@
   {% endif %}
 </div>
 {% elif held_back_pkgs %}
+{% set full_pkgs = held_back_pkgs | selectattr('held_back_reason', 'equalto', 'needs_full_upgrade') | list %}
+{% set phased_pkgs = held_back_pkgs | selectattr('held_back_reason', 'equalto', 'phased') | list %}
 <div class="flex flex-wrap items-center gap-2">
-  <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[12px] font-medium bg-slate-800/60 text-slate-300 border border-slate-700/50">
+  <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[12px] font-medium {% if full_pkgs %}bg-amber-950/50 text-amber-400 border border-amber-900/40{% else %}bg-slate-800/60 text-slate-300 border border-slate-700/50{% endif %}">
     <span class="w-1.5 h-1.5 rounded-full bg-current flex-shrink-0"></span>
-    {{ held_back_pkgs | length }} held back / phased
+    {% if full_pkgs %}{{ full_pkgs | length }} need full-upgrade{% else %}{{ held_back_pkgs | length }} held back / phased{% endif %}
   </span>
   {% if proxmox_node %}
   <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium bg-orange-950/50 text-orange-400 border border-orange-900/40">Proxmox · {{ proxmox_node }}</span>
@@ -66,10 +69,25 @@
   <div>{{ pkg.name }} <span class="text-slate-600">{{ pkg.current }} → {{ pkg.available }}</span></div>
   {% endfor %}
 </div>
+{% if full_pkgs %}
+<p class="mt-1.5 text-[11px] text-amber-500/90 leading-snug">
+  <code>apt-get upgrade</code> will never apply {{ full_pkgs | length }} of these — they need a
+  new package installed, which only <code>apt-get full-upgrade</code> does.
+  Waiting will not clear them, and a kernel upgrade this way also needs a reboot.
+</p>
+{% endif %}
+{% if phased_pkgs %}
+<p class="mt-1.5 text-[11px] text-slate-500 leading-snug">
+  {{ phased_pkgs | length }} of these are phased — <code>apt-get upgrade</code> skips them for
+  now, and they roll out automatically over time.
+</p>
+{% endif %}
+{% if not full_pkgs and not phased_pkgs %}
 <p class="mt-1.5 text-[11px] text-slate-500 leading-snug">
   <code>apt-get upgrade</code> won't apply these — they're phased or need
-  <code>apt-get full-upgrade</code>. They roll out automatically over time, so the host is otherwise up to date.
+  <code>apt-get full-upgrade</code>.
 </p>
+{% endif %}
 {% if is_proxmox_node and reboot_required %}
 <div class="mt-2 flex flex-wrap items-center gap-2">
   <button

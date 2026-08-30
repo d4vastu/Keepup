@@ -284,9 +284,11 @@ async def test_get_lxc_updates_parses_apt_output(mock_client):
     assert len(result) == 2
     assert result[0] == {
         "name": "curl", "current": "7.81", "available": "7.90", "held_back": False,
+        "held_back_reason": None,
     }
     assert result[1] == {
         "name": "vim", "current": "9.0", "available": "9.1", "held_back": False,
+        "held_back_reason": None,
     }
     # First call with empty cache: apt-get update must run
     sent_cmd = mock_conn.run.call_args[0][0]
