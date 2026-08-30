@@ -9,6 +9,7 @@ never installs new packages, so such a package is deferred forever.
 upgrade refuses, while a phased package is skipped by both.
 """
 
+import os
 import subprocess
 
 from app.package_managers import AptPackageManager
@@ -122,21 +123,29 @@ def test_list_cmd_markers_appear_in_parse_order():
     assert cmd.index("__APPLY__") < cmd.index("__FULL__") < cmd.index("__REBOOT__")
 
 
-def test_list_cmd_sections_survive_a_real_shell():
+def test_list_cmd_sections_survive_a_real_shell(tmp_path):
     """Run the emitted command shape through an actual shell.
 
     OP#240 shipped a command that was correct as a string and broken in a
-    shell. Here the apt calls are replaced with stubs, but the redirections,
-    separators and marker echoes are the real ones.
+    shell. Here `apt`/`apt-get` are stubbed as real executables on PATH rather
+    than shell functions — `apt-get` is not a valid function name in dash,
+    which is /bin/sh on Debian and Ubuntu — so the redirections, separators
+    and marker echoes are exercised under whatever shell is present.
     """
-    cmd = _PM.list_cmd(refresh=False)
-    stub = (
-        "apt() { echo 'Listing...'; }; "
-        "apt-get() { echo 'Inst curl [1] (2 Debian:13 [amd64])'; }; "
-    )
+    for name, line in (
+        ("apt", "Listing..."),
+        ("apt-get", "Inst curl [1] (2 Debian:13 [amd64])"),
+    ):
+        stub = tmp_path / name
+        stub.write_text(f"#!/bin/sh\necho '{line}'\n")
+        stub.chmod(0o755)
+
+    env = {**os.environ, "PATH": f"{tmp_path}:{os.environ['PATH']}"}
     out = subprocess.run(
-        stub + cmd, shell=True, capture_output=True, text=True
+        _PM.list_cmd(refresh=False),
+        shell=True, capture_output=True, text=True, env=env,
     ).stdout
+
     assert "__APPLY__" in out
     assert "__FULL__" in out
     assert "__REBOOT__" in out
