@@ -6,11 +6,12 @@ and failed. These tests pin all three sudo paths: root (none), non-root with a
 password (``sudo -S``), and non-root without one (``sudo -n``).
 """
 
+import subprocess
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from app.package_managers import AptPackageManager
+from app.package_managers import DETECT_CMD, AptPackageManager
 from app.ssh_client import _run, check_host_updates, run_host_update_buffered
 
 _APT_PM = AptPackageManager()
@@ -42,7 +43,7 @@ async def test_run_uses_sudo_n_when_no_password_stored():
     conn = _make_conn()
     await _run(conn, "apt-get upgrade -y", sudo_password=None, needs_sudo=True)
     sent_cmd = conn.run.call_args[0][0]
-    assert sent_cmd == "sudo -n apt-get upgrade -y"
+    assert sent_cmd == "sudo -n sh -c 'apt-get upgrade -y'"
 
 
 @pytest.mark.asyncio
@@ -55,12 +56,75 @@ async def test_run_sends_no_stdin_when_no_password_stored():
 
 @pytest.mark.asyncio
 async def test_run_still_uses_sudo_s_when_password_stored():
-    """Hosts that need a password keep the existing `sudo -S` path."""
+    """Hosts that need a password keep the `sudo -S` path."""
     conn = _make_conn()
     await _run(conn, "apt-get upgrade -y", sudo_password="pw", needs_sudo=True)
     sent_cmd = conn.run.call_args[0][0]
-    assert sent_cmd == "sudo -S apt-get upgrade -y"
+    assert sent_cmd == "sudo -S sh -c 'apt-get upgrade -y'"
     assert conn.run.call_args.kwargs["input"] == "pw\n"
+
+
+# ---------------------------------------------------------------------------
+# Returned by QA: the sudo prefix must survive a real shell
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_builtin_command_is_elevated_as_a_unit():
+    """`DETECT_CMD` is shell builtins — `sudo -n command -v` execs nothing.
+
+    Live QA caught this: detection fell through to `unknown` because sudo
+    looked for a binary named `command`.
+    """
+    conn = _make_conn()
+    await _run(conn, DETECT_CMD, sudo_password=None, needs_sudo=True)
+    sent_cmd = conn.run.call_args[0][0]
+    assert not sent_cmd.startswith("sudo -n command")
+    assert sent_cmd.startswith("sudo -n sh -c ")
+
+
+@pytest.mark.asyncio
+async def test_compound_chain_is_elevated_as_a_unit():
+    """Bare prefixing elevates only the first command in a `;` chain."""
+    conn = _make_conn()
+    await _run(
+        conn, "apt-get update -qq; apt list --upgradable",
+        sudo_password=None, needs_sudo=True,
+    )
+    sent_cmd = conn.run.call_args[0][0]
+    # The whole chain must sit inside the sudo'd shell, not just the head.
+    assert sent_cmd == "sudo -n sh -c 'apt-get update -qq; apt list --upgradable'"
+
+
+@pytest.mark.asyncio
+async def test_embedded_single_quotes_are_quoted_safely():
+    """Package-manager commands contain quotes; they must not break the wrapper."""
+    conn = _make_conn()
+    await _run(conn, "echo 'it works'", sudo_password=None, needs_sudo=True)
+    sent_cmd = conn.run.call_args[0][0]
+    assert sent_cmd.startswith("sudo -n sh -c ")
+    # shlex.quote escapes the inner quotes rather than terminating the wrapper
+    assert sent_cmd.count("sh -c") == 1
+
+
+@pytest.mark.asyncio
+async def test_real_shell_runs_the_wrapped_command():
+    """Execute the wrapped form through an actual shell, minus sudo.
+
+    The first round of tests asserted on the string Keepup sends and passed
+    while the command was broken on a real host. This one runs it.
+    """
+    conn = _make_conn()
+    await _run(conn, DETECT_CMD, sudo_password=None, needs_sudo=True)
+    sent_cmd = conn.run.call_args[0][0]
+    # Drop the sudo prefix (CI has no passwordless sudo) and run the rest.
+    assert sent_cmd.startswith("sudo -n ")
+    runnable = sent_cmd[len("sudo -n "):]
+    out = subprocess.run(
+        runnable, shell=True, capture_output=True, text=True
+    ).stdout.strip()
+    assert out in {"apt", "dnf", "yum", "zypper", "pacman", "apk"}
+    assert out != "unknown"
 
 
 @pytest.mark.asyncio

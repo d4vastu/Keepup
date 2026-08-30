@@ -14,6 +14,7 @@ package-manager-specific recovery hint rather than a blank `TimeoutError`.
 import asyncio
 import logging
 import os
+import shlex
 
 import asyncssh
 
@@ -107,13 +108,20 @@ async def _run(
     case ran privileged commands unprivileged (OP#240). ``-n`` also fails fast
     with sudo's own "a password is required" on hosts that do need one, rather
     than hanging on a prompt nobody can answer.
+
+    ``cmd`` is a *shell* string, not an argv: ``DETECT_CMD`` is built from
+    builtins and the package-manager commands are ``;``-separated chains. A
+    bare ``sudo <cmd>`` prefix would try to exec ``command`` as a binary and
+    would elevate only the head of a chain, so the command is handed to a
+    shell running under sudo instead.
     """
     if needs_sudo:
+        wrapped = f"sh -c {shlex.quote(cmd)}"
         if sudo_password:
-            full_cmd = f"sudo -S {cmd}"
+            full_cmd = f"sudo -S {wrapped}"
             stdin_data = sudo_password + "\n"
         else:
-            full_cmd = f"sudo -n {cmd}"
+            full_cmd = f"sudo -n {wrapped}"
             stdin_data = None
     else:
         full_cmd = cmd
