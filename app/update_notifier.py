@@ -27,7 +27,12 @@ UNKNOWN_STALE_SECONDS = 86400
 
 
 def _empty_state() -> dict:
-    return {"notified": [], "unknown_since": {}, "unknown_notified": []}
+    return {
+        "notified": [],
+        "unknown_since": {},
+        "unknown_notified": [],
+        "notified_hosts": [],
+    }
 
 
 def _load() -> dict:
@@ -40,12 +45,18 @@ def _load() -> dict:
         return _empty_state()
 
     if isinstance(data, list):
-        return {"notified": list(data), "unknown_since": {}, "unknown_notified": []}
+        return {
+            "notified": list(data),
+            "unknown_since": {},
+            "unknown_notified": [],
+            "notified_hosts": [],
+        }
     if not isinstance(data, dict):
         return _empty_state()
 
     return {
         "notified": list(data.get("notified") or []),
+        "notified_hosts": list(data.get("notified_hosts") or []),
         "unknown_since": dict(data.get("unknown_since") or {}),
         "unknown_notified": list(data.get("unknown_notified") or []),
     }
@@ -59,6 +70,7 @@ def _save(state: dict) -> None:
                 "notified": sorted(state["notified"]),
                 "unknown_since": state["unknown_since"],
                 "unknown_notified": sorted(state["unknown_notified"]),
+                "notified_hosts": sorted(state["notified_hosts"]),
             },
             indent=2,
         )
@@ -153,3 +165,31 @@ def check_and_notify(stacks: list[dict]) -> None:
         if changed:
             state["notified"] = sorted(notified)
             _save(state)
+
+
+def should_notify_host(slug: str, has_updates: bool) -> bool:
+    """Whether this host's pending updates are worth a notification right now.
+
+    True only on the transition from up-to-date to pending. A host that is clean
+    is cleared, so its next real update is heard again — without that, a
+    six-hourly job would either re-announce the same packages forever or go
+    permanently quiet after the first one (OP#239).
+    """
+    with _lock:
+        state = _load()
+        notified = set(state["notified_hosts"])
+
+        if not has_updates:
+            if slug in notified:
+                notified.discard(slug)
+                state["notified_hosts"] = sorted(notified)
+                _save(state)
+            return False
+
+        if slug in notified:
+            return False
+
+        notified.add(slug)
+        state["notified_hosts"] = sorted(notified)
+        _save(state)
+        return True

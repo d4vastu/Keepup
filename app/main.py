@@ -1,4 +1,3 @@
-import asyncio
 import logging
 import os
 import time
@@ -28,7 +27,7 @@ from .log_buffer import setup_log_buffer
 from .notifications import get_unread_count, get_notifications, mark_all_read
 from .auto_update_scheduler import apply_all_schedules, scheduler
 from .auto_updates_router import router as auto_updates_router
-from .backend_loader import get_backends, get_dockerhub_creds, reload_backends
+from .backend_loader import get_backends, reload_backends
 from .config_manager import (
     get_hosts,
     get_opnsense_config,
@@ -48,7 +47,7 @@ from .config_manager import (
 )
 from .credentials import get_credentials, get_integration_credentials, save_sudo_password
 from .host_ops import reboot_host_typed, run_os_update
-from .ssh_client import _needs_sudo, check_host_updates
+from .ssh_client import _needs_sudo
 from .__version__ import APP_VERSION
 from .httpx_client import make_client
 from .self_identity import is_self_on_proxmox_node
@@ -822,90 +821,14 @@ async def _proxmox_client_from_config(host: dict | None = None):
 async def host_check(request: Request, slug: str) -> HTMLResponse:
     try:
         host = _get_host(slug)
-        host_name = host.get("name", slug)
-        proxmox_node = host.get("proxmox_node")
-        proxmox_vmid = host.get("proxmox_vmid")
-        if proxmox_node and proxmox_vmid is not None:
-            # LXC container — use pct exec via SSH to the Proxmox host
-            log.info(
-                "Checking %s (%s) via pct exec (%s/%s)",
-                host_name, slug, proxmox_node, proxmox_vmid,
-            )
-            # Same resolution the upgrade path uses, so a check and an upgrade
-            # of one LXC can never target different servers (OP#210).
-            from .host_ops import _lxc_ssh_context, server_context
-            px_host, ssh_creds = _lxc_ssh_context(host)
-            # The link back to the UI must point at the server that owns this
-            # guest, not whichever one happens to be first.
-            proxmox_url = server_context(host)[0].get("url", "")
-            client = await _proxmox_client_from_config(host)
-            packages = await client.get_lxc_updates(
-                proxmox_node, proxmox_vmid, px_host, ssh_creds
-            )
-            log.info(
-                "Check complete: %s (%s) — %d update(s) via pct exec",
-                host_name, slug, len(packages),
-            )
-            return templates.TemplateResponse(
-                "partials/host_status.html",
-                {
-                    "request": request,
-                    "slug": slug,
-                    "packages": packages,
-                    "reboot_required": False,
-                    "is_proxmox_node": False,
-                    "package_manager": f"apt · pct exec ({proxmox_node}/{proxmox_vmid})",
-                    "proxmox_node": proxmox_node,
-                    "proxmox_url": proxmox_url,
-                },
-            )
-        if proxmox_node:
-            log.info(
-                "Checking %s (%s) via Proxmox API (node %s)",
-                host_name, slug, proxmox_node,
-            )
-            import asyncio as _asyncio
+        from .last_check import record_host_check
+        from .update_scan import scan_host
 
-            from .host_ops import reboot_required_typed
-            client = await _proxmox_client_from_config(host)
-            packages, reboot_required = await _asyncio.gather(
-                client.get_node_updates(proxmox_node),
-                reboot_required_typed(host, {}),
-            )
-            proxmox_url = get_proxmox_config().get("url", "")
-            log.info(
-                "Check complete: %s (%s) — %d update(s), reboot_required=%s via Proxmox API",
-                host_name, slug, len(packages), reboot_required,
-            )
-            return templates.TemplateResponse(
-                "partials/host_status.html",
-                {
-                    "request": request,
-                    "slug": slug,
-                    "packages": packages,
-                    "reboot_required": reboot_required,
-                    "is_proxmox_node": True,
-                    "package_manager": f"apt · Proxmox API ({proxmox_node})",
-                    "proxmox_node": proxmox_node,
-                    "proxmox_url": proxmox_url,
-                },
-            )
-        log.info("Checking %s (%s) via SSH", host_name, slug)
-        creds = get_credentials(slug)
-        result = await check_host_updates(host, creds)
-        log.info(
-            "Check complete: %s (%s) — %d update(s) via SSH",
-            host_name, slug, len(result["packages"]),
-        )
+        result = await scan_host(host, get_credentials(slug))
+        record_host_check(slug)
         return templates.TemplateResponse(
             "partials/host_status.html",
-            {
-                "request": request,
-                "slug": slug,
-                "packages": result["packages"],
-                "reboot_required": result["reboot_required"],
-                "package_manager": result.get("package_manager", ""),
-            },
+            {"request": request, "slug": slug, **result},
         )
     except Exception as exc:
         log.exception("host_check failed for %s: %s", slug, exc)
@@ -1101,53 +1024,33 @@ _BACKEND_LABELS = {"portainer": "Portainer", "ssh": "SSH"}
 @app.get("/api/docker/check", response_class=HTMLResponse)
 @limiter.limit("60/minute")
 async def docker_check(request: Request) -> HTMLResponse:
-    hosts = get_hosts()
-    backends = get_backends()
-    active = [
-        b
-        for b in backends
-        if b.BACKEND_KEY != "ssh" or any(h.get("docker_mode") for h in hosts)
-    ]
-    if not active:
-        return templates.TemplateResponse(
-            "partials/error.html",
-            {"request": request, "message": "No container backends configured."},
-        )
+    from .last_check import record_container_check
+    from .update_scan import scan_containers
+
     try:
-        results = await asyncio.gather(
-            *[b.get_stacks_with_update_status(get_dockerhub_creds()) for b in active],
-            return_exceptions=True,
-        )
-        stacks = []
-        failed_backends = []
-        for backend, r in zip(active, results):
-            if isinstance(r, Exception):
-                log.warning(
-                    "Container backend '%s' failed during check: %r",
-                    backend.BACKEND_KEY, r,
-                )
-                failed_backends.append(_BACKEND_LABELS.get(
-                    backend.BACKEND_KEY, backend.BACKEND_KEY.title()
-                ))
-            elif isinstance(r, list):
-                stacks.extend(r)
-        updates_available = sum(
-            1 for s in stacks if s.get("update_status") in ("update_available", "mixed")
-        )
+        result = await scan_containers()
+        if not result["backends_configured"]:
+            return templates.TemplateResponse(
+                "partials/error.html",
+                {"request": request, "message": "No container backends configured."},
+            )
+        record_container_check()
         log.info(
             "Container check: found %d stack(s) with updates (of %d total)",
-            updates_available, len(stacks),
+            sum(
+                1
+                for st in result["stacks"]
+                if st.get("update_status") in ("update_available", "mixed")
+            ),
+            len(result["stacks"]),
         )
-        # Check for new image updates and fire notifications (deduplicated)
-        try:
-            from .update_notifier import check_and_notify
-
-            check_and_notify(stacks)
-        except Exception:
-            pass
         return templates.TemplateResponse(
             "partials/docker_status.html",
-            {"request": request, "stacks": stacks, "failed_backends": failed_backends},
+            {
+                "request": request,
+                "stacks": result["stacks"],
+                "failed_backends": result["failed_backends"],
+            },
         )
     except Exception as exc:
         return templates.TemplateResponse(

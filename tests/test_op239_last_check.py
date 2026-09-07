@@ -118,3 +118,31 @@ def test_relative_wording(store, kwargs, expected):
 
 def test_relative_of_nothing_says_never(store):
     assert store.relative(None) == "never checked"
+
+
+def test_recording_never_breaks_the_caller(store, monkeypatch, caplog):
+    """A timestamp is a nicety. Failing to store one must not cost the user the
+    check result it was describing — the route renders the check either way.
+    """
+    import logging
+    from pathlib import Path
+
+    monkeypatch.setattr(store, "_PATH", Path("/proc/nope/last_check.json"))
+    caplog.set_level(logging.WARNING)
+
+    store.record_host_check("web")  # must not raise
+    store.record_container_check()  # must not raise
+
+    assert "last check" in caplog.text.lower()
+
+
+def test_last_scan_is_the_most_recent_of_anything(store):
+    """Resuming the schedule asks "when did we last check", not "which host is
+    stalest" — the opposite question from the section headers."""
+    store._save({"hosts": {"web": _ago(hours=9)}, "containers": _ago(minutes=5)})
+
+    assert (datetime.now(timezone.utc) - store.last_scan()) < timedelta(hours=1)
+
+
+def test_last_scan_of_an_empty_store_is_none(store):
+    assert store.last_scan() is None

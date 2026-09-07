@@ -8,6 +8,7 @@ job of suppressing redundant `apt-get update` runs.
 """
 
 import json
+import logging
 import os
 import threading
 from datetime import datetime, timezone
@@ -16,6 +17,8 @@ from pathlib import Path
 _DATA_DIR = Path(os.getenv("DATA_PATH", "/app/data"))
 _PATH = _DATA_DIR / "last_check.json"
 _lock = threading.Lock()
+
+logger = logging.getLogger(__name__)
 
 
 def _empty() -> dict:
@@ -57,18 +60,28 @@ def _parse(raw: object) -> datetime | None:
     return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
 
 
+def _record(mutate) -> None:
+    """Apply one change to the store, never letting a write failure escape.
+
+    Callers are request handlers rendering a check the user asked for, and the
+    scheduled job. Losing the timestamp is a cosmetic loss; raising here would
+    turn a successful check into an error page.
+    """
+    try:
+        with _lock:
+            state = _load()
+            mutate(state)
+            _save(state)
+    except Exception as e:
+        logger.warning("Could not record the last check time: %s", e or type(e).__name__)
+
+
 def record_host_check(slug: str) -> None:
-    with _lock:
-        state = _load()
-        state["hosts"][slug] = _now()
-        _save(state)
+    _record(lambda state: state["hosts"].__setitem__(slug, _now()))
 
 
 def record_container_check() -> None:
-    with _lock:
-        state = _load()
-        state["containers"] = _now()
-        _save(state)
+    _record(lambda state: state.__setitem__("containers", _now()))
 
 
 def oldest_host_check(slugs: list[str]) -> datetime | None:
@@ -97,3 +110,13 @@ def relative(when: datetime | None) -> str:
     if seconds < 86400:
         return f"{int(seconds // 3600)}h ago"
     return f"{int(seconds // 86400)}d ago"
+
+
+def last_scan() -> datetime | None:
+    """The most recent check of anything, used to resume the schedule."""
+    state = _load()
+    times = [t for t in (_parse(v) for v in state["hosts"].values()) if t is not None]
+    container = _parse(state["containers"])
+    if container is not None:
+        times.append(container)
+    return max(times) if times else None

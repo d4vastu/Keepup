@@ -1,11 +1,16 @@
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
+from apscheduler.triggers.interval import IntervalTrigger
 
 from .activity_log import exc_text, record_run
-from .config_manager import get_all_stack_auto_updates, get_hosts
+from .config_manager import (
+    get_all_stack_auto_updates,
+    get_hosts,
+    get_update_check_interval_hours,
+)
 from .notifications import notify
 from .credentials import get_credentials
 from .host_ops import reboot_host_typed, reboot_required_typed, run_os_update
@@ -237,9 +242,64 @@ def apply_stack_schedule(update_path: str) -> None:
             logger.error("Invalid cron for stack %s: %s", update_path, exc)
 
 
+UPDATE_CHECK_JOB_ID = "update_check"
+
+# Never schedule the first run for right now: APScheduler would fire it while
+# the app is still coming up.
+_RESUME_FLOOR = timedelta(seconds=60)
+
+
+async def _run_update_check() -> None:
+    """Detect updates for every host and container backend, on a schedule."""
+    from .update_scan import run_scan
+
+    try:
+        await run_scan()
+    except Exception as e:
+        logger.warning("Scheduled update check failed: %s", exc_text(e))
+
+
+def _first_check_time(hours: int) -> datetime:
+    """When the resumed schedule should next fire.
+
+    A plain IntervalTrigger counts from process start, so a Keepup restarting
+    more often than its interval would never check at all — the very failure
+    this job exists to fix. Resume from the last real check instead.
+    """
+    from .last_check import last_scan
+
+    now = datetime.now(timezone.utc)
+    last = last_scan()
+    if last is None:
+        return now + timedelta(hours=hours)
+    return max(last + timedelta(hours=hours), now + _RESUME_FLOOR)
+
+
+def apply_update_check_schedule() -> None:
+    """Register, replace or remove the background update-check job."""
+    try:
+        scheduler.remove_job(UPDATE_CHECK_JOB_ID)
+    except Exception:
+        pass
+
+    hours = get_update_check_interval_hours()
+    if hours <= 0:
+        logger.info("Background update checks are off.")
+        return
+
+    scheduler.add_job(
+        _run_update_check,
+        IntervalTrigger(hours=hours, start_date=_first_check_time(hours)),
+        id=UPDATE_CHECK_JOB_ID,
+        replace_existing=True,
+    )
+    logger.info("Background update checks scheduled every %dh.", hours)
+
+
 def apply_all_schedules() -> None:
     """Called once on startup to register all configured auto-update jobs."""
     for host in get_hosts():
         apply_host_schedule(host["slug"])
     for update_path in get_all_stack_auto_updates():
         apply_stack_schedule(update_path)
+    apply_update_check_schedule()
