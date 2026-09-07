@@ -1,6 +1,7 @@
 """Tests for notification store (app/notifications.py) and related routes."""
 
-from unittest.mock import AsyncMock, patch
+import logging
+from unittest.mock import AsyncMock, MagicMock, patch
 
 
 # ---------------------------------------------------------------------------
@@ -239,14 +240,17 @@ def test_load_returns_empty_on_corrupt_json(data_dir, monkeypatch):
     assert n._load() == []
 
 
-def test_notify_pushover_ensure_future_exception_is_swallowed(data_dir, monkeypatch):
-    """If asyncio.ensure_future raises, notify() swallows it (lines 47-48)."""
+def test_notify_survives_a_broken_push_dispatch(data_dir, monkeypatch, caplog):
+    """A dispatch that raises is logged, not swallowed, and keeps the entry (OP#238)."""
     import app.notifications as n
 
     monkeypatch.setattr(n, "_NOTIF_PATH", data_dir / "notifications.json")
+    monkeypatch.setattr(
+        n, "_dispatch_push", MagicMock(side_effect=RuntimeError("no event loop"))
+    )
 
-    with patch("asyncio.ensure_future", side_effect=RuntimeError("no event loop")):
-        n.notify("title", "msg")  # must not raise
+    caplog.set_level(logging.WARNING)
+    n.notify("title", "msg")  # must not raise
 
-    # Notification was still saved
     assert n.get_unread_count() == 1
+    assert "no event loop" in caplog.text
