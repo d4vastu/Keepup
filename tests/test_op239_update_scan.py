@@ -297,3 +297,48 @@ async def test_a_failed_host_does_not_get_a_check_timestamp(stores):
         await us.run_scan()
 
     assert lc.oldest_host_check(["web"]) is None
+
+
+# ---------------------------------------------------------------------------
+# Timeouts — CLAUDE.md's QA rules, from OP#228
+# ---------------------------------------------------------------------------
+
+
+def test_the_host_check_carries_an_explicit_generous_timeout():
+    """The job must not wait forever on a wedged host, nor give up so fast that
+    a slow-but-working `apt-get update` is reported as a failure. Inheriting a
+    default is a decision; this is the visible version of it."""
+    import app.ssh_client as sc
+
+    assert sc._CHECK_TIMEOUT >= 60, "a check budget under a minute will report lies"
+    assert sc._CONNECT_TIMEOUT >= 10
+
+
+@pytest.mark.asyncio
+async def test_a_wedged_host_cannot_hold_the_whole_scan_open(data_dir, monkeypatch):
+    """One host that never answers must not stop the scan from finishing.
+
+    The mocked suite is otherwise blind to this: mocks answer instantly, which
+    is exactly how OP#228's inherited 15-second redeploy timeout survived.
+    """
+    import app.update_scan as us
+
+    async def wedged(host, creds):
+        await asyncio.sleep(30)
+
+    async def quick(host, creds):
+        return {"packages": [], "reboot_required": False, "package_manager": "apt"}
+
+    async def dispatch(host, creds):
+        return await (wedged if host["slug"] == "web" else quick)(host, creds)
+
+    with (
+        patch("app.update_scan.scan_host", new=dispatch),
+        patch("app.update_scan.get_credentials", return_value={}),
+        patch("app.update_scan.HOST_SCAN_TIMEOUT", 0.05),
+    ):
+        results = await asyncio.wait_for(us.scan_hosts([SSH_HOST, NODE_HOST]), timeout=5)
+
+    by_slug = {h["slug"]: r for h, r in results}
+    assert isinstance(by_slug["web"], Exception)
+    assert by_slug["pve"]["packages"] == []

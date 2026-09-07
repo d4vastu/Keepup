@@ -30,6 +30,12 @@ logger = logging.getLogger(__name__)
 # connection to every host at once.
 MAX_CONCURRENT_HOST_CHECKS = 4
 
+# A whole-host budget above `ssh_client`'s own per-operation timeouts, so a host
+# wedged somewhere those do not cover cannot hold the scan open indefinitely.
+# Generous on purpose: a slow but working `apt-get update` must finish, or the
+# job reports a failure that is not one (OP#228).
+HOST_SCAN_TIMEOUT = 300
+
 _BACKEND_LABELS = {"portainer": "Portainer", "ssh": "SSH"}
 
 
@@ -117,7 +123,10 @@ async def scan_hosts(hosts: list[dict]) -> list[tuple[dict, dict | Exception]]:
     async def one(host: dict):
         async with sem:
             try:
-                return await scan_host(host, get_credentials(host.get("slug", "")))
+                return await asyncio.wait_for(
+                    scan_host(host, get_credentials(host.get("slug", ""))),
+                    timeout=HOST_SCAN_TIMEOUT,
+                )
             except Exception as e:
                 logger.warning(
                     "Update check failed for %s: %s",

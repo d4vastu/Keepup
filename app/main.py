@@ -733,11 +733,20 @@ async def main_home(request: Request) -> HTMLResponse:
     latest_tag, latest_url = await _get_latest_version()
     show_update = _newer_version(latest_tag)
     host_groups, standalone_hosts = _group_hosts(hosts)
+
+    # When each section was last actually checked, however that check was
+    # triggered. Rendered on first paint; the page's own checks overwrite it
+    # with "just now" once they settle.
+    from .last_check import container_check, last_scan, oldest_host_check, relative
+
     return templates.TemplateResponse(
         "index.html",
         {
             "request": request,
             "hosts": hosts,
+            "os_checked_label": relative(oldest_host_check([h["slug"] for h in hosts])),
+            "containers_checked_label": relative(container_check()),
+            "last_scan_label": relative(last_scan()) if last_scan() else "",
             "host_groups": host_groups,
             "standalone_hosts": standalone_hosts,
             "docker_configured": docker_configured,

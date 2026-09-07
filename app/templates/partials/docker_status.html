@@ -7,9 +7,9 @@
 
 {# OOB: update section-header meta text #}
 {% if needs_update %}
-<span id="docker-meta" hx-swap-oob="true">{{ needs_update | length }} of {{ total_count }} need updating{{ unchecked_suffix }}</span>
+<span id="docker-meta" hx-swap-oob="true">{{ needs_update | length }} of {{ total_count }} need updating{{ unchecked_suffix }} · just now</span>
 {% elif stacks %}
-<span id="docker-meta" hx-swap-oob="true">{{ host_count }} host{{ 's' if host_count != 1 }} · {{ total_count }} container{{ 's' if total_count != 1 }}{{ unchecked_suffix }}</span>
+<span id="docker-meta" hx-swap-oob="true">{{ host_count }} host{{ 's' if host_count != 1 }} · {{ total_count }} container{{ 's' if total_count != 1 }}{{ unchecked_suffix }} · just now</span>
 {% else %}
 <span id="docker-meta" hx-swap-oob="true"></span>
 {% endif %}

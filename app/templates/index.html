@@ -127,7 +127,7 @@
           <div id="banner-sub" class="text-[11px] text-slate-600 mt-0.5"></div>
         </div>
       </div>
-      <div id="banner-time" class="text-[11px] text-slate-600 hidden">just now</div>
+      <div id="banner-time" class="text-[11px] text-slate-600{% if not last_scan_label %} hidden{% endif %}">{{ last_scan_label or 'just now' }}</div>
     </div>
 
     <!-- OS Package Updates -->
@@ -137,7 +137,7 @@
           <span id="os-dot" class="w-1.5 h-1.5 rounded-full bg-slate-600 flex-shrink-0"></span>
           OS packages
         </div>
-        <span class="text-[11px] text-slate-600">{{ hosts | length }} host{{ 's' if hosts | length != 1 }}</span>
+        <span id="os-meta" class="text-[11px] text-slate-600">{{ hosts | length }} host{{ 's' if hosts | length != 1 }} · {{ os_checked_label }}</span>
       </div>
 
       <div class="bg-[#161b22] border border-[#21262d] rounded-lg overflow-hidden">
@@ -262,7 +262,7 @@
           Containers
         </div>
         <div class="flex items-center gap-3">
-          <span id="docker-meta" class="text-[11px] text-slate-600"></span>
+          <span id="docker-meta" class="text-[11px] text-slate-600">{{ containers_checked_label }}</span>
           <span id="docker-spinner" class="spinner text-[11px] text-slate-500">Checking…</span>
         </div>
       </div>
@@ -395,6 +395,13 @@
     }
     time.classList.remove('hidden');
     time.textContent = 'just now';
+
+    // Keep the section headers agreeing with the banner: everything on screen
+    // was checked by the run that just settled.
+    const osMeta = document.getElementById('os-meta');
+    if (osMeta) {
+      osMeta.textContent = `${_hostSlugs.length} host${_hostSlugs.length !== 1 ? 's' : ''} \u00b7 just now`;
+    }
   }
 
   // Edge case: no checks needed

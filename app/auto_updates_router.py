@@ -4,10 +4,17 @@ from apscheduler.triggers.cron import CronTrigger
 from fastapi import APIRouter, Form, Request
 from fastapi.responses import HTMLResponse
 
-from .auto_update_scheduler import apply_host_schedule, apply_stack_schedule
+from .auto_update_scheduler import (
+    apply_host_schedule,
+    apply_stack_schedule,
+    apply_update_check_schedule,
+)
 from .config_manager import (
+    UPDATE_CHECK_INTERVALS,
     get_all_stack_auto_updates,
     get_hosts,
+    get_update_check_interval_hours,
+    save_update_check_interval_hours,
     set_host_auto_update,
     set_stack_auto_update,
 )
@@ -40,12 +47,81 @@ def _validate_cron(expr: str) -> str | None:
 # ---------------------------------------------------------------------------
 
 
+_INTERVAL_LABELS = {
+    0: "Off",
+    1: "Every hour",
+    6: "Every 6 hours",
+    12: "Every 12 hours",
+    24: "Every 24 hours",
+}
+
+
+def _in_words(delta) -> str:
+    """"in about 5 hours" — deliberately approximate, because the exact second
+    the job fires is not something the reader can act on."""
+    seconds = max(int(delta.total_seconds()), 0)
+    if seconds < 120:
+        return "any moment now"
+    if seconds < 5400:
+        return f"in about {max(seconds // 60, 1)} minutes"
+    return f"in about {round(seconds / 3600)} hours"
+
+
+def _check_card_context() -> dict:
+    """Everything `partials/update_check_card.html` renders."""
+    from datetime import datetime, timezone
+
+    from .auto_update_scheduler import _first_check_time
+    from .last_check import last_scan, relative
+
+    hours = get_update_check_interval_hours()
+    context = {
+        "check_interval_hours": hours,
+        "check_interval_options": [
+            (value, _INTERVAL_LABELS[value]) for value in UPDATE_CHECK_INTERVALS
+        ],
+        "check_status_line": "",
+    }
+    if not hours:
+        return context
+
+    due = _in_words(_first_check_time(hours) - datetime.now(timezone.utc))
+    last = last_scan()
+    if last is None:
+        context["check_status_line"] = f"No check has run yet · first check {due}."
+    else:
+        context["check_status_line"] = (
+            f"Last checked {relative(last)} · next check {due}."
+        )
+    return context
+
+
 @router.get("", response_class=HTMLResponse)
 async def auto_updates_page(request: Request) -> HTMLResponse:
     hosts = get_hosts()
     return templates.TemplateResponse(
         "auto_updates.html",
-        {"request": request, "hosts": hosts},
+        {"request": request, "hosts": hosts, **_check_card_context()},
+    )
+
+
+@router.post("/check-interval", response_class=HTMLResponse)
+async def save_check_interval(
+    request: Request,
+    interval_hours: str = Form(""),
+) -> HTMLResponse:
+    """Store the background check interval and reschedule without a restart."""
+    try:
+        hours = int(interval_hours)
+    except (TypeError, ValueError):
+        hours = get_update_check_interval_hours()
+
+    save_update_check_interval_hours(hours)
+    apply_update_check_schedule()
+
+    return templates.TemplateResponse(
+        "partials/update_check_card.html",
+        {"request": request, "check_saved": True, **_check_card_context()},
     )
 
 

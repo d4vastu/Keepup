@@ -1,0 +1,40 @@
+{# Background update-check interval (OP#237 design, OP#239). Sits above the
+   risk notice: that notice is about *applying* updates, and a check changes
+   nothing on a host. #}
+<div id="update-check-card" class="mb-8 bg-slate-800/50 border border-slate-700 rounded-xl p-4">
+  <h2 class="text-base font-semibold text-slate-300">Update checks</h2>
+  <p class="text-xs text-slate-500 mt-1 mb-3 max-w-2xl">
+    How often Keepup looks for new OS packages and container images in the
+    background. Checking never changes anything on your hosts.
+  </p>
+
+  <form
+    hx-post="/admin/auto-updates/check-interval"
+    hx-target="#update-check-card"
+    hx-swap="outerHTML"
+    class="flex flex-wrap items-center gap-3">
+    <label for="check-interval" class="text-xs text-slate-400">Check every</label>
+    <select id="check-interval" name="interval_hours"
+      class="bg-slate-700 border border-slate-600 rounded px-2 py-1 text-sm text-slate-200 focus:outline-none focus:border-blue-500">
+      {% for value, label in check_interval_options %}
+      <option value="{{ value }}" {% if value == check_interval_hours %}selected{% endif %}>{{ label }}</option>
+      {% endfor %}
+    </select>
+    <button type="submit"
+      class="px-3 py-1 rounded bg-blue-600 hover:bg-blue-500 text-xs font-medium text-white transition-colors">
+      Save
+    </button>
+    {% if check_saved %}
+    <span class="text-xs text-green-400">Saved</span>
+    {% endif %}
+  </form>
+
+  {% if check_interval_hours %}
+  <p class="text-xs text-slate-500 mt-3">{{ check_status_line }}</p>
+  {% else %}
+  <p class="text-xs text-amber-400 mt-3 max-w-2xl">
+    Keepup will only look for updates while the dashboard is open in a browser.
+    Notifications will arrive in a burst when you next open it.
+  </p>
+  {% endif %}
+</div>
