@@ -302,31 +302,82 @@ def save_timezone(tz: str) -> None:
     save_config(config)
 
 
+# How often the background job checks for updates, in hours. 0 means off — one
+# stored value, so an enable flag and an interval can never disagree (OP#237).
+UPDATE_CHECK_INTERVALS = (0, 1, 6, 12, 24)
+_DEFAULT_UPDATE_CHECK_HOURS = 6
+
+# Before OP#239 the setup wizard wrote a cron string to `update_check_schedule`
+# that nothing ever read. These are the only values it could produce.
+_LEGACY_SCHEDULE_HOURS = {
+    "0 */6 * * *": 6,
+    "0 */12 * * *": 12,
+    "0 2 * * *": 24,
+}
+
+# The wizard speaks in keys; the admin card speaks in hours. Both write the same
+# stored setting so the two screens cannot describe different schedules.
 _UPDATE_CHECK_SCHEDULES = {
-    "6h": "0 */6 * * *",
-    "12h": "0 */12 * * *",
-    "24h": "0 2 * * *",
-    "manual": "",
+    "manual": 0,
+    "1h": 1,
+    "6h": 6,
+    "12h": 12,
+    "24h": 24,
 }
 
 
+def _valid_interval(raw: object) -> int | None:
+    """The stored hours, or None if it is not one of the offered choices."""
+    if isinstance(raw, bool) or not isinstance(raw, int):
+        return None
+    return raw if raw in UPDATE_CHECK_INTERVALS else None
+
+
+def get_update_check_interval_hours() -> int:
+    """Hours between background update checks; 0 means checking is off.
+
+    Migrates the pre-OP#239 `update_check_schedule` cron on first read. A cron we
+    cannot express as an interval falls back to the default rather than to 0:
+    silently turning checking off is the defect this setting exists to fix.
+    """
+    config = load_config()
+    hours = _valid_interval((config.get("update_checks") or {}).get("interval_hours"))
+
+    if "update_check_schedule" in config:
+        if hours is None:
+            hours = _LEGACY_SCHEDULE_HOURS.get(
+                config["update_check_schedule"], _DEFAULT_UPDATE_CHECK_HOURS
+            )
+        config.pop("update_check_schedule")
+        config["update_checks"] = {"interval_hours": hours}
+        save_config(config)
+
+    return _DEFAULT_UPDATE_CHECK_HOURS if hours is None else hours
+
+
+def save_update_check_interval_hours(hours: int) -> None:
+    config = load_config()
+    valid = _valid_interval(hours)
+    config["update_checks"] = {
+        "interval_hours": _DEFAULT_UPDATE_CHECK_HOURS if valid is None else valid
+    }
+    config.pop("update_check_schedule", None)
+    save_config(config)
+
+
 def get_update_check_schedule() -> str:
-    """Return the update check schedule key ('6h', '12h', '24h', or 'manual')."""
-    cron = load_config().get("update_check_schedule", "")
+    """The interval as a setup-wizard key ('manual', '1h', '6h', '12h', '24h')."""
+    hours = get_update_check_interval_hours()
     for key, val in _UPDATE_CHECK_SCHEDULES.items():
-        if val == cron:
+        if val == hours:
             return key
-    return "manual" if not cron else "manual"
+    return "manual"
 
 
 def save_update_check_schedule(schedule_key: str) -> None:
-    config = load_config()
-    cron = _UPDATE_CHECK_SCHEDULES.get(schedule_key, "")
-    if cron:
-        config["update_check_schedule"] = cron
-    else:
-        config.pop("update_check_schedule", None)
-    save_config(config)
+    save_update_check_interval_hours(
+        _UPDATE_CHECK_SCHEDULES.get(schedule_key, _DEFAULT_UPDATE_CHECK_HOURS)
+    )
 
 
 def get_dockerhub_config() -> dict:
