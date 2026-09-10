@@ -67,7 +67,7 @@ def test_host_check_unknown_slug_returns_error(client):
 
 def test_host_check_calls_ssh(client):
     mock_result = {"packages": [], "reboot_required": False}
-    with patch("app.main.check_host_updates", new=AsyncMock(return_value=mock_result)):
+    with patch("app.update_scan.check_host_updates", new=AsyncMock(return_value=mock_result)):
         response = client.get("/api/host/test-host/check")
     assert response.status_code == 200
     assert "up to date" in response.text.lower()
@@ -78,7 +78,7 @@ def test_host_check_shows_pending_updates(client):
         "packages": [{"name": "curl", "current": "7.0", "available": "8.0"}],
         "reboot_required": False,
     }
-    with patch("app.main.check_host_updates", new=AsyncMock(return_value=mock_result)):
+    with patch("app.update_scan.check_host_updates", new=AsyncMock(return_value=mock_result)):
         response = client.get("/api/host/test-host/check")
     assert "curl" in response.text
     assert "1 update" in response.text
@@ -86,7 +86,7 @@ def test_host_check_shows_pending_updates(client):
 
 def test_host_check_shows_reboot_required(client):
     mock_result = {"packages": [], "reboot_required": True}
-    with patch("app.main.check_host_updates", new=AsyncMock(return_value=mock_result)):
+    with patch("app.update_scan.check_host_updates", new=AsyncMock(return_value=mock_result)):
         response = client.get("/api/host/test-host/check")
     assert "reboot" in response.text.lower()
 
@@ -101,9 +101,9 @@ def test_proxmox_node_check_shows_reboot_button_when_required(client):
     mock_client.get_node_updates = AsyncMock(return_value=[])
     with (
         patch("app.main._get_host", return_value=node_host),
-        patch("app.main._proxmox_client_from_config", new=AsyncMock(return_value=mock_client)),
-        patch("app.host_ops.reboot_required_typed", new=AsyncMock(return_value=True)),
-        patch("app.main.get_proxmox_config", return_value={"url": ""}),
+        patch("app.update_scan.client_from_config", return_value=mock_client),
+        patch("app.update_scan.reboot_required_typed", new=AsyncMock(return_value=True)),
+        patch("app.update_scan.get_proxmox_config", return_value={"url": ""}),
     ):
         response = client.get("/api/host/pve-node/check")
     assert response.status_code == 200
@@ -120,9 +120,9 @@ def test_proxmox_node_check_hides_reboot_button_when_not_required(client):
     mock_client.get_node_updates = AsyncMock(return_value=[])
     with (
         patch("app.main._get_host", return_value=node_host),
-        patch("app.main._proxmox_client_from_config", new=AsyncMock(return_value=mock_client)),
-        patch("app.host_ops.reboot_required_typed", new=AsyncMock(return_value=False)),
-        patch("app.main.get_proxmox_config", return_value={"url": ""}),
+        patch("app.update_scan.client_from_config", return_value=mock_client),
+        patch("app.update_scan.reboot_required_typed", new=AsyncMock(return_value=False)),
+        patch("app.update_scan.get_proxmox_config", return_value={"url": ""}),
     ):
         response = client.get("/api/host/pve-node/check")
     assert response.status_code == 200

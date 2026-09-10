@@ -17,7 +17,12 @@ def _make_notifier(tmp_path, monkeypatch):
 # ---------------------------------------------------------------------------
 
 
-_EMPTY = {"notified": [], "unknown_since": {}, "unknown_notified": []}
+_EMPTY = {
+    "notified": [],
+    "notified_hosts": [],
+    "unknown_since": {},
+    "unknown_notified": [],
+}
 
 
 def test_load_returns_empty_when_no_file(tmp_path, monkeypatch):

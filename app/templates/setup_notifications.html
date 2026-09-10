@@ -260,7 +260,7 @@
                 hx-target="#schedule-result"
                 class="space-y-3">
             <div class="space-y-2">
-              {% for key, label in [("6h", "Every 6 hours"), ("12h", "Every 12 hours"), ("24h", "Daily (2 am)"), ("manual", "Manual only")] %}
+              {% for key, label in [("1h", "Every hour"), ("6h", "Every 6 hours"), ("12h", "Every 12 hours"), ("24h", "Every 24 hours"), ("manual", "Only when I open the dashboard")] %}
               <label class="flex items-center gap-2 cursor-pointer">
                 <input type="radio" name="update_schedule" value="{{ key }}"
                   {% if update_schedule == key %}checked{% endif %}

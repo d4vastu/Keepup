@@ -176,7 +176,10 @@ def test_schedule_save_6h(setup_client, data_dir, config_file):
     assert response.status_code == 200
     assert "6 hour" in response.text.lower() or "&#10003;" in response.text
     raw = yaml.safe_load(config_file.read_text())
-    assert raw.get("update_check_schedule") == "0 */6 * * *"
+    # OP#239: the wizard writes the real interval now, not a cron string
+    # that nothing read.
+    assert raw["update_checks"]["interval_hours"] == 6
+    assert "update_check_schedule" not in raw
 
 
 def test_schedule_save_24h(setup_client, data_dir, config_file):
@@ -188,7 +191,8 @@ def test_schedule_save_24h(setup_client, data_dir, config_file):
     )
     assert response.status_code == 200
     raw = yaml.safe_load(config_file.read_text())
-    assert raw.get("update_check_schedule") == "0 2 * * *"
+    assert raw["update_checks"]["interval_hours"] == 24
+    assert "update_check_schedule" not in raw
 
 
 def test_schedule_save_manual_removes_key(setup_client, data_dir, config_file):
@@ -206,6 +210,8 @@ def test_schedule_save_manual_removes_key(setup_client, data_dir, config_file):
     assert response.status_code == 200
     raw = yaml.safe_load(config_file.read_text())
     assert "update_check_schedule" not in raw
+    # "Manual only" is 0 hours — an interval value, not a missing key.
+    assert raw["update_checks"]["interval_hours"] == 0
 
 
 # ---------------------------------------------------------------------------
