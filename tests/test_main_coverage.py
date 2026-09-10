@@ -161,7 +161,7 @@ def test_docker_check_notify_exception_is_swallowed(client, monkeypatch):
 def test_docker_check_gather_exception_returns_error_partial(client, monkeypatch):
     """If asyncio.gather itself raises, docker_check returns the error partial."""
     import app.backend_loader as bl
-    import app.main as m
+    import app.update_scan as us
 
     ssh_b = MagicMock()
     ssh_b.BACKEND_KEY = "portainer"
@@ -171,7 +171,7 @@ def test_docker_check_gather_exception_returns_error_partial(client, monkeypatch
     async def boom(*args, **kwargs):
         raise RuntimeError("gather exploded")
 
-    monkeypatch.setattr(m.asyncio, "gather", boom)
+    monkeypatch.setattr(us.asyncio, "gather", boom)
 
     response = client.get("/api/docker/check")
     assert response.status_code == 200

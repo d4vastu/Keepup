@@ -67,10 +67,12 @@ def _save(state: dict) -> None:
     _PATH.write_text(
         json.dumps(
             {
-                "notified": sorted(state["notified"]),
-                "unknown_since": state["unknown_since"],
-                "unknown_notified": sorted(state["unknown_notified"]),
-                "notified_hosts": sorted(state["notified_hosts"]),
+                # Tolerant of a state dict missing a key, the way _load() is
+                # tolerant of a file missing one: callers build these by hand.
+                "notified": sorted(state.get("notified") or []),
+                "unknown_since": state.get("unknown_since") or {},
+                "unknown_notified": sorted(state.get("unknown_notified") or []),
+                "notified_hosts": sorted(state.get("notified_hosts") or []),
             },
             indent=2,
         )

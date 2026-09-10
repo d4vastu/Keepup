@@ -229,10 +229,14 @@ def _notify_host(host: dict, result: dict) -> None:
 
     if packages:
         count = len(packages)
-        message = f"{count} package update{'s' if count != 1 else ''} available"
+        message = f"{count} package update{'s' if count != 1 else ''} available on {name}."
         if reboot:
-            message += " · reboot required"
+            message += " A reboot is also required."
+        title = f"OS updates available: {name}"
     else:
-        message = "Reboot required"
+        message = f"{name} is up to date but needs a reboot to finish applying updates."
+        title = f"Reboot required: {name}"
 
-    notify(f"{name}: updates available", message, level="warning", url="/home")
+    # "info", matching container update notifications — an available update is
+    # news, not a fault. Warnings stay reserved for checks that are failing.
+    notify(title, f"{message} Open the dashboard to update.", level="info", url="/home")
