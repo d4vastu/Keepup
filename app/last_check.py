@@ -85,7 +85,7 @@ def record_container_check() -> None:
 
 
 def oldest_host_check(slugs: list[str]) -> datetime | None:
-    """The staleset check among `slugs`, so the caller can say "nothing here is
+    """The stalest check among `slugs`, so the caller can say "nothing here is
     older than this". Hosts never checked are skipped rather than treated as
     infinitely old, and hosts no longer configured are ignored entirely."""
     state = _load()
