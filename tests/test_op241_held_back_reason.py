@@ -193,7 +193,8 @@ def _held(name, reason):
 def test_full_upgrade_package_is_not_described_as_self_resolving():
     """The reported bug: a permanently-deferred package claimed to roll out."""
     html = _render(packages=[_held("linux-image-amd64", "needs_full_upgrade")])
-    assert "roll out automatically" not in html
+    assert "install on its own" not in html
+    assert "rolling out" not in html
     assert "otherwise up to date" not in html
     assert "never apply" in html
     assert "full-upgrade" in html
@@ -205,10 +206,13 @@ def test_full_upgrade_package_says_waiting_will_not_help():
 
 
 def test_phased_package_still_says_it_resolves_itself():
-    """The phased case was always correct and must stay that way."""
+    """The phased case was always correct and must stay that way.
+
+    OP#258 reworded it ("rolling out", "install on its own") but kept the claim.
+    """
     html = _render(packages=[_held("libfoo", "phased")])
-    assert "phased" in html
-    assert "roll out automatically" in html
+    assert "rolling out" in html
+    assert "install on its own" in html
     assert "never apply" not in html
 
 
@@ -218,14 +222,15 @@ def test_mixed_causes_are_reported_separately():
         _held("libfoo", "phased"),
     ])
     assert "never apply" in html          # the full-upgrade one
-    assert "roll out automatically" in html  # the phased one
+    assert "install on its own" in html   # the phased one (OP#258 wording)
 
 
 def test_unknown_reason_falls_back_without_claiming_self_resolution():
     """Older/Proxmox output carries no reason — say less, not something false."""
     html = _render(packages=[_held("linux-image-amd64", None)])
     assert "won&#39;t apply" in html or "won't apply" in html
-    assert "roll out automatically" not in html
+    assert "install on its own" not in html
+    assert "rolling out" not in html
     assert "otherwise up to date" not in html
 
 
