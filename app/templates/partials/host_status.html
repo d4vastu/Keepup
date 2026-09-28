@@ -52,6 +52,7 @@
   <div class="text-slate-600">{{ pkg.name }} <span class="text-slate-700">{{ pkg.current }} → {{ pkg.available }}</span> <span class="text-slate-600">· rolling out</span></div>
   {% endfor %}
 </div>
+{% if phased_pkgs %}{{ rolling_out_note(phased_pkgs) }}{% endif %}
 <div class="mt-2 flex flex-wrap gap-2">
   <button
     hx-post="/api/host/{{ slug }}/update"

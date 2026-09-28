@@ -113,6 +113,12 @@ def test_mixed_real_and_phased_shows_updates_plus_rolling_out():
     assert "held back" not in _visible(html)
 
 
+def test_mixed_host_explains_the_phased_package_too():
+    """Found in QA: the note appeared only when nothing else was pending."""
+    html = _render(packages=[REAL, PHASED])
+    assert "Ubuntu is releasing this gradually" in html
+
+
 def test_mixed_real_phased_and_full_counts_only_the_stuck_one_as_held_back():
     html = _render(packages=[REAL, PHASED, FULL])
     assert "1 held back" in html
