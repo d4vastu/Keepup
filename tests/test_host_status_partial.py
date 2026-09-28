@@ -54,7 +54,7 @@ def test_held_back_only_shows_neutral_state_no_upgrade():
 
 def test_held_back_only_with_reboot_shows_required_badge():
     html = _render(packages=[_pkg("nginx", True)], reboot_required=True)
-    assert "held back / phased" in html
+    assert "1 held back" in html
     assert "Reboot required" in html
     assert "Upgrade" not in html
 

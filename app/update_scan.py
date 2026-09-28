@@ -218,8 +218,15 @@ def _notify_host(host: dict, result: dict) -> None:
 
     Deduplicated per host and cleared when the host is up to date again, so a
     six-hourly job does not re-announce the same packages forever.
+
+    Phased packages are left out (OP#258): they install themselves as Ubuntu's
+    rollout reaches the host, so a host with only those counts as up to date.
     """
-    packages = result.get("packages") or []
+    packages = [
+        p
+        for p in result.get("packages") or []
+        if p.get("held_back_reason") != "phased"
+    ]
     reboot = bool(result.get("reboot_required"))
     slug = host.get("slug", "")
     name = host.get("name", slug)
