@@ -196,7 +196,9 @@ Schedule unattended updates in **Admin → Auto-Updates**.
 **OS updates (per host):**
 - Enable the toggle and set a cron schedule (all times are UTC)
 - Runs the appropriate upgrade command for the detected package manager
-- Optionally enable auto-reboot — the host reboots immediately after the update if a reboot is required
+- apt upgrades (hosts, Proxmox nodes and LXCs) run non-interactively. If a package ships a new version of a config file you have edited, **your edited file is kept**; the package's version is left beside it as `*.dpkg-dist`
+- An upgrade that exits with an error is reported as **failed**, with the error line and full output in the Activity log. A notification is sent
+- Optionally enable auto-reboot — the host reboots immediately after the update if a reboot is required. A host whose upgrade failed is never auto-rebooted
 - Non-root hosts require a saved sudo password (set in Admin → Hosts → Credentials)
 - Missed schedules (e.g. container was stopped during the window) are skipped, not queued
 
@@ -413,7 +415,7 @@ is managed through the UI.
 | `KEEPUP_SECRET_KEY` | _(unset)_ | Credential-encryption (Fernet) key supplied directly, to keep it out of the `./data` volume. See [SECURITY.md](SECURITY.md#credential-storage--secret-management). |
 | `KEEPUP_SECRET_KEY_FILE` | _(unset)_ | Path to a file holding the encryption key — e.g. a Docker/Kubernetes secret at `/run/secrets/keepup_secret_key`. Takes effect only if `KEEPUP_SECRET_KEY` is unset. |
 | `KEEPUP_SESSION_SECRET` | _(unset)_ | Session-cookie signing secret. If unset, one is auto-generated at `./data/.session_secret`. Set it to keep sessions valid across redeploys or to source it from outside the data volume. |
-| `KEEPUP_UPGRADE_TIMEOUT` | `3600` | Seconds before a remote upgrade command is timed out (raised in OP#178 so long transactions aren't interrupted). |
+| `KEEPUP_UPGRADE_TIMEOUT` | `3600` | Seconds before a remote upgrade command is timed out, for SSH hosts, Proxmox nodes and LXCs (raised in OP#178 so long transactions aren't interrupted). |
 | `KEEPUP_CONTAINER_NAME` | _(auto)_ | Overrides Keepup's self-detected container name, used by the self-update safety net to avoid upgrading its own container. |
 | `KEEPUP_PROXMOX_NODE` | _(unset)_ | Identifies the Proxmox node Keepup itself runs on, so node self-reboot is guarded (OP#181). |
 

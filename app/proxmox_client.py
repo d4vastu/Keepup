@@ -5,6 +5,7 @@ Used during setup to verify credentials and discover VMs and LXC containers.
 API token format: user@realm!tokenname=uuid-value
 """
 
+import asyncio
 import logging
 
 import httpx
@@ -236,8 +237,20 @@ class ProxmoxClient:
     async def upgrade_lxc(
         self, node: str, vmid: int, ssh_host: str, ssh_creds: dict
     ) -> list[str]:
-        """Run apt-get upgrade inside an LXC container via pct exec over SSH."""
-        from .ssh_client import _connect, _run
+        """Run apt-get upgrade inside an LXC container via pct exec over SSH.
+
+        Raises ``UpgradeFailed`` on a non-zero exit and ``UpgradeTimeout`` when
+        the upgrade budget runs out. Returning the output in either case was
+        how failed LXC upgrades came to be reported as successes (OP#254).
+        """
+        from .package_managers import APT_CONFFILE_OPTS
+        from .ssh_client import (
+            UpgradeTimeout,
+            _connect,
+            _run,
+            _upgrade_timeout,
+            upgrade_failure,
+        )
 
         log.info("Proxmox: pct exec upgrade on %s/%s via %s", node, vmid, ssh_host)
 
@@ -252,43 +265,36 @@ class ProxmoxClient:
             "user": ssh_creds.get("user", "root"),
             "port": ssh_creds.get("port", 22),
         }
-        cmd = f"pct exec {vmid} -- apt-get upgrade -y 2>&1"
+        # `pct exec` starts no shell inside the container, so the variable is
+        # set with `env` rather than a `VAR=value` prefix.
+        cmd = (
+            f"pct exec {vmid} -- env DEBIAN_FRONTEND=noninteractive "
+            f"apt-get {APT_CONFFILE_OPTS} upgrade -y 2>&1"
+        )
+        target = f"LXC {vmid}"
+        hint = (
+            f"Run `pct exec {vmid} -- dpkg --configure -a` on {node} to finish "
+            "any interrupted package configuration, then re-run the upgrade."
+        )
+        timeout = _upgrade_timeout()
         async with await _connect(host_entry, ssh_creds) as conn:
-            result = await _run(conn, cmd, sudo_password=None, needs_sudo=False, timeout=300)
+            try:
+                result = await _run(
+                    conn, cmd, sudo_password=None, needs_sudo=False, timeout=timeout
+                )
+            except (asyncio.TimeoutError, TimeoutError) as exc:
+                log.error("Proxmox: upgrade timed out on %s/%s after %ds", node, vmid, timeout)
+                raise UpgradeTimeout(
+                    f"Upgrade timed out after {timeout}s. The package transaction "
+                    f"may still be running in {target} — do not re-run it blindly. "
+                    f"{hint}"
+                ) from exc
 
         lines = [ln for ln in result.stdout.splitlines() if ln.strip()]
+        if result.returncode != 0:
+            log.error("Proxmox: upgrade failed on %s/%s (exit %s)", node, vmid, result.returncode)
+            raise upgrade_failure(target, "apt", result, lines, hint)
         log.info("Proxmox: upgrade complete on %s/%s — %d line(s)", node, vmid, len(lines))
-        return lines
-
-    async def upgrade_node(self, node: str) -> list[str]:
-        """Run apt upgrade on a Proxmox node via the API. Returns log lines."""
-        import asyncio
-
-        log.info("Proxmox: starting apt upgrade on node %s", node)
-        async with self._client() as c:
-            r = await c.post(f"/api2/json/nodes/{node}/apt/upgrade")
-            r.raise_for_status()
-            upid = r.json().get("data", "")
-            if not upid:
-                raise RuntimeError("Proxmox API did not return a task ID for upgrade.")
-            log.info("Proxmox: upgrade task %s started on node %s", upid, node)
-
-            for _ in range(120):
-                await asyncio.sleep(3)
-                status_r = await c.get(f"/api2/json/nodes/{node}/tasks/{upid}/status")
-                status_r.raise_for_status()
-                status = status_r.json().get("data", {})
-                if status.get("status") == "stopped":
-                    exit_status = status.get("exitstatus", "")
-                    if exit_status != "OK":
-                        log.warning("Proxmox: upgrade task exited with %s", exit_status)
-                    break
-
-            log_r = await c.get(f"/api2/json/nodes/{node}/tasks/{upid}/log", params={"limit": 500})
-            log_r.raise_for_status()
-            lines = [entry.get("t", "") for entry in log_r.json().get("data", [])]
-
-        log.info("Proxmox: upgrade complete on node %s", node)
         return lines
 
     async def get_running_guests(self, node: str) -> list[dict]:

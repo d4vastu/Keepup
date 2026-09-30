@@ -9,6 +9,8 @@ budgets, but OS upgrades get a much larger one (`_upgrade_timeout`) because a
 hard cancel mid `dpkg`/`rpm` can leave the package database half-configured.
 When an upgrade does exceed its budget we raise `UpgradeTimeout` with a
 package-manager-specific recovery hint rather than a blank `TimeoutError`.
+An upgrade that exits non-zero raises `UpgradeFailed`, which names the cause
+and keeps the output, so no caller can mistake it for a success (OP#254).
 """
 
 import asyncio
@@ -40,6 +42,54 @@ class UpgradeTimeout(Exception):
     recovery hint — so the UI can tell the user it was a timeout and how to
     recover a possibly half-applied transaction.
     """
+
+
+class UpgradeFailed(RuntimeError):
+    """Raised when an OS upgrade command exits non-zero.
+
+    Returning the output instead made every caller record the run as a
+    success, and a scheduled auto-reboot then rebooted a host whose upgrade
+    had just failed (OP#254). ``lines`` keeps everything the command printed,
+    as OP#227's ``StackUpdateError`` does, because that output is what
+    explains the failure.
+    """
+
+    def __init__(self, message: str, lines: list[str]):
+        super().__init__(message)
+        self.lines = lines
+
+
+# Prefixes of lines that name a failure. When several match, the last one is
+# usually the one that explains the exit.
+_ERROR_PREFIXES = ("E:", "error", "Error", "ERROR", "dpkg:", "sudo:")
+
+
+def upgrade_failure(
+    target: str, tool: str, result: asyncssh.SSHCompletedProcess,
+    lines: list[str], hint: str,
+) -> UpgradeFailed:
+    """Build the ``UpgradeFailed`` for a non-zero upgrade exit.
+
+    The message has to explain the failure without the output beside it (the
+    dashboard modal and the Pushover alert show only the message), so it names
+    how the command ended and the line most likely to say why. A run that
+    printed nothing says so, rather than leaving the reader with a blank.
+    """
+    if result.returncode is None and result.exit_signal:
+        ended = f"{tool} was killed by signal {result.exit_signal[0]}"
+    else:
+        ended = f"{tool} exited with status {result.returncode}"
+    printed = [ln.strip() for ln in lines if ln.strip()]
+    errors = [ln for ln in printed if ln.startswith(_ERROR_PREFIXES)]
+    if printed:
+        cause = (errors or printed)[-1]
+        message = f"Upgrade failed on {target} ({ended}): {cause}"
+    else:
+        message = f"Upgrade failed on {target}: {ended} and printed nothing"
+    # apt's lock error ends in "?"; adding a full stop after it read "it?.".
+    if not message.endswith((".", "?", "!")):
+        message += "."
+    return UpgradeFailed(f"{message} {hint}", lines)
 
 
 def _upgrade_timeout() -> int:
@@ -447,10 +497,10 @@ async def run_host_update_buffered(
             ) from exc
 
     lines = result.stdout.splitlines()
-    if result.returncode != 0:
+    if result.returncode not in pm.upgrade_ok_codes:
         if result.stderr:
             lines += result.stderr.splitlines()
         log.error("SSH: upgrade failed on %s (exit %s)", h, result.returncode)
-    else:
-        log.info("SSH: upgrade complete on %s", h)
+        raise upgrade_failure(h, pm.name, result, lines, pm.recovery_hint())
+    log.info("SSH: upgrade complete on %s", h)
     return lines

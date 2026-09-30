@@ -206,7 +206,7 @@ def test_apt_no_reboot_sentinel():
 
 def test_apt_upgrade_cmd():
     pm = AptPackageManager()
-    assert "apt-get upgrade" in pm.upgrade_cmd()
+    assert "apt-get " in pm.upgrade_cmd() and " upgrade -y" in pm.upgrade_cmd()
     assert "DEBIAN_FRONTEND=noninteractive" in pm.upgrade_cmd()
 
 
