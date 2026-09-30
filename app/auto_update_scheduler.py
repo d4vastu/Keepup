@@ -120,7 +120,10 @@ async def _run_os_update(slug: str) -> None:
             target_name=host["name"],
             trigger="scheduled",
             status="error",
-            output=[exc_text(exc)],
+            # An UpgradeFailed carries the output that explains it (OP#254).
+            # It is raised before the auto-reboot block, so a host whose
+            # upgrade failed is never rebooted.
+            output=list(getattr(exc, "lines", [])) or [exc_text(exc)],
             started_at=started,
             error=exc_text(exc),
         )

@@ -263,6 +263,9 @@ async def test_run_host_update_returns_lines():
 
 @pytest.mark.asyncio
 async def test_run_host_update_includes_stderr_on_error():
+    """A failed upgrade raises (OP#254) and its output keeps stderr."""
+    from app.ssh_client import UpgradeFailed
+
     conn = _make_conn(
         stdout="some output\n", returncode=1, stderr="E: Could not lock\n"
     )
@@ -270,8 +273,9 @@ async def test_run_host_update_includes_stderr_on_error():
         patch("app.ssh_client.asyncssh.connect", new=AsyncMock(return_value=conn)),
         _DETECT_PM_PATCH,
     ):
-        lines = await run_host_update_buffered(HOST_KEY)
-    assert "E: Could not lock" in lines
+        with pytest.raises(UpgradeFailed) as exc_info:
+            await run_host_update_buffered(HOST_KEY)
+    assert "E: Could not lock" in exc_info.value.lines
 
 
 @pytest.mark.asyncio

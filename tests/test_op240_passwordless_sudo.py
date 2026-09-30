@@ -159,7 +159,7 @@ async def test_upgrade_runs_with_sudo_on_passwordless_host():
         await run_host_update_buffered(HOST_NON_ROOT, creds={})
     sent_cmd = conn.run.call_args[0][0]
     assert sent_cmd.startswith("sudo -n ")
-    assert "apt-get upgrade -y" in sent_cmd
+    assert "apt-get " in sent_cmd and " upgrade -y" in sent_cmd
 
 
 @pytest.mark.asyncio

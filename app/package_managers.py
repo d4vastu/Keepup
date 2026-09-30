@@ -31,6 +31,15 @@ import re
 Package = dict[str, str]
 
 
+# An unattended apt upgrade must also answer the "configuration file was
+# modified" prompt, which `-y` does not cover: take the package default where
+# there is one, otherwise keep the locally modified file. Local edits are
+# never overwritten. Shared by SSH hosts and LXCs (OP#254).
+APT_CONFFILE_OPTS = (
+    "-o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold"
+)
+
+
 # ---------------------------------------------------------------------------
 # Kernel package heuristic (shared across all PMs)
 # ---------------------------------------------------------------------------
@@ -96,6 +105,9 @@ def get_package_manager(name: str) -> "PackageManager":
 
 class PackageManager:
     name: str = "unknown"
+    # Exit statuses of upgrade_cmd() that mean the upgrade worked. Anything
+    # else is reported as a failed upgrade (OP#254).
+    upgrade_ok_codes: frozenset[int] = frozenset({0})
 
     def list_cmd(self, refresh: bool = True) -> str:
         """Single shell command — stdout fed to parse().
@@ -150,7 +162,7 @@ class AptPackageManager(PackageManager):
         )
 
     def upgrade_cmd(self) -> str:
-        return "DEBIAN_FRONTEND=noninteractive apt-get upgrade -y 2>&1"
+        return f"DEBIAN_FRONTEND=noninteractive apt-get {APT_CONFFILE_OPTS} upgrade -y 2>&1"
 
     def recovery_hint(self) -> str:
         return (
@@ -326,6 +338,11 @@ class YumPackageManager(PackageManager):
 
 class ZypperPackageManager(PackageManager):
     name = "zypper"
+    # zypper reports two outcomes of a *successful* run with non-zero codes:
+    # 102 ZYPPER_EXIT_INF_REBOOT_NEEDED and 103 ZYPPER_EXIT_INF_RESTART_NEEDED
+    # (zypper updated itself). Treating 102 as a failure would also cancel the
+    # auto-reboot it is asking for.
+    upgrade_ok_codes = frozenset({0, 102, 103})
 
     def list_cmd(self, refresh: bool = True) -> str:
         prefix = "zypper -q refresh 2>/dev/null; " if refresh else ""

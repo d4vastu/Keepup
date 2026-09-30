@@ -574,6 +574,8 @@ async def _job_run_host_update(job_id: str, host: dict, creds: dict) -> None:
         _jobs[job_id]["status"] = "done"
         log.info("OS upgrade complete on %s", name)
     except Exception as exc:
+        # An UpgradeFailed carries the output that explains it (OP#254).
+        _jobs[job_id]["lines"] = list(getattr(exc, "lines", [])) or [exc_text(exc)]
         _jobs[job_id]["status"] = "error"
         _jobs[job_id]["error"] = exc_text(exc)
         log.error("OS upgrade failed on %s: %s", name, exc)
@@ -591,6 +593,8 @@ async def _job_run_proxmox_node_upgrade(job_id: str, slug: str) -> None:
         _jobs[job_id]["status"] = "done"
         log.info("Proxmox node upgrade complete: %s", slug)
     except Exception as exc:
+        # An UpgradeFailed carries the output that explains it (OP#254).
+        _jobs[job_id]["lines"] = list(getattr(exc, "lines", [])) or [exc_text(exc)]
         _jobs[job_id]["status"] = "error"
         _jobs[job_id]["error"] = exc_text(exc)
         log.error("Proxmox node upgrade failed on %s: %s", slug, exc)
@@ -611,6 +615,8 @@ async def _job_run_lxc_upgrade(job_id: str, host: dict) -> None:
         _jobs[job_id]["status"] = "done"
         log.info("LXC upgrade complete: %s/%s", node, vmid)
     except Exception as exc:
+        # An UpgradeFailed carries the output that explains it (OP#254).
+        _jobs[job_id]["lines"] = list(getattr(exc, "lines", [])) or [exc_text(exc)]
         _jobs[job_id]["status"] = "error"
         _jobs[job_id]["error"] = exc_text(exc)
         log.error("LXC upgrade failed on %s/%s: %s", node, vmid, exc)
