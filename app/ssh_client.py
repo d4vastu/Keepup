@@ -82,11 +82,14 @@ def upgrade_failure(
     printed = [ln.strip() for ln in lines if ln.strip()]
     errors = [ln for ln in printed if ln.startswith(_ERROR_PREFIXES)]
     if printed:
-        cause = (errors or printed)[-1].rstrip(".")
+        cause = (errors or printed)[-1]
         message = f"Upgrade failed on {target} ({ended}): {cause}"
     else:
         message = f"Upgrade failed on {target}: {ended} and printed nothing"
-    return UpgradeFailed(f"{message}. {hint}", lines)
+    # apt's lock error ends in "?"; adding a full stop after it read "it?.".
+    if not message.endswith((".", "?", "!")):
+        message += "."
+    return UpgradeFailed(f"{message} {hint}", lines)
 
 
 def _upgrade_timeout() -> int:

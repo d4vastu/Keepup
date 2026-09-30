@@ -173,12 +173,22 @@ async def test_zypper_real_failure_code_still_raises():
     assert "nothing provides libfoo" in str(exc_info.value)
 
 
-def test_failure_message_does_not_double_the_full_stop():
+@pytest.mark.parametrize("cause, expected", [
+    ("E: Broken packages.", "E: Broken packages. Hint."),
+    # apt's real lock error, as seen in live QA: it ends in "?", and the
+    # message used to read "…using it?. Hint."
+    ("E: Unable to acquire the dpkg frontend lock, is another process using it?",
+     "is another process using it? Hint."),
+    ("error: failed!", "error: failed! Hint."),
+    ("E: plain", "E: plain. Hint."),
+])
+def test_failure_message_punctuates_the_cause_once(cause, expected):
     from app.ssh_client import upgrade_failure
 
-    exc = upgrade_failure("h", "apt", _result(returncode=1), ["E: Broken packages."], "Hint.")
+    msg = str(upgrade_failure("h", "apt", _result(returncode=1), [cause], "Hint."))
 
-    assert ".." not in str(exc)
+    assert msg.endswith(expected)
+    assert "?." not in msg and "!." not in msg and ".." not in msg
 
 
 def test_apt_upgrade_cmd_answers_conffile_prompts():
