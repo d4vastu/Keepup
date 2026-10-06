@@ -587,7 +587,13 @@ class SSHDockerBackend:
                     config_file = ""
                 else:
                     lines.append(f"Using compose file: {config_file}")
-            args = f"-f {shlex.quote(config_file)}" if config_file else f"-p {shlex.quote(project_name)}"
+            # Always name the project. With `-f` alone Compose names it after the
+            # file's folder, which for a project started under another name is a
+            # different project — `up -d` then builds a second copy beside the
+            # running one (OP#262).
+            args = f"-p {shlex.quote(project_name)}"
+            if config_file:
+                args += f" -f {shlex.quote(config_file)}"
             pull = await conn.run(wrap(f"{binary} {args} pull 2>&1"), check=False)
             _capture(lines, f"{binary} {args} pull", pull)
             if pull.returncode != 0:

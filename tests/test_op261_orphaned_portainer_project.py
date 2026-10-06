@@ -328,5 +328,6 @@ async def test_update_of_unlisted_project_with_compose_file_on_host_runs(data_di
 
     assert lines[-1] == "Compose update complete."
     assert any(
-        "-f /data/compose/58/docker-compose.yml pull" in c for c in _commands(conn)
+        "-p actualbudget -f /data/compose/58/docker-compose.yml pull" in c
+        for c in _commands(conn)
     )

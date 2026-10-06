@@ -2909,7 +2909,7 @@ async def test_update_compose_v1_relative_path_resolved(config_file, data_dir):
 
     calls = [c.args[0] for c in conn.run.call_args_list]
     pull_call = next(c for c in calls if "pull" in c)
-    assert "docker-compose -f /root/NGINX/docker-compose.yaml pull" in pull_call
+    assert "docker-compose -p nginx -f /root/NGINX/docker-compose.yaml pull" in pull_call
 
 
 # ---------------------------------------------------------------------------
