@@ -551,6 +551,19 @@ class SSHDockerBackend:
                         # actionable message instead of the doomed `-p` fallback
                         # (which errors "can't find a suitable configuration
                         # file" and only confuses the user). (OP#132)
+                        known_stacks = await self._portainer_stacks()
+                        if known_stacks is not None and not _is_listed_stack(
+                            config_file, project_name, known_stacks
+                        ):
+                            # No Portainer entry exists to send the user to
+                            # (OP#261), so name what is actually missing.
+                            raise RuntimeError(
+                                f"Stack {project_name!r} can't be updated from "
+                                f"Keepup: its compose file {config_file} is not on "
+                                f"{h}, and Portainer no longer lists the stack. "
+                                f"Re-create the stack in Portainer, or put its "
+                                f"compose file on {h}."
+                            )
                         if _portainer_integration_active():
                             raise RuntimeError(
                                 f"Stack {project_name!r} was deployed via "
@@ -758,6 +771,16 @@ def _stack_index(stacks: list[dict]) -> set[tuple[int, str]]:
     return {(s.get("Id"), (s.get("Name") or "").lower()) for s in stacks}
 
 
+def _is_listed_stack(
+    config_files: str, project: str, known_stacks: set[tuple[int, str]]
+) -> bool:
+    """True when the stack id in a compose path and the project name match a
+    stack Portainer lists. Id alone is not enough: an old install's id can
+    collide with an unrelated stack in the current one."""
+    m = _PORTAINER_STACK_PATH.match(config_files)
+    return bool(m) and (int(m.group(1)), project.lower()) in known_stacks
+
+
 def _portainer_managed_projects(
     containers: list[dict],
     known_stacks: set[tuple[int, str]] | None = None,
@@ -791,10 +814,10 @@ def _portainer_managed_projects(
         config_files = labels.get("com.docker.compose.project.config_files", "")
         if not project or not config_files.startswith("/data/compose/"):
             continue
-        if known_stacks is not None:
-            m = _PORTAINER_STACK_PATH.match(config_files)
-            if not m or (int(m.group(1)), project.lower()) not in known_stacks:
-                continue
+        if known_stacks is not None and not _is_listed_stack(
+            config_files, project, known_stacks
+        ):
+            continue
         excluded.add(project)
     return excluded
 

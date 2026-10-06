@@ -254,3 +254,79 @@ async def test_reload_backends_without_portainer_gives_ssh_backend_none(
 
     ssh = next(b for b in backends if b.BACKEND_KEY == "ssh")
     assert ssh._portainer is None
+
+
+# ---------------------------------------------------------------------------
+# Updating — the row is visible now, so its failure has to make sense
+# ---------------------------------------------------------------------------
+
+
+def _update_conn(file_exists: bool) -> MagicMock:
+    ps = "\n".join(json.dumps(r) for r in [AGENT, ACTUAL])
+
+    async def run(cmd, check=False):
+        if "docker ps -a" in cmd:
+            return MagicMock(stdout=ps, returncode=0)
+        if "test -f" in cmd:
+            return MagicMock(stdout="exists" if file_exists else "", returncode=0)
+        return MagicMock(stdout="v2", returncode=0)
+
+    conn = MagicMock()
+    conn.__aenter__ = AsyncMock(return_value=conn)
+    conn.__aexit__ = AsyncMock(return_value=False)
+    conn.run = AsyncMock(side_effect=run)
+    return conn
+
+
+async def _update(portainer_client, conn) -> list[str]:
+    host = {"slug": "h", "host": "1.2.3.4"}
+    with (
+        patch("app.backends.ssh_docker_backend._connect", new=AsyncMock(return_value=conn)),
+        patch("app.backends.ssh_docker_backend.get_self_container_id", return_value=None),
+        patch(
+            "app.backends.ssh_docker_backend._portainer_integration_active",
+            return_value=True,
+        ),
+    ):
+        return await SSHDockerBackend(
+            portainer_client=portainer_client
+        )._update_compose_project(host, "actualbudget")
+
+
+def _commands(conn) -> list[str]:
+    return [c.args[0] for c in conn.run.await_args_list]
+
+
+@pytest.mark.asyncio
+async def test_update_of_unlisted_project_without_compose_file_says_so(data_dir):
+    """Portainer has no entry to send the user to, so don't send them there."""
+    conn = _update_conn(file_exists=False)
+    with pytest.raises(RuntimeError) as exc:
+        await _update(_portainer(stacks=[{"Id": 3, "Name": "watchtower"}]), conn)
+
+    msg = str(exc.value)
+    assert "/data/compose/58/docker-compose.yml" in msg
+    assert "no longer lists" in msg
+    assert "Portainer entry" not in msg
+    assert not any(" pull" in c or " up -d" in c for c in _commands(conn))
+
+
+@pytest.mark.asyncio
+async def test_update_of_listed_project_still_points_to_its_portainer_entry(data_dir):
+    conn = _update_conn(file_exists=False)
+    with pytest.raises(RuntimeError) as exc:
+        await _update(_portainer(stacks=[{"Id": 58, "Name": "actualbudget"}]), conn)
+
+    assert "Portainer entry" in str(exc.value)
+
+
+@pytest.mark.asyncio
+async def test_update_of_unlisted_project_with_compose_file_on_host_runs(data_dir):
+    """An old stack whose file is still on the host updates like any project."""
+    conn = _update_conn(file_exists=True)
+    lines = await _update(_portainer(stacks=[]), conn)
+
+    assert lines[-1] == "Compose update complete."
+    assert any(
+        "-f /data/compose/58/docker-compose.yml pull" in c for c in _commands(conn)
+    )
