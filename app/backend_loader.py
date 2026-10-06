@@ -38,19 +38,21 @@ async def reload_backends() -> list:
     key = port_creds.get("api_key", "")
     pinned_pem = port_cfg.get("pinned_cert_pem", "")
 
+    portainer_client = None
     if url and key:
         from .portainer_client import PortainerClient
         from .backends import PortainerBackend
 
-        backends.append(
-            PortainerBackend(
-                PortainerClient(url=url, api_key=key, pinned_cert_pem=pinned_pem)
-            )
+        portainer_client = PortainerClient(
+            url=url, api_key=key, pinned_cert_pem=pinned_pem
         )
+        backends.append(PortainerBackend(portainer_client))
 
     from .backends import SSHDockerBackend
 
-    backends.append(SSHDockerBackend())
+    # The SSH backend asks Portainer which stacks it really has, so a compose
+    # project Portainer no longer lists is not left unchecked (OP#261).
+    backends.append(SSHDockerBackend(portainer_client=portainer_client))
 
     _backends = backends
 

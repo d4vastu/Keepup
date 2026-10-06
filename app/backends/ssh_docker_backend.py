@@ -17,6 +17,7 @@ import shlex
 from typing import Callable
 from urllib.parse import quote, unquote, urlparse
 
+from ..activity_log import exc_text
 from ..ssh_client import _connect
 from ..registry_client import (
     check_image_update,
@@ -53,6 +54,10 @@ def _capture(lines: list[str], label: str, result) -> None:
     if code:
         lines.append(f"[exit {code}]")
 
+# Portainer keeps a stack's compose file at /data/compose/{stack id}/…, so the
+# path a container was started from names the stack it claims to belong to.
+_PORTAINER_STACK_PATH = re.compile(r"^/data/compose/(\d+)/")
+
 # Seconds to wait after recreating a container before confirming it is still
 # running (not crash-looping) — so a container that starts then immediately
 # dies triggers rollback instead of slipping through. Patched to 0 in tests.
@@ -61,6 +66,31 @@ _RECREATE_SETTLE_SECONDS = 3
 
 class SSHDockerBackend:
     BACKEND_KEY = "ssh"
+
+    def __init__(self, portainer_client=None):
+        # Only used to ask which stacks Portainer really has (OP#261); None when
+        # the Portainer integration is not connected.
+        self._portainer = portainer_client
+
+    async def _portainer_stacks(self) -> set[tuple[int, str]] | None:
+        """The stacks Portainer lists, or None when there is nobody to ask.
+
+        A failed lookup also returns None, which keeps the path-only rule: with
+        Portainer down its backend is already reported as failed, and taking
+        over every one of its stacks for the length of the outage would only add
+        a second row and a second notification for each.
+        """
+        if self._portainer is None:
+            return None
+        try:
+            return _stack_index(await self._portainer.get_stacks())
+        except Exception as e:
+            log.warning(
+                "Docker SSH: could not ask Portainer which stacks it manages (%s);"
+                " leaving every /data/compose/ project to the Portainer backend",
+                exc_text(e),
+            )
+            return None
 
     def _docker_hosts(self) -> list[dict]:
         return [h for h in get_hosts() if h.get("docker_mode")]
@@ -194,7 +224,10 @@ class SSHDockerBackend:
         self, dockerhub_creds: dict | None = None
     ) -> list[dict]:
         hosts = self._docker_hosts()
-        tasks = [self._containers_for_host(h, dockerhub_creds) for h in hosts]
+        known_stacks = await self._portainer_stacks()
+        tasks = [
+            self._containers_for_host(h, dockerhub_creds, known_stacks) for h in hosts
+        ]
         results = await asyncio.gather(*tasks, return_exceptions=True)
         all_entries = []
         for host, r in zip(hosts, results):
@@ -246,6 +279,7 @@ class SSHDockerBackend:
         self,
         host: dict,
         dockerhub_creds: dict | None,
+        known_stacks: set[tuple[int, str]] | None = None,
     ) -> list[dict]:
         slug = host["slug"]
         h = host.get("host", slug)
@@ -271,8 +305,15 @@ class SSHDockerBackend:
                 wrap("docker ps -a --format '{{json .}}'"), check=False
             )
             containers = _parse_json_output(ps_result.stdout)
-            portainer_projects = _portainer_managed_projects(containers)
+            portainer_projects = _portainer_managed_projects(containers, known_stacks)
             portainer_active = _portainer_integration_active()
+            orphaned = _portainer_managed_projects(containers) - portainer_projects
+            if orphaned:
+                log.info(
+                    "Docker SSH: %s — %d project(s) under /data/compose/ are not"
+                    " stacks Portainer lists; checking them via SSH: %s",
+                    h, len(orphaned), sorted(orphaned),
+                )
             if portainer_projects and portainer_active:
                 log.info(
                     "Docker SSH: %s — skipping %d Portainer-managed project(s): %s",
@@ -510,6 +551,19 @@ class SSHDockerBackend:
                         # actionable message instead of the doomed `-p` fallback
                         # (which errors "can't find a suitable configuration
                         # file" and only confuses the user). (OP#132)
+                        known_stacks = await self._portainer_stacks()
+                        if known_stacks is not None and not _is_listed_stack(
+                            config_file, project_name, known_stacks
+                        ):
+                            # No Portainer entry exists to send the user to
+                            # (OP#261), so name what is actually missing.
+                            raise RuntimeError(
+                                f"Stack {project_name!r} can't be updated from "
+                                f"Keepup: its compose file {config_file} is not on "
+                                f"{h}, and Portainer no longer lists the stack. "
+                                f"Re-create the stack in Portainer, or put its "
+                                f"compose file on {h}."
+                            )
                         if _portainer_integration_active():
                             raise RuntimeError(
                                 f"Stack {project_name!r} was deployed via "
@@ -708,7 +762,29 @@ def _portainer_integration_active() -> bool:
     return bool(cfg.get("url") and creds.get("api_key"))
 
 
-def _portainer_managed_projects(containers: list[dict]) -> set[str]:
+def _stack_index(stacks: list[dict]) -> set[tuple[int, str]]:
+    """Reduce Portainer's stack list to (id, lowercased name) pairs.
+
+    Lowercased because Compose normalises project names while Portainer keeps
+    the case the stack was created with.
+    """
+    return {(s.get("Id"), (s.get("Name") or "").lower()) for s in stacks}
+
+
+def _is_listed_stack(
+    config_files: str, project: str, known_stacks: set[tuple[int, str]]
+) -> bool:
+    """True when the stack id in a compose path and the project name match a
+    stack Portainer lists. Id alone is not enough: an old install's id can
+    collide with an unrelated stack in the current one."""
+    m = _PORTAINER_STACK_PATH.match(config_files)
+    return bool(m) and (int(m.group(1)), project.lower()) in known_stacks
+
+
+def _portainer_managed_projects(
+    containers: list[dict],
+    known_stacks: set[tuple[int, str]] | None = None,
+) -> set[str]:
     """
     Return compose project names that are managed by a Portainer agent on this host.
 
@@ -716,6 +792,13 @@ def _portainer_managed_projects(containers: list[dict]) -> set[str]:
     files inside its own data volume (mounted at /data/compose/ by default),
     not on the host filesystem. Those projects cannot be updated via SSH and
     should be left to the Portainer backend.
+
+    The path only says a project was deployed by *a* Portainer at some point.
+    Given `known_stacks` (see `_stack_index`), a project counts only when the
+    stack id in its path and its name match a stack Portainer lists today —
+    otherwise the Portainer backend will never report it, and skipping it here
+    would leave it checked by nobody (OP#261). Without `known_stacks` the path
+    alone decides.
     """
     has_agent = any(
         "portainer/agent" in (c.get("Image") or "").lower()
@@ -729,8 +812,13 @@ def _portainer_managed_projects(containers: list[dict]) -> set[str]:
         labels = _parse_docker_ps_labels(c.get("Labels", "") or "")
         project = labels.get("com.docker.compose.project", "")
         config_files = labels.get("com.docker.compose.project.config_files", "")
-        if project and config_files.startswith("/data/compose/"):
-            excluded.add(project)
+        if not project or not config_files.startswith("/data/compose/"):
+            continue
+        if known_stacks is not None and not _is_listed_stack(
+            config_files, project, known_stacks
+        ):
+            continue
+        excluded.add(project)
     return excluded
 
 
