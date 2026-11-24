@@ -36,6 +36,11 @@ _READ_TIMEOUT = httpx.Timeout(connect=5, read=60, write=15, pool=30)
 # silence means something is genuinely stuck.
 DEPLOY_TIMEOUT = httpx.Timeout(connect=5, read=900, write=30, pool=30)
 
+# Arcane pages its lists (20 per page by default). Ask for big pages and follow
+# them; the page cap only guards against a server that never says "last page".
+_PAGE_SIZE = 100
+_MAX_PAGES = 50
+
 
 class ArcaneError(RuntimeError):
     """Arcane refused or failed an action, with the output captured so far."""
@@ -59,25 +64,36 @@ class ArcaneClient:
             timeout=timeout,
         )
 
-    async def _get_data(self, path: str):
+    async def _get_all(self, path: str) -> list[dict]:
+        """Every item of a paged Arcane list, following ``start``/``limit`` pages."""
+        items: list[dict] = []
         async with self._client(_READ_TIMEOUT) as c:
-            resp = await c.get(path)
-            _raise_for_status(resp)
-            return resp.json().get("data")
+            for _ in range(_MAX_PAGES):
+                resp = await c.get(path, params={"start": len(items), "limit": _PAGE_SIZE})
+                _raise_for_status(resp)
+                body = _json_object(resp)
+                page = body.get("data") or []
+                if not isinstance(page, list):
+                    raise ArcaneError(f"Arcane returned an unexpected list from {path}")
+                items.extend(page)
+                if not page or not (body.get("pagination") or {}).get("hasNextPage"):
+                    break
+        return items
 
     async def list_environments(self) -> list[dict]:
         """Every environment: id "0" is the manager's own Docker host."""
-        return await self._get_data("/agents") or []
+        return await self._get_all("/agents")
 
     async def list_projects(self, env_id: str) -> list[dict]:
-        return await self._get_data(f"/agents/{env_id}/projects") or []
+        return await self._get_all(f"/agents/{env_id}/projects")
 
     async def check_project_updates(self, env_id: str, project_id: str) -> dict:
         """Ask Arcane to check the project's images now; returns its updateInfo."""
         async with self._client(_READ_TIMEOUT) as c:
             resp = await c.post(f"/agents/{env_id}/updater/projects/{project_id}/check")
             _raise_for_status(resp)
-            return resp.json().get("data") or {}
+            data = _json_object(resp).get("data")
+            return data if isinstance(data, dict) else {}
 
     async def deploy(self, env_id: str, project_id: str, action: str) -> list[str]:
         """Run a streamed deploy action ("pull" or "up") and return its log lines.
@@ -122,6 +138,18 @@ class ArcaneClient:
         return lines
 
 
+def _json_object(resp: httpx.Response) -> dict:
+    """The response body as a JSON object, or a readable error saying it was not."""
+    try:
+        body = resp.json()
+    except ValueError:
+        body = None
+    if not isinstance(body, dict):
+        snippet = (resp.text or "").strip()[:200] or "empty body"
+        raise ArcaneError(f"Arcane returned an unexpected response: {snippet}")
+    return body
+
+
 def _raise_for_status(resp: httpx.Response) -> None:
     """Raise with Arcane's own explanation, not just the status code."""
     if resp.status_code < 400:
@@ -129,7 +157,12 @@ def _raise_for_status(resp: httpx.Response) -> None:
     detail = ""
     try:
         body = resp.json()
-        detail = body.get("detail") or body.get("title") or body.get("error") or ""
     except ValueError:
+        body = None
+    if isinstance(body, dict):
+        detail = body.get("detail") or body.get("title") or body.get("error") or ""
+    elif isinstance(body, str):
+        detail = body
+    else:
         detail = (resp.text or "").strip()[:200]
     raise ArcaneError(f"Arcane returned HTTP {resp.status_code}: {detail or resp.reason_phrase}")

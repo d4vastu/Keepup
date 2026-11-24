@@ -19,9 +19,13 @@ checked or updated twice.
 
 import asyncio
 import ipaddress
+import json
 import logging
+import os
+import re
 import socket
 import time
+from pathlib import Path
 from urllib.parse import urlparse
 
 from ..activity_log import exc_text
@@ -47,17 +51,46 @@ _SNAPSHOT_TTL_SECONDS = 30
 
 CONNECTION_BADGE = "Arcane"
 
+# The last known "which projects are Arcane's" answer, kept on disk so an Arcane
+# outage right after a Keepup restart does not hand every project to SSH.
+_DATA_DIR = Path(os.getenv("DATA_PATH", "/app/data"))
+_COVERAGE_PATH = _DATA_DIR / "arcane_coverage.json"
+
+# Whole-word status codes and specific phrases only: a bare "429" also matches
+# inside a sha256 digest, and "rate" inside "generate" or "separate".
+_RATE_LIMITED = re.compile(r"\b429\b|rate[ -]?limit|too ?many ?requests")
+_AUTH_FAILED = re.compile(r"\b40[13]\b|unauthori[sz]ed|forbidden|access denied|denied:")
+_NOT_FOUND = re.compile(r"\b404\b|not found|manifest unknown")
+
 
 def classify_error(error: str) -> str:
     """Map Arcane's free-text registry error onto Keepup's coarse reasons."""
     e = (error or "").lower()
-    if "429" in e or "rate" in e or "too many requests" in e or "toomanyrequests" in e:
+    if _RATE_LIMITED.search(e):
         return REASON_RATE_LIMITED
-    if "401" in e or "403" in e or "unauthorized" in e or "denied" in e:
+    if _AUTH_FAILED.search(e):
         return REASON_AUTH_FAILED
-    if "not found" in e or "manifest unknown" in e or "404" in e:
+    if _NOT_FOUND.search(e):
         return REASON_NOT_FOUND
     return REASON_REGISTRY_ERROR
+
+
+def _load_coverage() -> dict[str, set[str]]:
+    try:
+        raw = json.loads(_COVERAGE_PATH.read_text())
+        return {str(k): {str(n) for n in v} for k, v in raw.items()}
+    except (OSError, ValueError, AttributeError, TypeError):
+        return {}
+
+
+def _save_coverage(coverage: dict[str, set[str]]) -> None:
+    try:
+        _COVERAGE_PATH.parent.mkdir(parents=True, exist_ok=True)
+        tmp = _COVERAGE_PATH.with_suffix(".tmp")
+        tmp.write_text(json.dumps({k: sorted(v) for k, v in coverage.items()}))
+        os.replace(tmp, _COVERAGE_PATH)
+    except OSError as e:
+        log.warning("Arcane: could not save the project list (%s)", exc_text(e))
 
 
 def image_statuses(update_info: dict | None) -> list[dict]:
@@ -130,9 +163,10 @@ class ArcaneBackend:
         self._snapshot: tuple[float, list] | None = None
         self._lock = asyncio.Lock()
         # Last good answer to "which projects are Arcane's?", kept through an
-        # Arcane outage so the SSH backend does not suddenly start checking (and
-        # notifying about) every Arcane project for the length of it.
-        self._last_coverage: dict[str, set[str]] = {}
+        # Arcane outage — and across restarts, via the data dir — so the SSH
+        # backend does not suddenly start checking (and notifying about) every
+        # Arcane project for the length of it.
+        self._last_coverage: dict[str, set[str]] = _load_coverage()
 
     # ------------------------------------------------------------------
     # Listing
@@ -176,7 +210,11 @@ class ArcaneBackend:
         return self._client.base
 
     async def projects_by_host(self) -> dict[str, set[str]]:
-        """{host IP: names of the Compose projects Arcane manages there}."""
+        """{host IP: lowercased names of the Compose projects Arcane manages there}.
+
+        Lowercased because Compose lowercases project names in its labels,
+        while Arcane shows a project's name as written.
+        """
         try:
             snapshot = await self._environments()
         except Exception as e:
@@ -195,9 +233,26 @@ class ArcaneBackend:
                 continue
             addr = await self._env_address(env)
             if addr:
-                coverage.setdefault(addr, set()).update(p.get("name", "") for p in projects)
+                coverage.setdefault(addr, set()).update(
+                    (p.get("name") or "").lower() for p in projects
+                )
+        if coverage != self._last_coverage:
+            _save_coverage(coverage)
         self._last_coverage = coverage
         return coverage
+
+    async def find_project_ref(self, host: dict, project_name: str) -> str | None:
+        """The Arcane ref (``env:project``) for a Compose project on a Keepup host."""
+        addr = await _resolve(host.get("host", ""))
+        if not addr:
+            return None
+        for env, projects in await self._environments():
+            if isinstance(projects, Exception) or await self._env_address(env) != addr:
+                continue
+            for p in projects:
+                if (p.get("name") or "").lower() == project_name.lower():
+                    return f"{env['id']}:{p['id']}"
+        return None
 
     async def get_stacks_with_update_status(
         self, dockerhub_creds: dict | None = None

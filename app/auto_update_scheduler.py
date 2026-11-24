@@ -306,3 +306,68 @@ def apply_all_schedules() -> None:
     for update_path in get_all_stack_auto_updates():
         apply_stack_schedule(update_path)
     apply_update_check_schedule()
+
+
+async def migrate_stack_schedules(backends: list) -> list[str]:
+    """Re-home per-stack auto-update schedules whose backend changed (OP#275).
+
+    - ``portainer/…`` entries: Portainer support is gone (OP#274), so they could
+      only fail — and push a failure notification — every time they fired.
+      They are dropped.
+    - ``ssh/{slug}/{project}:…`` entries for a project Arcane now manages move
+      to that project's ``arcane/…`` path, keeping their schedule. Left alone,
+      they are hidden from the Auto-updates page (the SSH backend no longer
+      lists the project) yet would keep firing.
+
+    Returns a line per change, for the log. Scheduler jobs are re-applied for
+    both the old and the new path.
+    """
+    from urllib.parse import unquote
+
+    from .config_manager import get_hosts, load_config, save_config
+
+    arcane = next((b for b in backends if b.BACKEND_KEY == "arcane"), None)
+    config = load_config()
+    sau: dict = dict(config.get("stack_auto_update") or {})
+    if not sau:
+        return []
+    hosts = {h["slug"]: h for h in get_hosts()}
+    changes: list[str] = []
+    touched: list[str] = []
+    for path, entry in list(sau.items()):
+        if path.startswith("portainer/"):
+            sau.pop(path)
+            touched.append(path)
+            changes.append(f"dropped Portainer schedule {path}")
+            continue
+        if arcane is None or not path.startswith("ssh/"):
+            continue
+        slug, _, rest = path[len("ssh/"):].partition("/")
+        rest = unquote(rest)
+        if not rest or rest.startswith("~") or slug not in hosts:
+            continue  # standalone containers stay with SSH
+        project = rest.split(":", 1)[0]
+        try:
+            ref = await arcane.find_project_ref(hosts[slug], project)
+        except Exception as exc:
+            logger.warning("Schedule migration: could not ask Arcane about %s (%s)", path, exc_text(exc))
+            continue
+        if not ref:
+            continue
+        new_path = f"arcane/{ref}"
+        sau.pop(path)
+        sau.setdefault(new_path, {**entry, "name": project})
+        touched += [path, new_path]
+        changes.append(f"moved schedule {path} → {new_path}")
+    if not changes:
+        return []
+    if sau:
+        config["stack_auto_update"] = sau
+    else:
+        config.pop("stack_auto_update", None)
+    save_config(config)
+    for path in touched:
+        apply_stack_schedule(path)
+    for line in changes:
+        logger.info("Stack schedules: %s", line)
+    return changes

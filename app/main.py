@@ -25,7 +25,7 @@ from .csrf import CSRFMiddleware
 from .security_headers import ConditionalHTTPSRedirectMiddleware, SecurityHeadersMiddleware
 from .log_buffer import setup_log_buffer
 from .notifications import get_unread_count, get_notifications, mark_all_read
-from .auto_update_scheduler import apply_all_schedules, scheduler
+from .auto_update_scheduler import apply_all_schedules, migrate_stack_schedules, scheduler
 from .auto_updates_router import router as auto_updates_router
 from .backend_loader import get_backends, reload_backends
 from .config_manager import (
@@ -412,7 +412,13 @@ async def _startup() -> None:
     await _migrate_tofu_certs()
     if drop_portainer_leftovers():
         log.info("Removed the Portainer integration settings (no longer supported)")
-    await reload_backends()
+    backends = await reload_backends()
+    # Before the schedules are registered, so a re-homed schedule (OP#275) is
+    # registered under its new path rather than its stale one.
+    try:
+        await migrate_stack_schedules(backends)
+    except Exception as e:
+        log.warning("Stack schedule migration failed: %s", exc_text(e))
     apply_all_schedules()
     scheduler.start()
 

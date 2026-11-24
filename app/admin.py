@@ -323,9 +323,13 @@ async def admin_integrations_test_arcane(
     from .arcane_client import ArcaneClient
 
     url = arcane_url.strip().rstrip("/")
-    key = arcane_api_key.strip() or get_integration_credentials("arcane").get("api_key", "")
+    key = arcane_api_key.strip()
+    # The saved key is only ever sent to the saved address: a blank key field
+    # with a different URL must not hand the stored credential to it.
+    if not key and url and url == get_arcane_config().get("url"):
+        key = get_integration_credentials("arcane").get("api_key", "")
     if not url or not key:
-        return _fail("Enter the Arcane URL and an API key.")
+        return _fail("Enter the Arcane URL and an API key (the saved key is only used with the saved URL).")
     client = ArcaneClient(url=url, api_key=key, verify_ssl=arcane_verify_ssl != "off")
     try:
         envs = await client.list_environments()
@@ -364,7 +368,12 @@ async def admin_integrations_save_arcane(
     if key:
         save_integration_credentials("arcane", api_key=key)
         audit(request, "credential.save", target="arcane")
-    await reload_backends()
+    from .auto_update_scheduler import migrate_stack_schedules
+
+    backends = await reload_backends()
+    moved = await migrate_stack_schedules(backends)
+    if moved:
+        return _ok(f"Arcane saved. {len(moved)} stack auto-update schedule(s) moved to Arcane.")
     return _ok("Arcane saved.")
 
 
