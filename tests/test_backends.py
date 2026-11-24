@@ -5,14 +5,12 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from app.backends import ContainerBackend, PortainerBackend, SSHDockerBackend
+from app.backends import ContainerBackend, SSHDockerBackend
 from app.backends.ssh_docker_backend import (
     _build_docker_run_cmd,
     _compose_projects_from_ps,
     _parse_docker_ps_labels,
     _parse_json_output,
-    _portainer_integration_active,
-    _portainer_managed_projects,
     _rollup_status,
 )
 from app.registry_client import ImageCheck
@@ -31,13 +29,6 @@ def _no_recreate_settle(monkeypatch):
 # ---------------------------------------------------------------------------
 
 
-def test_portainer_backend_satisfies_protocol():
-    mock_client = MagicMock()
-    b = PortainerBackend(mock_client)
-    assert isinstance(b, ContainerBackend)
-    assert b.BACKEND_KEY == "portainer"
-
-
 def test_ssh_docker_backend_satisfies_protocol():
     b = SSHDockerBackend()
     assert isinstance(b, ContainerBackend)
@@ -47,41 +38,6 @@ def test_ssh_docker_backend_satisfies_protocol():
 # ---------------------------------------------------------------------------
 # PortainerBackend
 # ---------------------------------------------------------------------------
-
-
-@pytest.mark.asyncio
-async def test_portainer_backend_enriches_update_path():
-    raw = [
-        {
-            "id": 10,
-            "name": "sonarr",
-            "endpoint_id": 1,
-            "endpoint_name": "primary",
-            "update_status": "up_to_date",
-            "images": [],
-        }
-    ]
-    mock_client = MagicMock()
-    mock_client.get_stacks_with_update_status = AsyncMock(return_value=raw)
-    backend = PortainerBackend(mock_client)
-
-    stacks = await backend.get_stacks_with_update_status()
-
-    assert len(stacks) == 1
-    assert stacks[0]["update_path"] == "portainer/10:1"
-    assert stacks[0]["id"] == "10"
-    assert stacks[0]["endpoint_id"] == "1"
-
-
-@pytest.mark.asyncio
-async def test_portainer_backend_update_stack_decodes_ref():
-    mock_client = MagicMock()
-    mock_client.update_stack = AsyncMock(return_value={})
-    backend = PortainerBackend(mock_client)
-
-    await backend.update_stack("42:3")
-
-    mock_client.update_stack.assert_called_once_with(42, 3)
 
 
 # ---------------------------------------------------------------------------
@@ -382,35 +338,6 @@ async def test_discover_containers_returns_containers(config_file, data_dir):
     plex = next(c for c in containers if c["name"] == "plex")
     assert plex["compose_project"] is None
     assert plex["running"] is False
-
-
-@pytest.mark.asyncio
-async def test_discover_containers_tags_portainer_managed(config_file, data_dir):
-    """Containers in Portainer-agent-managed compose projects are tagged."""
-    ps_output = "\n".join([
-        json.dumps({"Names": "/portainer_agent", "Image": "portainer/agent:latest",
-                    "Status": "Up 1 day", "Labels": ""}),
-        json.dumps({"Names": "/watchtower", "Image": "watchtower:latest",
-                    "Status": "Up 2 hours",
-                    "Labels": "com.docker.compose.project=watchtower,"
-                              "com.docker.compose.project.config_files=/data/compose/3/docker-compose.yml"}),
-        json.dumps({"Names": "/plex", "Image": "plex:latest",
-                    "Status": "Up 1 hour",
-                    "Labels": "com.docker.compose.project=media,"
-                              "com.docker.compose.project.config_files=/srv/media/docker-compose.yml"}),
-    ])
-    conn = _make_ssh_conn_with_status(stdout=ps_output)
-    host = {"name": "Test Host", "host": "192.168.1.10", "slug": "test-host"}
-    with patch(
-        "app.backends.ssh_docker_backend._connect", new=AsyncMock(return_value=conn)
-    ):
-        backend = SSHDockerBackend()
-        containers = await backend.discover_containers(host)
-
-    watchtower = next(c for c in containers if c["name"] == "watchtower")
-    plex = next(c for c in containers if c["name"] == "plex")
-    assert watchtower["portainer_managed"] is True
-    assert plex["portainer_managed"] is False
 
 
 @pytest.mark.asyncio
@@ -840,93 +767,6 @@ def test_docker_manage_returns_panel(client):
     assert response.status_code == 200
     assert "plex" in response.text
     assert "monitor" in response.text.lower()
-
-
-def test_docker_discover_shows_portainer_notice_when_managed_and_integration_off(client):
-    """Portainer-managed containers + integration off → 'Connect Portainer' notice."""
-    containers = [
-        {"name": "watchtower", "image": "watchtower:latest", "status": "Up", "running": True,
-         "compose_project": "watchtower", "css_id": "watchtower", "portainer_managed": True},
-    ]
-    with patch(
-        "app.backends.ssh_docker_backend.SSHDockerBackend.discover_containers",
-        new=AsyncMock(return_value=containers),
-    ):
-        response = client.get("/admin/hosts/test-host/docker-discover")
-    assert response.status_code == 200
-    assert "Connect Portainer" in response.text
-    assert "/admin#config-portainer" in response.text
-    assert "1 of these containers was deployed via Portainer" in response.text
-
-
-def test_docker_discover_hides_portainer_notice_when_integration_active(client):
-    containers = [
-        {"name": "watchtower", "image": "watchtower:latest", "status": "Up", "running": True,
-         "compose_project": "watchtower", "css_id": "watchtower", "portainer_managed": True},
-    ]
-    with (
-        patch(
-            "app.backends.ssh_docker_backend.SSHDockerBackend.discover_containers",
-            new=AsyncMock(return_value=containers),
-        ),
-        patch(
-            "app.backends.ssh_docker_backend._portainer_integration_active",
-            return_value=True,
-        ),
-    ):
-        response = client.get("/admin/hosts/test-host/docker-discover")
-    assert response.status_code == 200
-    assert "Connect Portainer" not in response.text
-
-
-def test_docker_discover_no_portainer_notice_when_none_managed(client):
-    containers = [
-        {"name": "plex", "image": "plex:latest", "status": "Up", "running": True,
-         "compose_project": None, "css_id": "plex", "portainer_managed": False},
-    ]
-    with patch(
-        "app.backends.ssh_docker_backend.SSHDockerBackend.discover_containers",
-        new=AsyncMock(return_value=containers),
-    ):
-        response = client.get("/admin/hosts/test-host/docker-discover")
-    assert response.status_code == 200
-    assert "Connect Portainer" not in response.text
-
-
-def test_docker_manage_shows_portainer_notice_when_managed_and_integration_off(client):
-    containers = [
-        {"name": "watchtower", "image": "watchtower:latest", "status": "Up", "running": True,
-         "compose_project": "watchtower", "css_id": "watchtower", "portainer_managed": True},
-    ]
-    with patch(
-        "app.backends.ssh_docker_backend.SSHDockerBackend.discover_containers",
-        new=AsyncMock(return_value=containers),
-    ):
-        response = client.get("/admin/hosts/test-host/docker-manage")
-    assert response.status_code == 200
-    assert "Connect Portainer" in response.text
-    assert "/admin#config-portainer" in response.text
-    assert "1 of these containers was deployed via Portainer" in response.text
-
-
-def test_docker_manage_hides_portainer_notice_when_integration_active(client):
-    containers = [
-        {"name": "watchtower", "image": "watchtower:latest", "status": "Up", "running": True,
-         "compose_project": "watchtower", "css_id": "watchtower", "portainer_managed": True},
-    ]
-    with (
-        patch(
-            "app.backends.ssh_docker_backend.SSHDockerBackend.discover_containers",
-            new=AsyncMock(return_value=containers),
-        ),
-        patch(
-            "app.backends.ssh_docker_backend._portainer_integration_active",
-            return_value=True,
-        ),
-    ):
-        response = client.get("/admin/hosts/test-host/docker-manage")
-    assert response.status_code == 200
-    assert "Connect Portainer" not in response.text
 
 
 def test_docker_manage_unknown_host_returns_empty(client):
@@ -3106,190 +2946,14 @@ def _make_container(name: str, image: str, project: str = "", config_files: str 
     return {"Names": f"/{name}", "Image": image, "Labels": labels.lstrip(",")}
 
 
-def test_portainer_managed_projects_excludes_portainer_stacks():
-    """Agent present + Portainer stack + manual stack → only manual returned as excluded."""
-    containers = [
-        _make_container("portainer_agent_1", "portainer/agent:latest"),
-        _make_container("actual_server_1", "actualbudget/actual:latest",
-                        project="actualbudget",
-                        config_files="/data/compose/58/docker-compose.yml"),
-        _make_container("nginx_1", "nginx:latest",
-                        project="nginx",
-                        config_files="/home/user/nginx/docker-compose.yml"),
-    ]
-    result = _portainer_managed_projects(containers)
-    assert result == {"actualbudget"}
-
-
-def test_portainer_managed_projects_no_exclusion_when_paths_normal():
-    """Agent present but all stacks have host-accessible paths → nothing excluded."""
-    containers = [
-        _make_container("portainer_agent_1", "portainer/agent:latest"),
-        _make_container("app_1", "myapp:latest",
-                        project="myapp",
-                        config_files="/home/user/myapp/docker-compose.yml"),
-    ]
-    result = _portainer_managed_projects(containers)
-    assert result == set()
-
-
-def test_portainer_managed_projects_no_agent_no_exclusion():
-    """No Portainer agent present → /data/compose/ paths are NOT excluded (no false positive)."""
-    containers = [
-        _make_container("app_1", "myapp:latest",
-                        project="myapp",
-                        config_files="/data/compose/99/docker-compose.yml"),
-    ]
-    result = _portainer_managed_projects(containers)
-    assert result == set()
-
-
-def test_portainer_managed_projects_standalone_unaffected():
-    """Agent present → standalone containers (no project label) are not in the excluded set."""
-    containers = [
-        _make_container("portainer_agent_1", "portainer/agent:latest"),
-        _make_container("standalone", "redis:latest"),
-    ]
-    result = _portainer_managed_projects(containers)
-    assert result == set()
-
-
 # ---------------------------------------------------------------------------
 # _portainer_integration_active
 # ---------------------------------------------------------------------------
 
 
-def test_portainer_integration_active_false_when_unconfigured():
-    """Returns False when no Portainer URL or API key is set."""
-    with (
-        patch("app.backends.ssh_docker_backend.get_portainer_config", return_value={}),
-        patch("app.backends.ssh_docker_backend.get_integration_credentials", return_value={}),
-    ):
-        assert _portainer_integration_active() is False
-
-
-def test_portainer_integration_active_false_when_url_missing():
-    """Returns False when API key is set but URL is absent."""
-    with (
-        patch("app.backends.ssh_docker_backend.get_portainer_config", return_value={}),
-        patch("app.backends.ssh_docker_backend.get_integration_credentials",
-              return_value={"api_key": "tok"}),
-    ):
-        assert _portainer_integration_active() is False
-
-
-def test_portainer_integration_active_false_when_key_missing():
-    """Returns False when URL is set but API key is absent."""
-    with (
-        patch("app.backends.ssh_docker_backend.get_portainer_config",
-              return_value={"url": "https://portainer.test:9443"}),
-        patch("app.backends.ssh_docker_backend.get_integration_credentials", return_value={}),
-    ):
-        assert _portainer_integration_active() is False
-
-
-def test_portainer_integration_active_true_when_both_set():
-    """Returns True when both URL and API key are present."""
-    with (
-        patch("app.backends.ssh_docker_backend.get_portainer_config",
-              return_value={"url": "https://portainer.test:9443"}),
-        patch("app.backends.ssh_docker_backend.get_integration_credentials",
-              return_value={"api_key": "tok"}),
-    ):
-        assert _portainer_integration_active() is True
-
-
 # ---------------------------------------------------------------------------
 # _containers_for_host — Portainer agent present, integration not configured
 # ---------------------------------------------------------------------------
-
-
-@pytest.mark.asyncio
-async def test_portainer_agent_containers_included_without_integration(config_file, data_dir):
-    """When portainer/agent runs but no Portainer integration is configured,
-    SSH backend must include the /data/compose/ containers instead of dropping them."""
-    import yaml
-
-    raw = yaml.safe_load(config_file.read_text())
-    raw["hosts"][0]["docker_mode"] = "all"
-    config_file.write_text(yaml.dump(raw))
-
-    portainer_agent = json.dumps({
-        "Names": "/portainer_agent_1",
-        "Image": "portainer/agent:latest",
-        "Labels": "",
-    })
-    managed_container = json.dumps({
-        "Names": "/actualbudget_1",
-        "Image": "actualbudget/actual:latest",
-        "Labels": (
-            "com.docker.compose.project=actualbudget,"
-            "com.docker.compose.project.config_files=/data/compose/58/docker-compose.yml"
-        ),
-    })
-    inspect_output = '["actualbudget/actual@sha256:abc"]'
-
-    conn = _make_multi_conn([
-        MagicMock(stdout="\n".join([portainer_agent, managed_container]), returncode=0),
-        MagicMock(stdout=inspect_output, returncode=0),
-    ])
-
-    with (
-        patch("app.backends.ssh_docker_backend._connect", new=AsyncMock(return_value=conn)),
-        patch("app.backends.ssh_docker_backend.check_image_update",
-              new=AsyncMock(return_value=ImageCheck("up_to_date", None))),
-        patch("app.backends.ssh_docker_backend.get_portainer_config", return_value={}),
-        patch("app.backends.ssh_docker_backend.get_integration_credentials", return_value={}),
-    ):
-        backend = SSHDockerBackend()
-        stacks = await backend.get_stacks_with_update_status()
-
-    names = [s["name"] for s in stacks]
-    assert "actualbudget_1" in names
-
-
-@pytest.mark.asyncio
-async def test_portainer_agent_containers_skipped_with_integration(config_file, data_dir):
-    """When portainer/agent runs AND Portainer integration is configured,
-    SSH backend must skip /data/compose/ containers (Portainer backend owns them)."""
-    import yaml
-
-    raw = yaml.safe_load(config_file.read_text())
-    raw["hosts"][0]["docker_mode"] = "all"
-    config_file.write_text(yaml.dump(raw))
-
-    portainer_agent = json.dumps({
-        "Names": "/portainer_agent_1",
-        "Image": "portainer/agent:latest",
-        "Labels": "",
-    })
-    managed_container = json.dumps({
-        "Names": "/actualbudget_1",
-        "Image": "actualbudget/actual:latest",
-        "Labels": (
-            "com.docker.compose.project=actualbudget,"
-            "com.docker.compose.project.config_files=/data/compose/58/docker-compose.yml"
-        ),
-    })
-
-    conn = _make_multi_conn([
-        MagicMock(stdout="\n".join([portainer_agent, managed_container]), returncode=0),
-    ])
-
-    with (
-        patch("app.backends.ssh_docker_backend._connect", new=AsyncMock(return_value=conn)),
-        patch("app.backends.ssh_docker_backend.check_image_update",
-              new=AsyncMock(return_value=ImageCheck("up_to_date", None))),
-        patch("app.backends.ssh_docker_backend.get_portainer_config",
-              return_value={"url": "https://portainer.test:9443"}),
-        patch("app.backends.ssh_docker_backend.get_integration_credentials",
-              return_value={"api_key": "tok"}),
-    ):
-        backend = SSHDockerBackend()
-        stacks = await backend.get_stacks_with_update_status()
-
-    names = [s["name"] for s in stacks]
-    assert "actualbudget_1" not in names
 
 
 # ---------------------------------------------------------------------------
@@ -3329,71 +2993,6 @@ def _portainer_owned_ps(project="mystack", config="/data/compose/5/docker-compos
 
 def _ran_commands(conn):
     return [c.args[0] for c in conn.run.call_args_list]
-
-
-@pytest.mark.asyncio
-async def test_compose_redeploy_portainer_owned_stack_without_integration_raises(data_dir):
-    """A Portainer-owned stack (config under /data/compose, absent on host) with
-    no Portainer integration raises a clear, actionable error instead of the
-    doomed `-p` compose fallback."""
-    def handler(cmd):
-        if "docker ps -a" in cmd:
-            return (_portainer_owned_ps(), 0)
-        if "compose version" in cmd:
-            return ("v2", 0)
-        if "test -f" in cmd:
-            return ("", 0)  # file not present on host
-        return ("", 0)
-
-    conn = _make_dispatch_conn(handler)
-    host = {"slug": "h", "host": "1.2.3.4"}
-    with patch(
-        "app.backends.ssh_docker_backend._connect", new=AsyncMock(return_value=conn)
-    ), patch(
-        "app.backends.ssh_docker_backend.get_self_container_id", return_value=None
-    ):
-        backend = SSHDockerBackend()
-        with pytest.raises(RuntimeError) as exc:
-            await backend._update_compose_project(host, "mystack")
-
-    msg = str(exc.value)
-    assert "Portainer" in msg
-    assert "Connect the Portainer integration" in msg
-    # The doomed compose pull/up must never run.
-    assert not any(" pull" in c or " up -d" in c for c in _ran_commands(conn))
-
-
-@pytest.mark.asyncio
-async def test_compose_redeploy_portainer_owned_stack_with_integration_points_to_portainer(data_dir):
-    """With Portainer integration active, the error tells the user to redeploy
-    from the Portainer entry rather than via SSH."""
-    def handler(cmd):
-        if "docker ps -a" in cmd:
-            return (_portainer_owned_ps(), 0)
-        if "compose version" in cmd:
-            return ("v2", 0)
-        if "test -f" in cmd:
-            return ("", 0)
-        return ("", 0)
-
-    conn = _make_dispatch_conn(handler)
-    host = {"slug": "h", "host": "1.2.3.4"}
-    with patch(
-        "app.backends.ssh_docker_backend._connect", new=AsyncMock(return_value=conn)
-    ), patch(
-        "app.backends.ssh_docker_backend.get_self_container_id", return_value=None
-    ), patch(
-        "app.backends.ssh_docker_backend._portainer_integration_active",
-        return_value=True,
-    ):
-        backend = SSHDockerBackend()
-        with pytest.raises(RuntimeError) as exc:
-            await backend._update_compose_project(host, "mystack")
-
-    msg = str(exc.value)
-    assert "Portainer" in msg
-    assert "Portainer entry" in msg
-    assert not any(" pull" in c or " up -d" in c for c in _ran_commands(conn))
 
 
 @pytest.mark.asyncio

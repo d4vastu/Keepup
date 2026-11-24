@@ -85,9 +85,6 @@ def data_dir(tmp_path, monkeypatch):
 @pytest.fixture
 def client(config_file, data_dir, monkeypatch):
     """Authenticated TestClient."""
-    monkeypatch.setenv("PORTAINER_URL", "https://portainer.test:9443")
-    monkeypatch.setenv("PORTAINER_API_KEY", "test-api-key")
-    monkeypatch.setenv("PORTAINER_VERIFY_SSL", "false")
 
     from app.main import app
     from app.auth import create_admin
@@ -117,9 +114,6 @@ def client(config_file, data_dir, monkeypatch):
 @pytest.fixture
 def anon_client(config_file, data_dir, monkeypatch):
     """Unauthenticated TestClient (admin account exists, but no session cookie)."""
-    monkeypatch.setenv("PORTAINER_URL", "https://portainer.test:9443")
-    monkeypatch.setenv("PORTAINER_API_KEY", "test-api-key")
-    monkeypatch.setenv("PORTAINER_VERIFY_SSL", "false")
 
     from app.main import app
     from app.auth import create_admin

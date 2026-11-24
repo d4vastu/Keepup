@@ -316,71 +316,9 @@ def test_setup_remove_host(setup_client, data_dir, config_file):
 # ---------------------------------------------------------------------------
 
 
-def test_setup_portainer_test_empty_url_shows_amber(setup_client, data_dir):
-    _create_admin()
-    response = setup_client.post(
-        "/setup/portainer/test",
-        data={
-            "portainer_url": "",
-            "portainer_api_key": "",
-        },
-    )
-    assert response.status_code == 200
-    assert "amber" in response.text or "Enter a URL" in response.text
-
-
-def test_setup_portainer_test_success_shows_green(setup_client, data_dir):
-    _create_admin()
-    mock_client = AsyncMock()
-    mock_client.get_endpoints = AsyncMock(return_value=[{"id": 1}])
-    with patch("app.portainer_client.PortainerClient", return_value=mock_client):
-        response = setup_client.post(
-            "/setup/portainer/test",
-            data={
-                "portainer_url": "https://portainer.test:9443",
-                "portainer_api_key": "ptr_test123",
-            },
-        )
-    assert response.status_code == 200
-    assert "green" in response.text or "Connected" in response.text
-
-
-def test_setup_portainer_test_failure_shows_red(setup_client, data_dir):
-    _create_admin()
-    mock_client = AsyncMock()
-    mock_client.get_endpoints = AsyncMock(side_effect=Exception("Connection refused"))
-    with patch("app.portainer_client.PortainerClient", return_value=mock_client):
-        response = setup_client.post(
-            "/setup/portainer/test",
-            data={
-                "portainer_url": "https://bad-host:9443",
-                "portainer_api_key": "ptr_test123",
-            },
-        )
-    assert response.status_code == 200
-    assert "red" in response.text or "error" in response.text.lower()
-
-
 # ---------------------------------------------------------------------------
 # POST /setup/portainer/save
 # ---------------------------------------------------------------------------
-
-
-def test_setup_portainer_save(setup_client, data_dir, config_file):
-    import yaml
-
-    _create_admin()
-    with patch("app.auth_router.reload_backends", new=AsyncMock()):
-        response = setup_client.post(
-            "/setup/portainer/save",
-            data={
-                "portainer_url": "https://portainer.test:9443",
-                "portainer_api_key": "ptr_test",
-            },
-        )
-    assert response.status_code == 200
-    raw = yaml.safe_load(config_file.read_text())
-    assert raw.get("portainer", {}).get("url") == "https://portainer.test:9443"
 
 
 # ---------------------------------------------------------------------------

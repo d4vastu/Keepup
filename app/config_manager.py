@@ -234,28 +234,23 @@ def migrate_ssh_config() -> int:
 # ---------------------------------------------------------------------------
 
 
-def get_portainer_config() -> dict:
-    return load_config().get("portainer", {})
+def drop_portainer_leftovers() -> bool:
+    """Remove the Portainer integration left by Keepup versions before OP#274.
 
+    Portainer support is gone; a stale ``portainer:`` block and its stored API
+    token would only sit there unused, so both are deleted. Returns True when
+    there was something to remove.
+    """
+    from .credentials import delete_integration_credentials, get_integration_credentials
 
-def save_portainer_config(
-    url: str,
-    pinned_cert_pem: str = "",
-    pinned_fingerprint: str = "",
-) -> None:
     config = load_config()
-    if url:
-        existing = config.get("portainer", {})
-        pem = pinned_cert_pem or existing.get("pinned_cert_pem", "")
-        fp = pinned_fingerprint or existing.get("pinned_fingerprint", "")
-        entry: dict = {"url": url.rstrip("/")}
-        if pem:
-            entry["pinned_cert_pem"] = pem
-            entry["pinned_fingerprint"] = fp
-        config["portainer"] = entry
-    else:
-        config.pop("portainer", None)
-    save_config(config)
+    had_config = config.pop("portainer", None) is not None
+    if had_config:
+        save_config(config)
+    had_key = bool(get_integration_credentials("portainer"))
+    if had_key:
+        delete_integration_credentials("portainer")
+    return had_config or had_key
 
 
 def get_arcane_config() -> dict:

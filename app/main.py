@@ -33,16 +33,15 @@ from .config_manager import (
     get_opnsense_config,
     get_pbs_config,
     get_pfsense_config,
-    get_portainer_config,
     get_proxmox_config,
     get_tofu_migrated,
     mark_tofu_migrated,
+    drop_portainer_leftovers,
     migrate_proxmox_servers,
     migrate_ssh_config,
     save_opnsense_config,
     save_pbs_config,
     save_pfsense_config,
-    save_portainer_config,
     save_proxmox_config,
 )
 from .credentials import get_credentials, get_integration_credentials, save_sudo_password
@@ -362,7 +361,6 @@ async def _migrate_tofu_certs() -> None:
         ("proxmox_backup", get_pbs_config, save_pbs_config),
         ("opnsense", get_opnsense_config, save_opnsense_config),
         ("pfsense", get_pfsense_config, save_pfsense_config),
-        ("portainer", get_portainer_config, save_portainer_config),
     ]
 
     pinned: list[str] = []
@@ -412,6 +410,8 @@ async def _startup() -> None:
             migrated_server,
         )
     await _migrate_tofu_certs()
+    if drop_portainer_leftovers():
+        log.info("Removed the Portainer integration settings (no longer supported)")
     await reload_backends()
     apply_all_schedules()
     scheduler.start()
@@ -688,7 +688,7 @@ async def _job_run_stack_update(job_id: str, backend_key: str, ref: str) -> None
             raise ValueError(f"Backend {backend_key!r} not available")
         # Resolve a readable label before running. Done here rather than in the
         # route so the click stays instant, and best-effort because a run must
-        # never fail over its own name — Portainer refs are "{id}:{endpoint}"
+        # never fail over its own name — Arcane refs are "{env}:{project}" ids
         # and cannot be parsed into anything a human recognises.
         try:
             name = await backend.describe_ref(ref)
@@ -728,9 +728,7 @@ async def home(request: Request) -> HTMLResponse:
 async def main_home(request: Request) -> HTMLResponse:
     hosts = get_hosts()
     backends = get_backends()
-    docker_configured = any(
-        b.BACKEND_KEY in ("portainer", "arcane") for b in backends
-    ) or any(
+    docker_configured = any(b.BACKEND_KEY == "arcane" for b in backends) or any(
         h.get("docker_mode") for h in hosts
     )
     pbs_creds = get_integration_credentials("proxmox_backup")
@@ -1035,7 +1033,7 @@ async def host_restart(
 
 # Human-friendly labels for container backends, used when surfacing a backend
 # whose update check failed (OP#216). Falls back to a title-cased key.
-_BACKEND_LABELS = {"arcane": "Arcane", "portainer": "Portainer", "ssh": "SSH"}
+_BACKEND_LABELS = {"arcane": "Arcane", "ssh": "SSH"}
 
 
 @app.get("/api/docker/check", response_class=HTMLResponse)

@@ -1,6 +1,5 @@
 """Additional admin route tests for coverage gaps."""
 
-from unittest.mock import AsyncMock, patch
 
 
 # ---------------------------------------------------------------------------
@@ -18,110 +17,9 @@ def test_admin_connections_returns_200(client):
 # ---------------------------------------------------------------------------
 
 
-def test_portainer_test_missing_url_or_key(client):
-    response = client.post(
-        "/admin/connections/portainer/test",
-        data={
-            "portainer_url": "",
-            "portainer_api_key": "",
-        },
-    )
-    assert response.status_code == 200
-    assert "Enter" in response.text
-
-
-def test_portainer_test_connection_success(client):
-    with patch("app.portainer_client.PortainerClient") as MockClient:
-        instance = MockClient.return_value
-        instance.get_endpoints = AsyncMock(return_value=[{"Id": 1}, {"Id": 2}])
-        response = client.post(
-            "/admin/connections/portainer/test",
-            data={
-                "portainer_url": "https://portainer.test:9443",
-                "portainer_api_key": "test-key",
-            },
-        )
-    assert response.status_code == 200
-    assert "Connected" in response.text
-
-
-def test_portainer_test_connection_401_error(client):
-    with patch("app.portainer_client.PortainerClient") as MockClient:
-        instance = MockClient.return_value
-        instance.get_endpoints = AsyncMock(side_effect=Exception("401 Unauthorized"))
-        response = client.post(
-            "/admin/connections/portainer/test",
-            data={
-                "portainer_url": "https://portainer.test:9443",
-                "portainer_api_key": "wrong-key",
-            },
-        )
-    assert response.status_code == 200
-    assert "Invalid API token" in response.text
-
-
-def test_portainer_test_connection_connect_error(client):
-    with patch("app.portainer_client.PortainerClient") as MockClient:
-        instance = MockClient.return_value
-        instance.get_endpoints = AsyncMock(side_effect=Exception("Connection refused"))
-        response = client.post(
-            "/admin/connections/portainer/test",
-            data={
-                "portainer_url": "https://bad.host:9443",
-                "portainer_api_key": "test-key",
-            },
-        )
-    assert response.status_code == 200
-    assert "reach" in response.text.lower() or "connect" in response.text.lower()
-
-
-def test_portainer_test_connection_ssl_error(client):
-    with patch("app.portainer_client.PortainerClient") as MockClient, \
-         patch("app.admin.fetch_server_cert", side_effect=Exception("no conn")):
-        instance = MockClient.return_value
-        instance.get_endpoints = AsyncMock(
-            side_effect=Exception("SSL certificate verify failed")
-        )
-        response = client.post(
-            "/admin/connections/portainer/test",
-            data={
-                "portainer_url": "https://portainer.test:9443",
-                "portainer_api_key": "test-key",
-            },
-        )
-    assert response.status_code == 200
-    assert "SSL" in response.text
-
-
-def test_portainer_test_connection_generic_error(client):
-    with patch("app.portainer_client.PortainerClient") as MockClient:
-        instance = MockClient.return_value
-        instance.get_endpoints = AsyncMock(side_effect=Exception("some other error"))
-        response = client.post(
-            "/admin/connections/portainer/test",
-            data={
-                "portainer_url": "https://portainer.test:9443",
-                "portainer_api_key": "test-key",
-            },
-        )
-    assert response.status_code == 200
-    assert "some other error" in response.text
-
-
 # ---------------------------------------------------------------------------
 # POST /admin/connections/portainer (save)
 # ---------------------------------------------------------------------------
-
-
-def test_save_portainer_config(client):
-    response = client.post(
-        "/admin/connections/portainer",
-        data={
-            "portainer_url": "https://portainer.example.com:9443",
-            "portainer_api_key": "my-api-key",
-        },
-    )
-    assert response.status_code == 200
 
 
 # ---------------------------------------------------------------------------

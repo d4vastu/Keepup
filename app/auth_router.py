@@ -35,7 +35,7 @@ from .config_manager import (
     get_opnsense_config,
     get_pbs_config,
     get_pfsense_config,
-    get_portainer_config,
+    get_arcane_config,
     add_proxmox_server,
     get_proxmox_config,
     get_proxmox_server,
@@ -51,7 +51,6 @@ from .config_manager import (
     save_opnsense_config,
     save_pbs_config,
     save_pfsense_config,
-    save_portainer_config,
     save_proxmox_config,
     save_pushover_config,
     save_timezone,
@@ -405,8 +404,6 @@ async def setup_connect(request: Request) -> HTMLResponse:
     pf_creds = get_integration_credentials("pfsense")
     ha_cfg = get_homeassistant_config()
     ha_creds = get_integration_credentials("homeassistant")
-    port_cfg = get_portainer_config()
-    port_creds = get_integration_credentials("portainer")
     dh_cfg = get_integration_credentials("dockerhub")
 
     return templates.TemplateResponse(
@@ -424,10 +421,6 @@ async def setup_connect(request: Request) -> HTMLResponse:
             "homeassistant_url": ha_cfg.get("url", ""),
             "homeassistant_connected": bool(
                 ha_cfg.get("url") and ha_creds.get("token")
-            ),
-            "portainer_url": port_cfg.get("url", ""),
-            "portainer_connected": bool(
-                port_cfg.get("url") and port_creds.get("api_key")
             ),
             "dockerhub_connected": bool(dh_cfg.get("token")),
         },
@@ -1982,106 +1975,6 @@ async def setup_card_add(
     )
 
 
-@router.post("/setup/portainer/test", response_class=HTMLResponse)
-async def setup_test_portainer(
-    request: Request,
-    portainer_url: str = Form(""),
-    portainer_api_key: str = Form(""),
-    trust_accepted: str = Form(""),
-) -> HTMLResponse:
-    url = portainer_url.strip().rstrip("/")
-    key = portainer_api_key.strip()
-    if not url or not key:
-        return HTMLResponse(
-            '<span class="text-amber-400 text-sm">Enter a URL and API token first.</span>'
-        )
-
-    if trust_accepted == "1":
-        pem = request.session.get("pending_cert_portainer", "")
-        if not pem:
-            return HTMLResponse(
-                '<span class="text-red-400 text-sm">&#10007; Session expired — re-test to try again.</span>'
-            )
-    else:
-        pem = get_portainer_config().get("pinned_cert_pem", "")
-
-    try:
-        from .portainer_client import PortainerClient
-
-        client = PortainerClient(url=url, api_key=key, pinned_cert_pem=pem)
-        endpoints = await client.get_endpoints()
-        count = len(endpoints)
-        if trust_accepted == "1":
-            fp = fingerprint(pem)
-            request.session["confirmed_cert_portainer"] = {"pem": pem, "fingerprint": fp}
-            request.session.pop("pending_cert_portainer", None)
-            return HTMLResponse(
-                f'<span class="text-green-400 text-sm">&#10003; Connected — {count} environment{"s" if count != 1 else ""} found. Certificate pinned. Click Save to apply.</span>'
-            )
-        return HTMLResponse(
-            f'<span class="text-green-400 text-sm">&#10003; Connected — {count} environment{"s" if count != 1 else ""} found. Click Save to apply.</span>'
-        )
-    except Exception as exc:
-        if _is_ssl_cert_error(exc):
-            changed = bool(pem)
-            try:
-                new_pem = fetch_server_cert(url)
-                info = cert_info(new_pem)
-                request.session["pending_cert_portainer"] = new_pem
-            except Exception:
-                return HTMLResponse(
-                    '<span class="text-red-400 text-sm">&#10007; SSL certificate error — could not fetch certificate details.</span>'
-                )
-            return _cert_trust_response(
-                request, info,
-                test_url="/setup/portainer/test",
-                include_ids="[name='portainer_url'],[name='portainer_api_key']",
-                target_id="#portainer-test-result",
-                changed=changed,
-            )
-        msg = str(exc)
-        if "401" in msg or "403" in msg:
-            hint = "Invalid API token."
-        elif "connect" in msg.lower() or "Name or service" in msg:
-            hint = "Can&#39;t reach that address — check the URL."
-        else:
-            hint = msg[:120]
-        return HTMLResponse(
-            f'<span class="text-red-400 text-sm">&#10007; {hint}</span>'
-        )
-
-
-@router.post("/setup/portainer/save", response_class=HTMLResponse)
-async def setup_save_portainer(
-    request: Request,
-    portainer_url: str = Form(""),
-    portainer_api_key: str = Form(""),
-) -> HTMLResponse:
-    url = portainer_url.strip().rstrip("/")
-    key = portainer_api_key.strip()
-    confirmed = request.session.pop("confirmed_cert_portainer", {})
-    save_portainer_config(
-        url=url,
-        pinned_cert_pem=confirmed.get("pem", ""),
-        pinned_fingerprint=confirmed.get("fingerprint", ""),
-    )
-    if key:
-        save_integration_credentials("portainer", api_key=key)
-    await reload_backends()
-    port_cfg = get_portainer_config()
-    port_creds = get_integration_credentials("portainer")
-    portainer_connected = bool(port_cfg.get("url") and port_creds.get("api_key"))
-    return templates.TemplateResponse(
-        "partials/setup_portainer_section.html",
-        {
-            "request": request,
-            "portainer_url": port_cfg.get("url", ""),
-            "portainer_connected": portainer_connected,
-            "portainer_saved": True,
-        },
-    )
-
-
 @router.post("/setup/dockerhub/save", response_class=HTMLResponse)
 async def setup_save_dockerhub(
     request: Request,
@@ -2137,11 +2030,7 @@ async def setup_summary_page(request: Request) -> HTMLResponse:
             get_homeassistant_config().get("url"),
             _cred_set("homeassistant", "api_token"),
         ),
-        (
-            "Portainer",
-            get_portainer_config().get("url"),
-            _cred_set("portainer", "api_key"),
-        ),
+        ("Arcane", get_arcane_config().get("url"), _cred_set("arcane", "api_key")),
         ("DockerHub", get_dockerhub_config().get("username"), False),
     ]
     # Only show integrations that have a URL/username configured

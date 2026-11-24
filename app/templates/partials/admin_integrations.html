@@ -120,28 +120,6 @@
     </div>
   </div>
 
-  <!-- Portainer -->
-  <div class="int-icon {% if integ.portainer_configured %}connected{% endif %}" id="tile-portainer" onclick="toggleConfig('portainer')">
-    <div class="int-logo" style="background:#0c2637">
-      <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
-        <rect x="4" y="4" width="7" height="7" rx="1" stroke="#13bef9" stroke-width="1.5"/>
-        <rect x="4" y="13" width="7" height="7" rx="1" stroke="#13bef9" stroke-width="1.5"/>
-        <rect x="13" y="4" width="7" height="7" rx="1" stroke="#13bef9" stroke-width="1.5"/>
-        <rect x="13" y="13" width="7" height="7" rx="1" stroke="#13bef9" stroke-width="1.2" stroke-dasharray="2 1"/>
-      </svg>
-    </div>
-    <div class="int-name">Portainer</div>
-    <div class="int-bottom">
-      {% if integ.portainer_configured %}
-      <span class="int-count count-green">connected</span>
-      <button class="add-btn add-btn-green" onclick="event.stopPropagation();openConfig('portainer')">Edit</button>
-      {% else %}
-      <span class="int-count count-gray">optional</span>
-      <button class="add-btn add-btn-gray" onclick="event.stopPropagation();openConfig('portainer')">Add</button>
-      {% endif %}
-    </div>
-  </div>
-
   <!-- Docker Hub -->
   <div class="int-icon {% if integ.dockerhub_configured %}connected{% endif %}" id="tile-dockerhub" onclick="toggleConfig('dockerhub')">
     <div class="int-logo" style="background:#0c1e3d">
@@ -409,46 +387,6 @@
           hx-confirm="Disconnect Arcane? Keepup forgets its address and deletes the stored API key."
           hx-target="#arcane-result">Remove</button>
         {% endif %}
-      </div>
-    </div>
-  </div>
-</div>
-
-<!-- Portainer -->
-<div class="config-section" id="config-portainer">
-  <div class="config-card">
-    <div class="config-card-header">
-      <div class="config-card-title">
-        <div class="int-logo" style="background:#0c2637;width:22px;height:22px;border-radius:5px;flex-shrink:0">
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none"><rect x="4" y="4" width="7" height="7" rx="1" stroke="#13bef9" stroke-width="1.8"/><rect x="4" y="13" width="7" height="7" rx="1" stroke="#13bef9" stroke-width="1.8"/><rect x="13" y="4" width="7" height="7" rx="1" stroke="#13bef9" stroke-width="1.8"/></svg>
-        </div>
-        Portainer
-      </div>
-      {% if integ.portainer_configured %}<span style="font-size:11px;color:#3fb950">● Connected</span>{% endif %}
-    </div>
-    <div class="config-card-body">
-      <div id="portainer-result"></div>
-      <div class="field">
-        <div class="field-label">PORTAINER URL</div>
-        <input type="url" id="port-url" name="portainer_url" value="{{ integ.portainer_url }}" placeholder="https://192.168.x.x:9443" class="field-input">
-        <div class="field-hint">Include https:// and port (usually 9443)</div>
-      </div>
-      <div class="field">
-        <div class="field-label">API TOKEN{% if integ.portainer_key_set %} <span style="color:#3fb950">(saved)</span>{% endif %}</div>
-        <input type="password" id="port-key" name="portainer_api_key" placeholder="{% if integ.portainer_key_set %}Leave blank to keep{% else %}Paste token here{% endif %}" class="field-input">
-        <div class="field-hint">Your account → Access tokens → Add access token</div>
-      </div>
-      {% if integ.portainer_pinned %}<div class="field-hint" style="color:#3fb950;margin-bottom:6px;">&#128274; Certificate pinned &mdash; <span style="font-family:monospace;font-size:10px;">{{ integ.portainer_cert_fingerprint[:29] }}&hellip;</span></div>{% endif %}
-      <div id="portainer-test-result" class="result-area"></div>
-      <div class="btn-row">
-        <button class="btn-test"
-          hx-post="/admin/integrations/portainer/test"
-          hx-include="#port-url,#port-key"
-          hx-target="#portainer-test-result">Test connection</button>
-        <button class="btn-save"
-          hx-post="/admin/integrations/portainer"
-          hx-include="#port-url,#port-key"
-          hx-target="#portainer-result">Save</button>
       </div>
     </div>
   </div>

@@ -27,16 +27,6 @@ def test_admin_hosts_page_contains_hosts(client):
     assert "Custom User Host" in response.text
 
 
-def test_admin_integrations_shows_portainer_configured(client, data_dir, config_file):
-    from app.config_manager import save_portainer_config
-    from app.credentials import save_integration_credentials
-
-    save_portainer_config(url="https://portainer.test:9443")
-    save_integration_credentials("portainer", api_key="test-api-key")
-    response = client.get("/admin/integrations")
-    assert "portainer.test" in response.text
-
-
 # ---------------------------------------------------------------------------
 # GET /admin/hosts, /admin/ssh, /admin/https, /admin/account, /admin/about
 # ---------------------------------------------------------------------------
@@ -443,80 +433,9 @@ def test_connection_test_unknown_host(client):
 # ---------------------------------------------------------------------------
 
 
-def test_admin_integrations_test_portainer_missing_fields(client):
-    response = client.post(
-        "/admin/integrations/portainer/test",
-        data={"portainer_url": "", "portainer_api_key": ""},
-    )
-    assert response.status_code == 200
-    assert "Enter a URL" in response.text
-
-
-def test_admin_integrations_test_portainer_success(client):
-    with patch(
-        "app.portainer_client.PortainerClient.get_endpoints",
-        new=AsyncMock(return_value=[{"Id": 1}, {"Id": 2}]),
-    ):
-        response = client.post(
-            "/admin/integrations/portainer/test",
-            data={
-                "portainer_url": "https://portainer.test:9443",
-                "portainer_api_key": "testkey",
-            },
-        )
-    assert response.status_code == 200
-    assert "Connected" in response.text
-    assert "2 environments" in response.text
-
-
-def test_admin_integrations_test_portainer_failure(client):
-    with patch(
-        "app.portainer_client.PortainerClient.get_endpoints",
-        new=AsyncMock(side_effect=Exception("401 Unauthorized")),
-    ):
-        response = client.post(
-            "/admin/integrations/portainer/test",
-            data={
-                "portainer_url": "https://portainer.test:9443",
-                "portainer_api_key": "badkey",
-            },
-        )
-    assert response.status_code == 200
-    assert "Invalid API token" in response.text
-
-
-def test_admin_integrations_test_portainer_ssl_error(client):
-    with patch(
-        "app.portainer_client.PortainerClient.get_endpoints",
-        new=AsyncMock(side_effect=Exception("SSL certificate verify failed")),
-    ), patch("app.admin.fetch_server_cert", side_effect=Exception("no conn")):
-        response = client.post(
-            "/admin/integrations/portainer/test",
-            data={
-                "portainer_url": "https://portainer.test:9443",
-                "portainer_api_key": "key",
-            },
-        )
-    assert response.status_code == 200
-    assert "SSL" in response.text
-
-
 # ---------------------------------------------------------------------------
 # POST /admin/integrations/portainer (save)
 # ---------------------------------------------------------------------------
-
-
-def test_admin_integrations_save_portainer(client):
-    with patch("app.admin.reload_backends", new=AsyncMock()):
-        response = client.post(
-            "/admin/integrations/portainer",
-            data={
-                "portainer_url": "https://portainer.test:9443",
-                "portainer_api_key": "mykey",
-            },
-        )
-    assert response.status_code == 200
-    assert "saved" in response.text.lower()
 
 
 # ---------------------------------------------------------------------------
@@ -632,31 +551,6 @@ def test_admin_proxmox_add_node_host(client, data_dir, config_file):
             "ip_address": "192.168.1.10",
         },
     )
-    assert response.status_code == 200
-
-
-def test_admin_integrations_test_portainer_connect_error(client):
-    with patch(
-        "app.portainer_client.PortainerClient.get_endpoints",
-        new=AsyncMock(side_effect=Exception("could not connect to host")),
-    ):
-        response = client.post(
-            "/admin/integrations/portainer/test",
-            data={"portainer_url": "https://bad.host:9443", "portainer_api_key": "key"},
-        )
-    assert response.status_code == 200
-    assert "reach" in response.text.lower() or "connect" in response.text.lower()
-
-
-def test_admin_integrations_test_portainer_generic_error(client):
-    with patch(
-        "app.portainer_client.PortainerClient.get_endpoints",
-        new=AsyncMock(side_effect=Exception("unexpected internal error")),
-    ):
-        response = client.post(
-            "/admin/integrations/portainer/test",
-            data={"portainer_url": "https://portainer.test:9443", "portainer_api_key": "key"},
-        )
     assert response.status_code == 200
 
 

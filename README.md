@@ -20,7 +20,6 @@ Built with FastAPI + HTMX. No JavaScript frameworks, no database, no agents to i
 - **Reboot detection** — shows a "Reboot required" badge and restart button after kernel/system updates
 - **Docker Compose monitoring** — discovers running stacks over SSH, compares image digests against the registry to detect available updates — no agent required
 - **Arcane support** — if you run [Arcane](https://getarcane.app), Keepup reads container updates from it and applies them through it, linking each project back to Arcane
-- **Portainer support** — optionally use a Portainer API as an alternative or additional Docker backend
 - **One-click stack redeploy** — pulls latest images and restarts the stack
 - **Auto-updates** — schedule unattended OS upgrades and Docker stack redeployments per host/stack with cron schedules; optional auto-reboot per host
 - **Push notifications** — Pushover and Email (SMTP) support; fires on auto-update completion and failure
@@ -81,7 +80,7 @@ The setup wizard runs automatically the first time (when no admin account exists
 2. **Account** — set a username and password
 3. **Security** — optionally enroll TOTP 2FA (a dedicated step, not part of account creation)
 4. **Recovery code** — a one-time recovery key is displayed; **copy it and store it somewhere safe** — this is the only way to reset your password if you lose access
-5. **Connect infrastructure** — configure Proxmox VE, Proxmox Backup Server, OPNsense, pfSense, Home Assistant, Portainer, and Docker Hub. If Proxmox is connected, a guided sub-flow walks through selecting LXC containers (updated via `pct exec` — no in-container agent), generating an SSH key pair for Keepup (`keepup_proxmox_ed25519`), and selecting VMs; discovered resources are grouped by node with type badges (Node, LXC, VM)
+5. **Connect infrastructure** — configure Proxmox VE, Proxmox Backup Server, OPNsense, pfSense, Home Assistant, and Docker Hub (Arcane is connected later from Admin → Integrations). If Proxmox is connected, a guided sub-flow walks through selecting LXC containers (updated via `pct exec` — no in-container agent), generating an SSH key pair for Keepup (`keepup_proxmox_ed25519`), and selecting VMs; discovered resources are grouped by node with type badges (Node, LXC, VM)
 6. **SSH hosts** — add the Linux hosts you want to monitor (hosts queued from Proxmox discovery appear here pre-filled); each gets a connection test
 7. **Container monitoring** — choose which Docker containers to monitor for image updates on each host
 8. **Notifications** — configure Pushover and/or Email for auto-update alerts
@@ -133,7 +132,7 @@ If your SSH user is not root, updates and reboots require `sudo`. The dashboard 
 
 ## Docker Compose Monitoring
 
-Docker monitoring works over the same SSH connection used for OS updates — no Portainer or agent required on the remote host.
+Docker monitoring works over the same SSH connection used for OS updates — no agent required on the remote host.
 
 **Requirements on the remote host:**
 - Docker Engine and Docker Compose — v2 (`docker compose`) or legacy v1 (`docker-compose`); Keepup auto-detects which is available
@@ -172,15 +171,7 @@ If you manage your Compose projects with [Arcane](https://getarcane.app), Keepup
 
 Leave Arcane's own auto-update off so Keepup stays the one place updates are applied.
 
-### Portainer (optional)
-
-If you already run Portainer, it can be used alongside SSH monitoring.
-
-1. Go to **Admin → Connections → Portainer**
-2. Enter the Portainer URL (e.g. `https://192.168.1.10:9443`) and paste your API token
-3. Click **Test Connection**, then **Save**
-
-To get your API token: Portainer → your username (top-right) → **Account Settings** → **Access Tokens** → **Add access token**.
+Portainer support was removed in v0.42.0; use Arcane instead. Old Portainer settings and the stored token are deleted automatically on upgrade.
 
 ---
 
@@ -196,7 +187,6 @@ Configure integrations from the setup wizard (step 3) or **Admin → Connections
 | **pfSense** | Connected for future monitoring features |
 | **Home Assistant** | Connected for future monitoring features |
 | **Arcane** | Read container updates from Arcane and apply them through it |
-| **Portainer** | Use as a Docker backend instead of or alongside SSH |
 | **Docker Hub** | Higher rate limits for image digest lookups (free account + access token) |
 
 For Proxmox VE, credentials are entered as a **Token ID** (e.g. `root@pam!mytoken`) and **Token Secret** (the UUID). The API user is derived automatically from the Token ID — no separate field needed. Find these in Proxmox under **Datacenter → Permissions → API Tokens**.
@@ -451,8 +441,7 @@ FastAPI (Python)
 │   └── Docker Compose discover / inspect / pull / up -d
 ├── Container backends (pluggable)
 │   ├── SSHDockerBackend  — SSH + docker CLI, no agent needed
-│   ├── ArcaneBackend     — Arcane REST API: update status + pull/up per project
-│   └── PortainerBackend  — Portainer REST API via httpx
+│   └── ArcaneBackend     — Arcane REST API: update status + pull/up per project
 ├── Auto-update scheduler (APScheduler)
 │   ├── Per-host OS upgrade jobs with optional auto-reboot
 │   └── Per-stack Docker redeploy jobs
