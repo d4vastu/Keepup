@@ -5,7 +5,11 @@ Both the app startup and admin save routes call reload_backends() so that
 connection changes take effect immediately without a container restart.
 """
 
-from .config_manager import get_dockerhub_config, get_portainer_config
+from .config_manager import (
+    get_arcane_config,
+    get_dockerhub_config,
+    get_portainer_config,
+)
 from .credentials import get_integration_credentials
 
 _backends: list = []
@@ -48,11 +52,30 @@ async def reload_backends() -> list:
         )
         backends.append(PortainerBackend(portainer_client))
 
+    arcane_backend = None
+    arc_cfg = get_arcane_config()
+    arc_key = get_integration_credentials("arcane").get("api_key", "")
+    if arc_cfg.get("url") and arc_key:
+        from .arcane_client import ArcaneClient
+        from .backends import ArcaneBackend
+
+        arcane_backend = ArcaneBackend(
+            ArcaneClient(
+                url=arc_cfg["url"],
+                api_key=arc_key,
+                verify_ssl=arc_cfg.get("verify_ssl", True),
+            )
+        )
+        backends.append(arcane_backend)
+
     from .backends import SSHDockerBackend
 
     # The SSH backend asks Portainer which stacks it really has, so a compose
-    # project Portainer no longer lists is not left unchecked (OP#261).
-    backends.append(SSHDockerBackend(portainer_client=portainer_client))
+    # project Portainer no longer lists is not left unchecked (OP#261), and asks
+    # Arcane which projects are its own, so those are not checked twice.
+    backends.append(
+        SSHDockerBackend(portainer_client=portainer_client, arcane=arcane_backend)
+    )
 
     _backends = backends
 

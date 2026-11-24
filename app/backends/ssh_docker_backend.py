@@ -67,10 +67,19 @@ _RECREATE_SETTLE_SECONDS = 3
 class SSHDockerBackend:
     BACKEND_KEY = "ssh"
 
-    def __init__(self, portainer_client=None):
+    def __init__(self, portainer_client=None, arcane=None):
         # Only used to ask which stacks Portainer really has (OP#261); None when
         # the Portainer integration is not connected.
         self._portainer = portainer_client
+        # The Arcane backend, when connected: its projects are checked and
+        # updated through Arcane, so this backend leaves them alone (OP#273).
+        self._arcane = arcane
+
+    async def _arcane_projects(self) -> dict[str, set[str]]:
+        """{host IP: Compose project names Arcane manages there}; {} without Arcane."""
+        if self._arcane is None:
+            return {}
+        return await self._arcane.projects_by_host()
 
     async def _portainer_stacks(self) -> set[tuple[int, str]] | None:
         """The stacks Portainer lists, or None when there is nobody to ask.
@@ -225,8 +234,13 @@ class SSHDockerBackend:
     ) -> list[dict]:
         hosts = self._docker_hosts()
         known_stacks = await self._portainer_stacks()
+        arcane_projects = await self._arcane_projects()
         tasks = [
-            self._containers_for_host(h, dockerhub_creds, known_stacks) for h in hosts
+            self._containers_for_host(
+                h, dockerhub_creds, known_stacks,
+                await _arcane_projects_for(h, arcane_projects),
+            )
+            for h in hosts
         ]
         results = await asyncio.gather(*tasks, return_exceptions=True)
         all_entries = []
@@ -280,6 +294,7 @@ class SSHDockerBackend:
         host: dict,
         dockerhub_creds: dict | None,
         known_stacks: set[tuple[int, str]] | None = None,
+        arcane_projects: set[str] | None = None,
     ) -> list[dict]:
         slug = host["slug"]
         h = host.get("host", slug)
@@ -325,6 +340,12 @@ class SSHDockerBackend:
                     " configured; including %d project(s) via SSH: %s",
                     h, len(portainer_projects), sorted(portainer_projects),
                 )
+            arcane_projects = arcane_projects or set()
+            if arcane_projects:
+                log.info(
+                    "Docker SSH: %s — leaving %d project(s) to Arcane: %s",
+                    h, len(arcane_projects), sorted(arcane_projects),
+                )
 
             # Identify own container and its compose project (if any) so we can
             # exclude both the container itself and all siblings in the same project.
@@ -367,6 +388,10 @@ class SSHDockerBackend:
                 # when the Portainer integration is active; otherwise those
                 # containers would vanish from the dashboard entirely.
                 if project and project in portainer_projects and portainer_active:
+                    continue
+
+                # Arcane checks and updates its own projects (OP#273).
+                if project and project in arcane_projects:
                     continue
 
                 raw_all.append((container_name, image, project))
@@ -759,6 +784,15 @@ def _compose_projects_from_ps(containers: list[dict]) -> list[dict]:
         if name not in by_project or (cf and not by_project[name]):
             by_project[name] = cf
     return [{"name": n, "config_file": f} for n, f in by_project.items()]
+
+
+async def _arcane_projects_for(host: dict, by_ip: dict[str, set[str]]) -> set[str]:
+    """The Arcane projects on this Keepup host, matched by its resolved address."""
+    if not by_ip:
+        return set()
+    from .arcane_backend import _resolve
+
+    return by_ip.get(await _resolve(host.get("host", "")), set())
 
 
 def _portainer_integration_active() -> bool:

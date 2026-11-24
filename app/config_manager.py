@@ -258,6 +258,23 @@ def save_portainer_config(
     save_config(config)
 
 
+def get_arcane_config() -> dict:
+    return load_config().get("arcane", {})
+
+
+def save_arcane_config(url: str, verify_ssl: bool = True) -> None:
+    """Save the Arcane address; an empty URL removes the connection."""
+    config = load_config()
+    if url:
+        entry: dict = {"url": url.rstrip("/")}
+        if not verify_ssl:
+            entry["verify_ssl"] = False
+        config["arcane"] = entry
+    else:
+        config.pop("arcane", None)
+    save_config(config)
+
+
 def get_pushover_config() -> dict:
     return load_config().get("pushover", {})
 
@@ -816,6 +833,7 @@ def reset_config() -> None:
     for key in (
         "hosts",
         "portainer",
+        "arcane",
         "dockerhub",
         "stack_auto_update",
         "proxmox",

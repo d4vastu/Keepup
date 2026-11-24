@@ -100,6 +100,26 @@
     </div>
   </div>
 
+  <!-- Arcane -->
+  <div class="int-icon {% if integ.arcane_configured %}connected{% endif %}" id="tile-arcane" onclick="toggleConfig('arcane')">
+    <div class="int-logo" style="background:#1d1533">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+        <path d="M12 3l8 4.5v9L12 21l-8-4.5v-9L12 3z" stroke="#a78bfa" stroke-width="1.5" stroke-linejoin="round"/>
+        <path d="M12 12l8-4.5M12 12v9M12 12L4 7.5" stroke="#a78bfa" stroke-width="1.2" stroke-linejoin="round"/>
+      </svg>
+    </div>
+    <div class="int-name">Arcane</div>
+    <div class="int-bottom">
+      {% if integ.arcane_configured %}
+      <span class="int-count count-green">connected</span>
+      <button class="add-btn add-btn-green" onclick="event.stopPropagation();openConfig('arcane')">Edit</button>
+      {% else %}
+      <span class="int-count count-gray">optional</span>
+      <button class="add-btn add-btn-gray" onclick="event.stopPropagation();openConfig('arcane')">Add</button>
+      {% endif %}
+    </div>
+  </div>
+
   <!-- Portainer -->
   <div class="int-icon {% if integ.portainer_configured %}connected{% endif %}" id="tile-portainer" onclick="toggleConfig('portainer')">
     <div class="int-logo" style="background:#0c2637">
@@ -337,6 +357,58 @@
           hx-post="/setup/connect/homeassistant/save"
           hx-include="#ha-url,#ha-token,#ha-skip-ssl"
           hx-target="#ha-result">Save</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Arcane -->
+<div class="config-section" id="config-arcane">
+  <div class="config-card">
+    <div class="config-card-header">
+      <div class="config-card-title">
+        <div class="int-logo" style="background:#1d1533;width:22px;height:22px;border-radius:5px;flex-shrink:0">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none"><path d="M12 3l8 4.5v9L12 21l-8-4.5v-9L12 3z" stroke="#a78bfa" stroke-width="1.8" stroke-linejoin="round"/></svg>
+        </div>
+        Arcane
+      </div>
+      {% if integ.arcane_configured %}<span style="font-size:11px;color:#3fb950">● Connected</span>{% endif %}
+    </div>
+    <div class="config-card-body">
+      <div class="field-hint" style="margin-bottom:10px;">Keepup reads container updates from Arcane and asks Arcane to apply them. Compose projects Arcane manages are skipped by Keepup's own SSH checks.</div>
+      <div id="arcane-result"></div>
+      <div class="field">
+        <div class="field-label">ARCANE URL</div>
+        <input type="url" id="arc-url" name="arcane_url" value="{{ integ.arcane_url }}" placeholder="http://192.168.x.x:3552" class="field-input">
+        <div class="field-hint">Use the address of the machine Arcane runs on (e.g. http://192.168.x.x:3552), so its own containers are matched to the right host</div>
+      </div>
+      <div class="field">
+        <div class="field-label">API KEY{% if integ.arcane_key_set %} <span style="color:#3fb950">(saved)</span>{% endif %}</div>
+        <input type="password" id="arc-key" name="arcane_api_key" placeholder="{% if integ.arcane_key_set %}Leave blank to keep{% else %}Paste key here{% endif %}" class="field-input">
+        <div class="field-hint">Arcane → Settings → API Keys → Create API Key</div>
+      </div>
+      <div class="field">
+        <label class="field-hint" style="display:flex;align-items:center;gap:6px;cursor:pointer;">
+          <input type="checkbox" id="arc-verify" name="arcane_verify_ssl" value="off" {% if not integ.arcane_verify_ssl %}checked{% endif %}>
+          Skip TLS certificate check (self-signed https only)
+        </label>
+      </div>
+      <div id="arcane-test-result" class="result-area"></div>
+      <div class="btn-row">
+        <button class="btn-test"
+          hx-post="/admin/integrations/arcane/test"
+          hx-include="#arc-url,#arc-key,#arc-verify"
+          hx-target="#arcane-test-result">Test connection</button>
+        <button class="btn-save"
+          hx-post="/admin/integrations/arcane"
+          hx-include="#arc-url,#arc-key,#arc-verify"
+          hx-target="#arcane-result">Save</button>
+        {% if integ.arcane_configured or integ.arcane_url %}
+        <button class="btn-test" style="margin-left:auto;color:#f85149;border-color:#6e2a2a"
+          hx-post="/admin/integrations/arcane/remove"
+          hx-confirm="Disconnect Arcane? Keepup forgets its address and deletes the stored API key."
+          hx-target="#arcane-result">Remove</button>
+        {% endif %}
       </div>
     </div>
   </div>
