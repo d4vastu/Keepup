@@ -8,7 +8,6 @@ connection changes take effect immediately without a container restart.
 from .config_manager import (
     get_arcane_config,
     get_dockerhub_config,
-    get_portainer_config,
 )
 from .credentials import get_integration_credentials
 
@@ -36,22 +35,6 @@ async def reload_backends() -> list:
     global _backends
     backends = []
 
-    port_cfg = get_portainer_config()
-    port_creds = get_integration_credentials("portainer")
-    url = port_cfg.get("url", "")
-    key = port_creds.get("api_key", "")
-    pinned_pem = port_cfg.get("pinned_cert_pem", "")
-
-    portainer_client = None
-    if url and key:
-        from .portainer_client import PortainerClient
-        from .backends import PortainerBackend
-
-        portainer_client = PortainerClient(
-            url=url, api_key=key, pinned_cert_pem=pinned_pem
-        )
-        backends.append(PortainerBackend(portainer_client))
-
     arcane_backend = None
     arc_cfg = get_arcane_config()
     arc_key = get_integration_credentials("arcane").get("api_key", "")
@@ -70,12 +53,9 @@ async def reload_backends() -> list:
 
     from .backends import SSHDockerBackend
 
-    # The SSH backend asks Portainer which stacks it really has, so a compose
-    # project Portainer no longer lists is not left unchecked (OP#261), and asks
-    # Arcane which projects are its own, so those are not checked twice.
-    backends.append(
-        SSHDockerBackend(portainer_client=portainer_client, arcane=arcane_backend)
-    )
+    # The SSH backend asks Arcane which projects are its own, so those are not
+    # checked twice (OP#273).
+    backends.append(SSHDockerBackend(arcane=arcane_backend))
 
     _backends = backends
 

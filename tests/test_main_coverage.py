@@ -375,14 +375,14 @@ async def test_migrate_tofu_skips_when_already_migrated(data_dir, config_file, m
 async def test_migrate_tofu_pins_cert_for_verify_ssl_false(data_dir, config_file, monkeypatch):
     """Migration auto-pins a cert when verify_ssl=False is in the saved config."""
     import app.main as m
-    from app.config_manager import get_portainer_config
+    from app.config_manager import get_opnsense_config
 
     import yaml
     import app.config_manager as cm
     cfg_path = cm._CONFIG_PATH
     raw = yaml.safe_load(cfg_path.read_text()) if cfg_path.exists() else {}
-    raw["portainer"] = {
-        "url": "https://portainer.test:9443",
+    raw["opnsense"] = {
+        "url": "https://opnsense.test:9443",
         "verify_ssl": False,
     }
     cfg_path.write_text(yaml.dump(raw))
@@ -391,17 +391,17 @@ async def test_migrate_tofu_pins_cert_for_verify_ssl_false(data_dir, config_file
     monkeypatch.setattr(m, "mark_tofu_migrated", lambda: None)
 
     from app.ssl_manager import generate_self_signed_cert
-    pem, _ = generate_self_signed_cert("portainer.test")
+    pem, _ = generate_self_signed_cert("opnsense.test")
 
     with patch("app.cert_utils.fetch_server_cert", return_value=pem), \
          patch("app.notifications.notify") as mock_notify:
         await m._migrate_tofu_certs()
 
-    cfg = get_portainer_config()
+    cfg = get_opnsense_config()
     assert cfg.get("pinned_cert_pem") == pem
     assert cfg.get("pinned_fingerprint")
     mock_notify.assert_called_once()
-    assert "portainer" in str(mock_notify.call_args)
+    assert "opnsense" in str(mock_notify.call_args)
 
 
 @pytest.mark.asyncio

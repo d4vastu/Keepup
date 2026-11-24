@@ -59,13 +59,13 @@ def test_reset_config_clears_hosts(config_file):
     assert config.get("hosts") is None or config.get("hosts") == []
 
 
-def test_reset_config_clears_portainer(config_file):
-    from app.config_manager import save_portainer_config, reset_config, load_config
+def test_reset_config_clears_arcane(config_file):
+    from app.config_manager import save_arcane_config, reset_config, load_config
 
-    save_portainer_config(url="https://portainer.test")
+    save_arcane_config(url="http://arcane.test:3552")
     reset_config()
     config = load_config()
-    assert "portainer" not in config
+    assert "arcane" not in config
 
 
 def test_reset_config_clears_dockerhub(config_file):
@@ -168,13 +168,13 @@ def test_factory_reset_wipes_credential_store(data_dir):
 
 
 def test_factory_reset_resets_config(config_file):
-    """reset_config() clears portainer from config."""
-    from app.config_manager import load_config, save_portainer_config, reset_config
+    """reset_config() clears integration config, including Arcane."""
+    from app.config_manager import load_config, save_arcane_config, reset_config
 
-    save_portainer_config(url="https://portainer.example:9443")
+    save_arcane_config(url="http://arcane.example:3552")
     reset_config()
     config = load_config()
-    assert "portainer" not in config
+    assert "arcane" not in config
 
 
 def test_factory_reset_case_insensitive_confirm(admin_client):

@@ -131,7 +131,7 @@ async def _run_os_update(slug: str) -> None:
 
 
 async def _run_stack_update(update_path: str, stack_name: str) -> None:
-    # update_path is "{backend_key}/{ref}", e.g. "portainer/3:1" or "ssh/myhost/mystack"
+    # update_path is "{backend_key}/{ref}", e.g. "arcane/{env}:{project}" or "ssh/myhost/mystack"
     parts = update_path.split("/", 1)
     if len(parts) != 2:
         message = f"Invalid update_path format: {update_path!r}"

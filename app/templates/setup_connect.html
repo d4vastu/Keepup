@@ -197,28 +197,6 @@
         </div>
       </div>
 
-      <!-- Portainer -->
-      <div class="int-icon {% if portainer_connected %}connected{% endif %}" id="tile-portainer" onclick="toggleConfig('portainer')">
-        <div class="int-logo" style="background:#0c2637">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
-            <rect x="4" y="4" width="7" height="7" rx="1" stroke="#13bef9" stroke-width="1.5"/>
-            <rect x="4" y="13" width="7" height="7" rx="1" stroke="#13bef9" stroke-width="1.5"/>
-            <rect x="13" y="4" width="7" height="7" rx="1" stroke="#13bef9" stroke-width="1.5"/>
-            <rect x="13" y="13" width="7" height="7" rx="1" stroke="#13bef9" stroke-width="1.2" stroke-dasharray="2 1"/>
-          </svg>
-        </div>
-        <div class="int-name">Portainer</div>
-        <div class="int-bottom">
-          {% if portainer_connected %}
-          <span class="int-count count-green">connected</span>
-          <button class="add-btn add-btn-green" onclick="event.stopPropagation();openConfig('portainer')">Edit</button>
-          {% else %}
-          <span class="int-count count-gray">optional</span>
-          <button class="add-btn add-btn-gray" onclick="event.stopPropagation();openConfig('portainer')">Add</button>
-          {% endif %}
-        </div>
-      </div>
-
       <!-- Docker Hub -->
       <div class="int-icon {% if dockerhub_connected %}connected{% endif %}" id="tile-dockerhub" onclick="toggleConfig('dockerhub')">
         <div class="int-logo" style="background:#0c1e3d">
@@ -456,13 +434,6 @@
       </div>
     </div>
 
-    <!-- Portainer config -->
-    <div class="config-section" id="config-portainer">
-      <div id="portainer-section">
-        {% include 'partials/setup_portainer_section.html' %}
-      </div>
-    </div>
-
     <!-- Docker Hub config -->
     <div class="config-section" id="config-dockerhub">
       <div class="config-card">
@@ -571,7 +542,6 @@
     {% if opnsense_connected %}toggleConfig('opnsense');{% endif %}
     {% if pfsense_connected %}toggleConfig('pfsense');{% endif %}
     {% if homeassistant_connected %}toggleConfig('homeassistant');{% endif %}
-    {% if portainer_connected %}toggleConfig('portainer');{% endif %}
     {% if dockerhub_connected %}toggleConfig('dockerhub');{% endif %}
   });
   </script>

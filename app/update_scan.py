@@ -36,7 +36,7 @@ MAX_CONCURRENT_HOST_CHECKS = 4
 # job reports a failure that is not one (OP#228).
 HOST_SCAN_TIMEOUT = 300
 
-_BACKEND_LABELS = {"arcane": "Arcane", "portainer": "Portainer", "ssh": "SSH"}
+_BACKEND_LABELS = {"arcane": "Arcane", "ssh": "SSH"}
 
 
 # ---------------------------------------------------------------------------

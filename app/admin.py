@@ -36,7 +36,6 @@ from .config_manager import (
     get_pbs_config,
     get_pfsense_config,
     get_arcane_config,
-    get_portainer_config,
     get_proxmox_config,
     get_proxmox_server,
     get_proxmox_servers,
@@ -46,7 +45,6 @@ from .config_manager import (
     reset_config,
     save_dockerhub_config,
     save_arcane_config,
-    save_portainer_config,
     save_pushover_config,
     save_ssl_config,
     save_timezone,
@@ -54,7 +52,6 @@ from .config_manager import (
     update_host,
 )
 from .config_manager import delete_proxmox_server
-from .cert_utils import cert_info, fetch_server_cert, fingerprint
 from .proxmox_client import ProxmoxClient, assemble_token
 from .credentials import (
     credential_status,
@@ -222,8 +219,6 @@ def _integration_status() -> dict:
     pf_creds = get_integration_credentials("pfsense")
     ha_cfg = get_homeassistant_config()
     ha_creds = get_integration_credentials("homeassistant")
-    port_cfg = get_portainer_config()
-    port_creds = get_integration_credentials("portainer")
     dh_cfg = get_dockerhub_config()
     dh_creds = get_integration_credentials("dockerhub")
     arc_cfg = get_arcane_config()
@@ -264,11 +259,6 @@ def _integration_status() -> dict:
         "ha_url": ha_cfg.get("url", ""),
         "ha_configured": bool(ha_cfg.get("url") and ha_creds.get("token")),
         "ha_verify_ssl": ha_cfg.get("verify_ssl", True),
-        "portainer_url": port_cfg.get("url", ""),
-        "portainer_key_set": bool(port_creds.get("api_key")),
-        "portainer_pinned": bool(port_cfg.get("pinned_fingerprint")),
-        "portainer_cert_fingerprint": port_cfg.get("pinned_fingerprint", ""),
-        "portainer_configured": bool(port_cfg.get("url") and port_creds.get("api_key")),
         "arcane_url": arc_cfg.get("url", ""),
         "arcane_key_set": bool(arc_creds.get("api_key")),
         "arcane_verify_ssl": arc_cfg.get("verify_ssl", True),
@@ -311,101 +301,6 @@ async def admin_integrations(request: Request) -> HTMLResponse:
             "app_version": APP_VERSION,
         },
     )
-
-
-@router.post("/integrations/portainer/test", response_class=HTMLResponse)
-async def admin_integrations_test_portainer(
-    request: Request,
-    portainer_url: str = Form(""),
-    portainer_api_key: str = Form(""),
-    trust_accepted: str = Form(""),
-) -> HTMLResponse:
-    """Test Portainer connection — same logic as connections test, returns inline HTML."""
-    url = portainer_url.strip().rstrip("/")
-    key = portainer_api_key.strip()
-    if not url or not key:
-        return HTMLResponse(
-            '<span class="text-amber-400 text-sm">Enter a URL and API token first.</span>'
-        )
-
-    if trust_accepted == "1":
-        pem = request.session.get("pending_cert_portainer", "")
-        if not pem:
-            return HTMLResponse(
-                '<span class="text-red-400 text-sm">&#10007; Session expired — re-test to try again.</span>'
-            )
-    else:
-        pem = get_portainer_config().get("pinned_cert_pem", "")
-
-    try:
-        from .portainer_client import PortainerClient
-
-        client = PortainerClient(url=url, api_key=key, pinned_cert_pem=pem)
-        endpoints = await client.get_endpoints()
-        count = len(endpoints)
-        if trust_accepted == "1":
-            fp = fingerprint(pem)
-            request.session["confirmed_cert_portainer"] = {"pem": pem, "fingerprint": fp}
-            request.session.pop("pending_cert_portainer", None)
-            return HTMLResponse(
-                f'<span class="text-green-400 text-sm">&#10003; Connected — '
-                f'{count} environment{"s" if count != 1 else ""} found. '
-                f'Certificate pinned. Click Save to apply.</span>'
-            )
-        return HTMLResponse(
-            f'<span class="text-green-400 text-sm">&#10003; Connected — '
-            f'{count} environment{"s" if count != 1 else ""} found. '
-            f'Click Save to apply.</span>'
-        )
-    except Exception as exc:
-        if _is_ssl_cert_error(exc):
-            changed = bool(pem)
-            try:
-                new_pem = fetch_server_cert(url)
-                info = cert_info(new_pem)
-                request.session["pending_cert_portainer"] = new_pem
-            except Exception:
-                return HTMLResponse(
-                    '<span class="text-red-400 text-sm">&#10007; SSL certificate error — could not fetch certificate details.</span>'
-                )
-            return _cert_trust_response(
-                request, info,
-                test_url="/admin/integrations/portainer/test",
-                include_ids="#port-url,#port-key",
-                target_id="#portainer-test-result",
-                changed=changed,
-            )
-        msg = str(exc)
-        if "401" in msg or "403" in msg:
-            hint = "Invalid API token — check you copied it correctly."
-        elif "Name or service not known" in msg or "connect" in msg.lower():
-            hint = "Can't reach that address — check the URL and that Portainer is running."
-        else:
-            hint = msg
-        return HTMLResponse(f'<span class="text-red-400 text-sm">&#10007; {hint}</span>')
-
-
-@router.post("/integrations/portainer", response_class=HTMLResponse)
-async def admin_integrations_save_portainer(
-    request: Request,
-    portainer_url: str = Form(""),
-    portainer_api_key: str = Form(""),
-) -> HTMLResponse:
-    url = portainer_url.strip().rstrip("/")
-    key = portainer_api_key.strip()
-    confirmed = request.session.pop("confirmed_cert_portainer", {})
-    save_portainer_config(
-        url=url,
-        pinned_cert_pem=confirmed.get("pem", ""),
-        pinned_fingerprint=confirmed.get("fingerprint", ""),
-    )
-    if key:
-        save_integration_credentials("portainer", api_key=key)
-        audit(request, "credential.save", target="portainer")
-
-    await reload_backends()
-
-    return HTMLResponse('<span style="font-size:12px;color:#3fb950">&#10003; Portainer saved.</span>')
 
 
 def _ok(msg: str) -> HTMLResponse:
@@ -997,21 +892,6 @@ def _group_containers(
     return dict(sorted(compose_groups.items())), standalone
 
 
-def _portainer_dependency(containers: list[dict]) -> tuple[int, bool]:
-    """Return (managed_count, portainer_required) for discovered containers.
-
-    ``portainer_required`` is True when one or more containers were deployed via
-    Portainer (their compose file lives in Portainer's volume, so Keepup cannot
-    update them over SSH) AND the Portainer integration is not connected. In
-    that case the UI prompts the user to connect the integration.
-    """
-    from .backends.ssh_docker_backend import _portainer_integration_active
-
-    managed_count = sum(1 for c in containers if c.get("portainer_managed"))
-    portainer_required = managed_count > 0 and not _portainer_integration_active()
-    return managed_count, portainer_required
-
-
 @router.delete("/hosts/{slug}/docker-prompt", response_class=HTMLResponse)
 async def admin_dismiss_docker_prompt(request: Request, slug: str) -> HTMLResponse:
     """Dismiss the Docker discovery prompt without saving anything."""
@@ -1035,7 +915,6 @@ async def admin_docker_discover(request: Request, slug: str) -> HTMLResponse:
     if not containers:
         return HTMLResponse("")
     compose_groups, standalone = _group_containers(containers)
-    managed_count, portainer_required = _portainer_dependency(containers)
     return templates.TemplateResponse(
         "partials/admin_docker_prompt.html",
         {
@@ -1045,8 +924,6 @@ async def admin_docker_discover(request: Request, slug: str) -> HTMLResponse:
             "compose_groups": compose_groups,
             "standalone": standalone,
             "container_count": len(containers),
-            "portainer_required": portainer_required,
-            "portainer_managed_count": managed_count,
         },
     )
 
@@ -1068,7 +945,6 @@ async def admin_docker_manage(request: Request, slug: str) -> HTMLResponse:
     except Exception as exc:
         error = str(exc)
     compose_groups, standalone = _group_containers(containers)
-    managed_count, portainer_required = _portainer_dependency(containers)
     return templates.TemplateResponse(
         "partials/admin_docker_manage.html",
         {
@@ -1078,8 +954,6 @@ async def admin_docker_manage(request: Request, slug: str) -> HTMLResponse:
             "compose_groups": compose_groups,
             "standalone": standalone,
             "error": error,
-            "portainer_required": portainer_required,
-            "portainer_managed_count": managed_count,
         },
     )
 
@@ -1105,115 +979,6 @@ async def admin_save_docker_monitoring(
     return templates.TemplateResponse(
         "partials/admin_hosts.html",
         {"request": request, "hosts": _hosts_with_status(), "save_success": True},
-    )
-
-
-# ---------------------------------------------------------------------------
-# Connections — Portainer
-# ---------------------------------------------------------------------------
-
-
-@router.post("/connections/portainer/test", response_class=HTMLResponse)
-async def admin_test_portainer(
-    request: Request,
-    portainer_url: str = Form(""),
-    portainer_api_key: str = Form(""),
-    trust_accepted: str = Form(""),
-) -> HTMLResponse:
-    """Test Portainer connection with provided (unsaved) values."""
-    url = portainer_url.strip().rstrip("/")
-    key = portainer_api_key.strip()
-
-    if not url or not key:
-        return HTMLResponse(
-            '<span class="text-amber-400 text-sm">Enter a URL and API token first.</span>'
-        )
-
-    if trust_accepted == "1":
-        pem = request.session.get("pending_cert_portainer", "")
-        if not pem:
-            return HTMLResponse(
-                '<span class="text-red-400 text-sm">&#10007; Session expired — re-test to try again.</span>'
-            )
-    else:
-        pem = get_portainer_config().get("pinned_cert_pem", "")
-
-    try:
-        from .portainer_client import PortainerClient
-
-        client = PortainerClient(url=url, api_key=key, pinned_cert_pem=pem)
-        endpoints = await client.get_endpoints()
-        count = len(endpoints)
-        if trust_accepted == "1":
-            fp = fingerprint(pem)
-            request.session["confirmed_cert_portainer"] = {"pem": pem, "fingerprint": fp}
-            request.session.pop("pending_cert_portainer", None)
-            return HTMLResponse(
-                f'<span class="text-green-400 text-sm">&#10003; Connected — '
-                f'{count} environment{"s" if count != 1 else ""} found. '
-                f'Certificate pinned. Click Save to apply.</span>'
-            )
-        return HTMLResponse(
-            f'<span class="text-green-400 text-sm">&#10003; Connected — '
-            f'{count} environment{"s" if count != 1 else ""} found. '
-            f'Click Save to apply.</span>'
-        )
-    except Exception as exc:
-        if _is_ssl_cert_error(exc):
-            changed = bool(pem)
-            try:
-                new_pem = fetch_server_cert(url)
-                info = cert_info(new_pem)
-                request.session["pending_cert_portainer"] = new_pem
-            except Exception:
-                return HTMLResponse(
-                    '<span class="text-red-400 text-sm">&#10007; SSL certificate error — could not fetch certificate details.</span>'
-                )
-            return _cert_trust_response(
-                request, info,
-                test_url="/admin/connections/portainer/test",
-                include_ids="#port-url,#port-key",
-                target_id="#portainer-test-result",
-                changed=changed,
-            )
-        msg = str(exc)
-        if "401" in msg or "403" in msg:
-            hint = "Invalid API token — check you copied it correctly."
-        elif (
-            "Name or service not known" in msg
-            or "ConnectionRefused" in msg.lower()
-            or "connect" in msg.lower()
-        ):
-            hint = "Can't reach that address — check the URL and that Portainer is running."
-        else:
-            hint = msg
-        return HTMLResponse(
-            f'<span class="text-red-400 text-sm">&#10007; {hint}</span>'
-        )
-
-
-@router.post("/connections/portainer", response_class=HTMLResponse)
-async def admin_save_portainer(
-    request: Request,
-    portainer_url: str = Form(""),
-    portainer_api_key: str = Form(""),
-) -> HTMLResponse:
-    url = portainer_url.strip().rstrip("/")
-    key = portainer_api_key.strip()
-    confirmed = request.session.pop("confirmed_cert_portainer", {})
-    save_portainer_config(
-        url=url,
-        pinned_cert_pem=confirmed.get("pem", ""),
-        pinned_fingerprint=confirmed.get("fingerprint", ""),
-    )
-    if key:
-        save_integration_credentials("portainer", api_key=key)
-
-    await reload_backends()
-
-    return templates.TemplateResponse(
-        "partials/admin_connections.html",
-        {"request": request, "conn": _connection_status(), "portainer_saved": True},
     )
 
 

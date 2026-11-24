@@ -337,8 +337,9 @@ def test_setup_connect_shows_all_integrations(auth_client, data_dir):
     assert response.status_code == 200
     assert "Proxmox" in response.text
     assert "OPNsense" in response.text
-    assert "Portainer" in response.text
+    assert "Docker Hub" in response.text
     assert "Home Assistant" in response.text
+    assert "Portainer" not in response.text
 
 
 # ---------------------------------------------------------------------------

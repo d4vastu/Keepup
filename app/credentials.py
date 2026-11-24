@@ -175,7 +175,7 @@ def rename_credentials(old_slug: str, new_slug: str) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Integration credentials (Portainer, DockerHub, etc.)
+# Integration credentials (Arcane, DockerHub, etc.)
 # ---------------------------------------------------------------------------
 
 

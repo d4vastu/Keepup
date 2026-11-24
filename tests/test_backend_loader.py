@@ -20,23 +20,6 @@ async def test_reload_backends_no_portainer_adds_ssh():
 
 
 @pytest.mark.asyncio
-async def test_reload_backends_with_portainer_ui_config():
-    """With Portainer configured via UI, Portainer backend is added."""
-    from app.config_manager import save_portainer_config
-    from app.credentials import save_integration_credentials
-
-    save_portainer_config(url="https://portainer.test:9443")
-    save_integration_credentials("portainer", api_key="test-api-key")
-
-    import app.backend_loader as bl
-
-    backends = await bl.reload_backends()
-    keys = [b.BACKEND_KEY for b in backends]
-    assert "portainer" in keys
-    assert "ssh" in keys
-
-
-@pytest.mark.asyncio
 async def test_get_backends_returns_current_list():
     import app.backend_loader as bl
 
