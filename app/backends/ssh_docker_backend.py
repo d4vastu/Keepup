@@ -240,12 +240,16 @@ class SSHDockerBackend:
         if rest.startswith(_STANDALONE_PREFIX):
             container_name = rest[len(_STANDALONE_PREFIX):]
             return await self._update_standalone_container(host, container_name)
-        elif ":" in rest:
-            project_name, _container_name = rest.split(":", 1)
-            return await self._update_compose_project(host, project_name)
-        else:
-            # Backward-compat: old refs that were just project names
-            return await self._update_compose_project(host, rest)
+        project_name = rest.split(":", 1)[0]
+        # A project Arcane manages is updated through Arcane, never behind its
+        # back over SSH — an old SSH schedule must not keep doing so (OP#275).
+        arcane = await _arcane_projects_for(host, await self._arcane_projects())
+        if project_name.lower() in arcane:
+            raise StackUpdateError(
+                f"Compose project {project_name!r} on {host.get('name', slug)} is"
+                " managed by Arcane; update it from its Arcane row instead of over SSH."
+            )
+        return await self._update_compose_project(host, project_name)
 
     # ------------------------------------------------------------------
     # Internals — discovery
@@ -326,7 +330,7 @@ class SSHDockerBackend:
                     continue
 
                 # Arcane checks and updates its own projects (OP#273).
-                if project and project in arcane_projects:
+                if project and project.lower() in arcane_projects:
                     continue
 
                 raw_all.append((container_name, image, project))
@@ -498,6 +502,7 @@ class SSHDockerBackend:
                             )
             binary = await self._detect_compose_binary(conn, wrap, h)
             lines.append(f"Using compose binary: {binary}")
+            missing_config = ""
             config_file = await self._get_config_file(conn, project_name, wrap)
             if config_file:
                 check = await conn.run(
@@ -512,6 +517,7 @@ class SSHDockerBackend:
                         f"Compose config {config_file!r} not found on {h}"
                         f" — falling back to project name"
                     )
+                    missing_config = config_file
                     config_file = ""
                 else:
                     lines.append(f"Using compose file: {config_file}")
@@ -526,6 +532,16 @@ class SSHDockerBackend:
             _capture(lines, f"{binary} {args} pull", pull)
             if pull.returncode != 0:
                 log.error("Docker SSH: pull failed for %s on %s", project_name, h)
+                if missing_config:
+                    # Say what is actually wrong rather than leave Compose's
+                    # "no configuration file provided" to explain it.
+                    raise StackUpdateError(
+                        f"The compose file for {project_name!r} ({missing_config}) is"
+                        f" not on {h}, so the project cannot be redeployed from"
+                        f" there. Put the compose file back, or redeploy it from"
+                        f" wherever it now lives.\n{pull.stdout}",
+                        lines,
+                    )
                 raise StackUpdateError(f"{binary} pull failed:\n{pull.stdout}", lines)
             up = await conn.run(wrap(f"{binary} {args} up -d 2>&1"), check=False)
             _capture(lines, f"{binary} {args} up -d", up)

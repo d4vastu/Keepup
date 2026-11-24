@@ -112,7 +112,10 @@ class FakeArcane:
 
 
 @pytest.fixture
-def fake(monkeypatch):
+def fake(monkeypatch, tmp_path):
+    import app.backends.arcane_backend as arcane_mod
+
+    monkeypatch.setattr(arcane_mod, "_COVERAGE_PATH", tmp_path / "arcane_coverage.json")
     fake = FakeArcane()
     transport = httpx.MockTransport(fake.handler)
     real = arcane_client_mod.make_client
@@ -349,7 +352,7 @@ async def test_listing_is_cached_briefly(fake, config_file):
     backend = ArcaneBackend(_client())
     await backend.projects_by_host()
     await backend.get_stacks_with_update_status()
-    assert sum(1 for m, p in fake.calls if p == "/api/agents") == 1
+    assert sum(1 for m, p in fake.calls if p.split("?")[0] == "/api/agents") == 1
 
 
 @pytest.mark.asyncio
@@ -635,8 +638,10 @@ def test_connection_test_needs_url_and_key(client):
 
 
 def test_connection_test_uses_the_saved_key(client, fake):
+    from app.config_manager import save_arcane_config
     from app.credentials import save_integration_credentials
 
+    save_arcane_config("http://192.168.1.50:3552")
     save_integration_credentials("arcane", api_key="k")
     resp = client.post("/admin/integrations/arcane/test", data={
         "arcane_url": "http://192.168.1.50:3552", "arcane_api_key": "",
