@@ -58,7 +58,7 @@
     <div class="ct-row">
       <div class="ct-indent">
         <span class="ct-line"></span>
-        <span class="ct-name">{{ stack.name }}</span>
+        {% if stack.arcane_url %}<a class="ct-name hover:underline" href="{{ stack.arcane_url }}" target="_blank" rel="noopener" title="Open in Arcane">{{ stack.name }} &#8599;</a>{% else %}<span class="ct-name">{{ stack.name }}</span>{% endif %}
       </div>
       <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[12px] font-medium bg-amber-900/40 text-amber-400 border border-amber-800/50 w-fit">
         <span class="w-1.5 h-1.5 rounded-full bg-current flex-shrink-0"></span>
@@ -100,9 +100,9 @@
     <div class="ct-row">
       <div class="ct-indent">
         <span class="ct-line"></span>
-        <span class="ct-name">{{ stack.name }}</span>
+        {% if stack.arcane_url %}<a class="ct-name hover:underline" href="{{ stack.arcane_url }}" target="_blank" rel="noopener" title="Open in Arcane">{{ stack.name }} &#8599;</a>{% else %}<span class="ct-name">{{ stack.name }}</span>{% endif %}
       </div>
-      <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[12px] font-medium bg-slate-800/60 text-slate-400 border border-slate-700 w-fit">
+      <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[12px] font-medium bg-slate-800/60 text-slate-400 border border-slate-700 w-fit"{% if stack.unknown_detail %} title="{{ stack.unknown_detail }}"{% endif %}>
         <span class="w-1.5 h-1.5 rounded-full bg-current flex-shrink-0"></span>
         {{ stack.unknown_reason | reason_label }}
       </span>

@@ -19,6 +19,7 @@ Built with FastAPI + HTMX. No JavaScript frameworks, no database, no agents to i
 - **One-click upgrade** — runs the appropriate upgrade command remotely with live streaming output
 - **Reboot detection** — shows a "Reboot required" badge and restart button after kernel/system updates
 - **Docker Compose monitoring** — discovers running stacks over SSH, compares image digests against the registry to detect available updates — no agent required
+- **Arcane support** — if you run [Arcane](https://getarcane.app), Keepup reads container updates from it and applies them through it, linking each project back to Arcane
 - **Portainer support** — optionally use a Portainer API as an alternative or additional Docker backend
 - **One-click stack redeploy** — pulls latest images and restarts the stack
 - **Auto-updates** — schedule unattended OS upgrades and Docker stack redeployments per host/stack with cron schedules; optional auto-reboot per host
@@ -155,6 +156,22 @@ Docker monitoring works over the same SSH connection used for OS updates — no 
 | All + new | Always queries fresh; picks up newly added stacks automatically |
 | Selected | Only monitors the stacks you explicitly choose |
 
+### Arcane (optional)
+
+If you manage your Compose projects with [Arcane](https://getarcane.app), Keepup works alongside it instead of duplicating it:
+
+- Update status for every Arcane project comes from Arcane's own image check, shown under the Keepup host it runs on (matched by IP address).
+- **Redeploy** (and per-stack auto-updates) ask Arcane to pull the images and bring the project up; Arcane's output lands in Keepup's activity log.
+- Each project links to its page in Arcane for logs, compose editing, and everything else.
+- On those hosts, Keepup's SSH check skips the projects Arcane manages and keeps checking everything else (standalone containers, the Arcane agent itself).
+- Keepup never redeploys its own project.
+
+1. In Arcane: **Settings → API Keys → Create API Key**
+2. In Keepup: **Admin → Connections → Arcane**, enter the URL of the machine Arcane runs on (e.g. `http://192.168.1.10:3552`, so Arcane's own containers are matched to that host) and paste the key
+3. Click **Test connection**, then **Save**. **Remove** disconnects Arcane and deletes the stored key.
+
+Leave Arcane's own auto-update off so Keepup stays the one place updates are applied.
+
 ### Portainer (optional)
 
 If you already run Portainer, it can be used alongside SSH monitoring.
@@ -178,6 +195,7 @@ Configure integrations from the setup wizard (step 3) or **Admin → Connections
 | **OPNsense** | Connected for future monitoring features |
 | **pfSense** | Connected for future monitoring features |
 | **Home Assistant** | Connected for future monitoring features |
+| **Arcane** | Read container updates from Arcane and apply them through it |
 | **Portainer** | Use as a Docker backend instead of or alongside SSH |
 | **Docker Hub** | Higher rate limits for image digest lookups (free account + access token) |
 
@@ -433,6 +451,7 @@ FastAPI (Python)
 │   └── Docker Compose discover / inspect / pull / up -d
 ├── Container backends (pluggable)
 │   ├── SSHDockerBackend  — SSH + docker CLI, no agent needed
+│   ├── ArcaneBackend     — Arcane REST API: update status + pull/up per project
 │   └── PortainerBackend  — Portainer REST API via httpx
 ├── Auto-update scheduler (APScheduler)
 │   ├── Per-host OS upgrade jobs with optional auto-reboot

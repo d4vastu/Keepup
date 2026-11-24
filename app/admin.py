@@ -35,6 +35,7 @@ from .config_manager import (
     get_opnsense_config,
     get_pbs_config,
     get_pfsense_config,
+    get_arcane_config,
     get_portainer_config,
     get_proxmox_config,
     get_proxmox_server,
@@ -44,6 +45,7 @@ from .config_manager import (
     get_timezone,
     reset_config,
     save_dockerhub_config,
+    save_arcane_config,
     save_portainer_config,
     save_pushover_config,
     save_ssl_config,
@@ -57,6 +59,7 @@ from .proxmox_client import ProxmoxClient, assemble_token
 from .credentials import (
     credential_status,
     delete_credentials,
+    delete_integration_credentials,
     get_integration_credentials,
     rename_credentials,
     save_credentials,
@@ -223,6 +226,8 @@ def _integration_status() -> dict:
     port_creds = get_integration_credentials("portainer")
     dh_cfg = get_dockerhub_config()
     dh_creds = get_integration_credentials("dockerhub")
+    arc_cfg = get_arcane_config()
+    arc_creds = get_integration_credentials("arcane")
 
     return {
         "proxmox_servers": [_proxmox_card(s) for s in get_proxmox_servers()],
@@ -264,6 +269,10 @@ def _integration_status() -> dict:
         "portainer_pinned": bool(port_cfg.get("pinned_fingerprint")),
         "portainer_cert_fingerprint": port_cfg.get("pinned_fingerprint", ""),
         "portainer_configured": bool(port_cfg.get("url") and port_creds.get("api_key")),
+        "arcane_url": arc_cfg.get("url", ""),
+        "arcane_key_set": bool(arc_creds.get("api_key")),
+        "arcane_verify_ssl": arc_cfg.get("verify_ssl", True),
+        "arcane_configured": bool(arc_cfg.get("url") and arc_creds.get("api_key")),
         "dockerhub_user": dh_cfg.get("username", ""),
         "dockerhub_token_set": bool(dh_creds.get("token")),
         "dockerhub_configured": bool(dh_cfg.get("username") and dh_creds.get("token")),
@@ -397,6 +406,83 @@ async def admin_integrations_save_portainer(
     await reload_backends()
 
     return HTMLResponse('<span style="font-size:12px;color:#3fb950">&#10003; Portainer saved.</span>')
+
+
+def _ok(msg: str) -> HTMLResponse:
+    return HTMLResponse(f'<span style="font-size:12px;color:#3fb950">&#10003; {escape(msg)}</span>')
+
+
+def _fail(msg: str) -> HTMLResponse:
+    return HTMLResponse(f'<span class="text-red-400 text-sm">&#10007; {escape(msg)}</span>')
+
+
+@router.post("/integrations/arcane/test", response_class=HTMLResponse)
+async def admin_integrations_test_arcane(
+    request: Request,
+    arcane_url: str = Form(""),
+    arcane_api_key: str = Form(""),
+    arcane_verify_ssl: str = Form(""),
+) -> HTMLResponse:
+    """Check the URL and key reach Arcane, and say what Keepup would see."""
+    from .activity_log import exc_text
+    from .arcane_client import ArcaneClient
+
+    url = arcane_url.strip().rstrip("/")
+    key = arcane_api_key.strip() or get_integration_credentials("arcane").get("api_key", "")
+    if not url or not key:
+        return _fail("Enter the Arcane URL and an API key.")
+    client = ArcaneClient(url=url, api_key=key, verify_ssl=arcane_verify_ssl != "off")
+    try:
+        envs = await client.list_environments()
+        projects = await asyncio.gather(
+            *[client.list_projects(str(e["id"])) for e in envs], return_exceptions=True
+        )
+    except Exception as e:
+        return _fail(f"Could not connect to Arcane: {exc_text(e)}")
+    n_projects = sum(len(p) for p in projects if isinstance(p, list))
+    offline = [e.get("name", str(e["id"])) for e, p in zip(envs, projects) if not isinstance(p, list)]
+    msg = (
+        f"Connected — {len(envs)} environment{'s' if len(envs) != 1 else ''},"
+        f" {n_projects} project{'s' if n_projects != 1 else ''}."
+    )
+    if offline:
+        msg += f" Not reachable: {', '.join(offline)}."
+    return _ok(msg)
+
+
+@router.post("/integrations/arcane", response_class=HTMLResponse)
+async def admin_integrations_save_arcane(
+    request: Request,
+    arcane_url: str = Form(""),
+    arcane_api_key: str = Form(""),
+    arcane_verify_ssl: str = Form(""),
+) -> HTMLResponse:
+    url = arcane_url.strip().rstrip("/")
+    key = arcane_api_key.strip()
+    if not url:
+        return _fail("Enter the Arcane URL, or use Remove to disconnect.")
+    if urlparse(url).scheme not in ("http", "https"):
+        return _fail("The URL must start with http:// or https://.")
+    if not key and not get_integration_credentials("arcane").get("api_key"):
+        return _fail("Paste an Arcane API key.")
+    save_arcane_config(url=url, verify_ssl=arcane_verify_ssl != "off")
+    if key:
+        save_integration_credentials("arcane", api_key=key)
+        audit(request, "credential.save", target="arcane")
+    await reload_backends()
+    return _ok("Arcane saved.")
+
+
+@router.post("/integrations/arcane/remove", response_class=HTMLResponse)
+async def admin_integrations_remove_arcane(request: Request) -> HTMLResponse:
+    """Disconnect Arcane: forget the address and delete the stored API key."""
+    save_arcane_config(url="")
+    delete_integration_credentials("arcane")
+    audit(request, "credential.delete", target="arcane")
+    await reload_backends()
+    response = _ok("Arcane removed.")
+    response.headers["HX-Refresh"] = "true"
+    return response
 
 
 @router.post("/integrations/dockerhub", response_class=HTMLResponse)

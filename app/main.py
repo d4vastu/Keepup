@@ -728,7 +728,9 @@ async def home(request: Request) -> HTMLResponse:
 async def main_home(request: Request) -> HTMLResponse:
     hosts = get_hosts()
     backends = get_backends()
-    docker_configured = any(b.BACKEND_KEY == "portainer" for b in backends) or any(
+    docker_configured = any(
+        b.BACKEND_KEY in ("portainer", "arcane") for b in backends
+    ) or any(
         h.get("docker_mode") for h in hosts
     )
     pbs_creds = get_integration_credentials("proxmox_backup")
@@ -1033,7 +1035,7 @@ async def host_restart(
 
 # Human-friendly labels for container backends, used when surfacing a backend
 # whose update check failed (OP#216). Falls back to a title-cased key.
-_BACKEND_LABELS = {"portainer": "Portainer", "ssh": "SSH"}
+_BACKEND_LABELS = {"arcane": "Arcane", "portainer": "Portainer", "ssh": "SSH"}
 
 
 @app.get("/api/docker/check", response_class=HTMLResponse)
